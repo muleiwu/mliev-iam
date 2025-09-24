@@ -1,428 +1,312 @@
-# Go Web 框架
+# MLiev IAM - 企业级身份认证与访问管理系统
 
-[![Go Version](https://img.shields.io/badge/Go-1.25.0-blue.svg)](https://golang.org)
-[![Gin Framework](https://img.shields.io/badge/Gin-v1.10.1-green.svg)](https://github.com/gin-gonic/gin)
-[![GORM](https://img.shields.io/badge/Gorm-v1.30.3-orange.svg)](https://gorm.io)
+## 项目介绍
 
-一个基于 Gin 框架的企业级 Go Web 应用模板，采用清晰的分层架构设计，内置依赖注入、健康检查、配置管理等企业级功能。
+MLiev IAM 是一个基于 Go 语言开发的现代化企业级身份认证与访问管理（IAM）系统，集成了单点登录（SSO）功能。该系统采用分层架构设计，提供高性能、高可用、易扩展的身份认证和授权服务。
 
-## ✨ 特性
+### 核心特性
 
-- 🏗️ **清晰的分层架构**：Controller → Service → DAO → Model
-- 🔧 **依赖注入**：基于 Assembly 模式的依赖管理
-- 🌐 **多数据库支持**：MySQL、PostgreSQL
-- 📦 **Redis 缓存**：内置 Redis 支持
-- 📊 **健康检查**：完整的健康检查机制
-- 🔧 **配置管理**：基于 Viper 的配置管理
-- 📝 **结构化日志**：基于 Zap 的高性能日志
-- 🚀 **优雅启停**：支持优雅关闭
-- 🔄 **自动迁移**：数据库表结构自动迁移
+- **🔐 身份认证管理** - 多种认证方式支持，包括用户名密码、OAuth2.0、OIDC等
+- **🛡️ 访问控制** - 基于角色的访问控制（RBAC）和基于属性的访问控制（ABAC）
+- **🔗 单点登录** - 统一登录入口，支持多应用系统无缝切换
+- **👥 用户管理** - 完整的用户生命周期管理，包括注册、激活、禁用等
+- **🏢 组织架构** - 支持多层级组织架构和部门管理
+- **📊 审计日志** - 完整的操作审计和安全日志记录
+- **🔧 API优先** - RESTful API设计，易于集成和扩展
 
-##  📞 加群获取帮助
+### 技术栈
 
-|                                     QQ                                      |                                 企业微信                                       |
-|:---------------------------------------------------------------------------:|:--------------------------------------------------------------------------:|
-| ![wechat_qr_code.png](https://static.1ms.run/dwz/image/httpsn3.inklmKc.png) | ![wechat_qr_code.png](https://static.1ms.run/dwz/image/wechat_qr_code.png) |
-|        QQ群：1021660914 <br /> [点击链接加入群聊【木雷坞开源家】](https://n3.ink/lmKc)        |                                扫描上方二维码加入微信群                                |
+- **编程语言**: Go 1.25+
+- **Web框架**: Gin
+- **数据库**: MySQL/PostgreSQL/SQLite
+- **ORM**: GORM v1.31.0（支持软删除、钩子函数、关联关系）
+- **缓存**: Redis
+- **配置管理**: Viper
+- **日志**: Zap
+- **认证协议**: JWT、OAuth2.0、OIDC
+- **容器化**: Docker
+- **依赖注入**: 自研轻量级DI框架
+- **数据验证**: Go Validator（内置结构体验证）
+- **数据模型**: 完整的RBAC权限模型设计
 
+### 架构特点
 
-## 🚀 快速开始
+- **分层架构**: 采用 Controller-Service-DAO 分层设计，职责清晰
+- **RBAC权限模型**: 完整的基于角色的访问控制，支持层级权限和数据权限隔离
+- **依赖注入**: 基于接口的依赖注入，提高代码可测试性和可维护性
+- **ORM集成**: GORM软删除、钩子函数、关联关系自动管理
+- **数据模型**: 支持JSON扩展字段、枚举类型、状态管理
+- **中间件支持**: 丰富的中间件生态，支持认证、授权、日志、限流等
+- **配置化**: 支持多环境配置，易于部署和运维
+- **健康检查**: 内置健康检查机制，支持微服务架构
+- **静态资源**: 内嵌静态资源，单文件部署
 
-### 1. 克隆项目
+## 功能清单
 
+### 🎯 核心功能
+
+#### 用户管理
+- [x] 用户数据模型设计（包含基础信息、认证信息、状态管理）
+- [x] 用户状态枚举（未激活/激活/禁用/锁定）
+- [x] 用户多属性管理（JSON扩展字段）
+- [x] 用户-部门关联设计
+- [ ] 用户注册与激活接口
+- [ ] 用户信息管理（增删改查）接口
+- [ ] 密码策略配置
+- [ ] 批量用户导入/导出
+
+#### 身份认证
+- [ ] 用户名密码认证
+- [ ] 手机号/邮箱验证码登录
+- [ ] OAuth2.0 第三方登录
+- [ ] OIDC 协议支持
+- [ ] 多因子认证（MFA）
+- [ ] 登录设备管理
+- [ ] 会话管理
+
+#### 权限管理
+- [x] 角色数据模型设计（支持层级结构和数据权限范围）
+- [x] 权限资源模型设计（菜单/按钮/API/数据权限）
+- [x] 基于角色的访问控制（RBAC）模型设计
+- [x] 角色权限关联表设计（支持权限约束和时效管理）
+- [x] 用户角色关联表设计（支持审批流程和范围控制）
+- [x] 权限继承机制设计（层级路径自动计算）
+- [ ] 角色管理接口开发
+- [ ] 权限管理接口开发
+- [ ] 基于属性的访问控制（ABAC）
+- [ ] 动态权限验证接口
+
+#### 组织架构
+- [x] 部门数据模型设计（支持多层级组织架构）
+- [x] 部门类型定义（公司/事业部/部门/团队）
+- [x] 用户-部门关联设计
+- [x] 组织层级权限模型（层级路径自动维护）
+- [x] 数据权限隔离设计（全部/本部门/本部门及下级/仅本人）
+- [ ] 部门管理接口开发
+- [ ] 组织架构树形接口
+- [ ] 部门负责人管理
+
+#### 单点登录（SSO）
+- [ ] 统一认证中心
+- [ ] 应用系统注册管理
+- [ ] 跨域认证支持
+- [ ] 退出登录同步
+- [ ] 令牌管理
+
+### 🔧 系统功能
+
+#### 安全特性
+- [x] 密码加密存储设计（密码哈希、盐值）
+- [x] 登录失败限制设计（失败计数、账户锁定）
+- [x] 用户状态安全控制（激活/禁用/锁定状态）
+- [x] 数据权限隔离设计（部门级、个人级权限）
+- [x] 软删除数据保护
+- [ ] 会话超时控制
+- [ ] IP白名单/黑名单
+- [ ] 操作日志审计接口
+- [ ] 安全事件告警
+
+#### 系统管理
+- [x] 健康检查接口
+- [x] 数据模型设计完成（用户、角色、权限、部门等）
+- [x] 数据库表结构设计（支持GORM自动迁移）
+- [ ] 系统配置管理接口
+- [ ] 字典数据管理
+- [ ] 系统监控
+- [ ] 性能指标
+- [ ] 日志管理
+
+#### API 接口
+- [x] RESTful API 设计
+- [ ] API 文档自动生成
+- [ ] API 限流控制
+- [ ] API 版本管理
+- [ ] Webhook 支持
+
+### 📊 数据统计
+- [ ] 用户登录统计
+- [ ] 权限使用分析
+- [ ] 系统访问报表
+- [ ] 安全事件统计
+- [ ] 性能监控数据
+
+### 🚀 扩展功能
+- [ ] 插件机制
+- [ ] 自定义认证流程
+- [ ] 多租户支持
+- [ ] 国际化支持
+- [ ] 主题定制
+- [ ] 移动端适配
+
+## 快速开始
+
+### 环境要求
+
+- Go 1.25+
+- MySQL 8.0+ / PostgreSQL 13+ / SQLite 3+
+- Redis 6.0+
+
+### 安装部署
+
+1. **克隆项目**
 ```bash
-git clone https://cnb.cool/mliev/examples/go-web
-cd go-web
+git clone <repository-url>
+cd mliev-iam
 ```
 
-### 2. 初始化项目
-
-项目Fork后执行初始化脚本，自动替换模块路径：
-
+2. **配置环境**
 ```bash
-./init.sh
-```
-
-### 3. 配置环境
-
-```bash
-# 复制配置文件
 cp config.yaml.example config.yaml
-
-# 编辑配置文件
-vim config.yaml
+# 编辑 config.yaml 配置数据库和Redis连接
 ```
 
-### 4. 安装依赖
-
+3. **安装依赖**
 ```bash
-go mod tidy
+go mod download
 ```
 
-### 5. 启动项目
-
+4. **运行项目**
 ```bash
-# 开发模式
 go run main.go
-
-# 或使用 Makefile
-make run
 ```
 
-## 📁 项目结构
-
-```
-go-web/
-├── main.go                    # 程序入口
-├── go.mod                     # Go模块定义
-├── go.sum                     # 依赖版本锁定
-├── README.md                  # 项目说明文档
-├── config.yaml.example        # 配置文件示例
-├── config.yaml                # 配置文件
-├── init.sh                    # 项目初始化脚本
-├── Dockerfile                 # Docker构建文件
-├── docker-compose.yml         # Docker编排文件
-├── Makefile                   # 构建脚本
-├── LICENSE                    # 许可证文件
-├── app/                       # 应用核心代码
-│   ├── controller/           # 控制器层
-│   │   ├── base_response.go  # 统一响应封装
-│   │   ├── health_controller.go # 健康检查
-│   │   └── index_controller.go  # 首页控制器
-│   ├── service/              # 服务层（业务逻辑）
-│   ├── dao/                  # 数据访问层
-│   │   └── test_demo_dao.go
-│   ├── model/                # 数据模型
-│   │   └── test_demo.go
-│   ├── dto/                  # 数据传输对象
-│   │   ├── health_dto.go
-│   │   └── response_dto.go
-│   └── middleware/           # 中间件
-│       └── cors_middleware.go
-├── cmd/                       # 命令行入口
-│   └── run.go                # 启动逻辑
-├── config/                   # 配置管理
-│   ├── assembly.go           # 依赖注入配置
-│   ├── config.go             # 基础配置
-│   ├── migration.go          # 迁移配置
-│   ├── server.go             # 服务器配置
-│   └── autoload/             # 自动加载配置
-│       ├── base.go
-│       ├── database.go
-│       ├── middleware.go
-│       ├── redis.go
-│       └── router.go
-├── constants/                # 常量定义
-│   └── errors.go            # 错误码定义
-├── docs/                     # 文档
-│   ├── PROJECT_SPECIFICATION.md
-│   └── TEMPLATE_INIT.md
-├── internal/                 # 内部包
-│   ├── helper/               # 内部助手
-│   │   └── helper.go
-│   ├── interfaces/           # 接口定义
-│   │   ├── assembly.go
-│   │   ├── config.go
-│   │   ├── database.go
-│   │   ├── env.go
-│   │   ├── helper.go
-│   │   ├── logger.go
-│   │   ├── redis.go
-│   │   └── server.go
-│   ├── pkg/                  # 内部包实现
-│   │   ├── config/           # 配置包
-│   │   ├── database/         # 数据库包
-│   │   ├── demo/             # 示例包
-│   │   ├── env/              # 环境变量包
-│   │   ├── http_server/      # HTTP服务器包
-│   │   ├── logger/           # 日志包
-│   │   └── redis/            # Redis包
-│   └── service/              # 内部服务
-│       └── migration/        # 迁移服务
-│           └── migration.go
-└── util/                     # 工具函数
-    ├── base_62.go
-    └── generate_utils.go
-```
-
-## 🛠️ 技术栈
-
-| 技术 | 版本 | 描述 |
-|------|------|------|
-| **Go** | 1.23.2 | 编程语言 |
-| **Gin** | 1.10.1 | Web框架 |
-| **GORM** | 1.25.12 | ORM框架 |
-| **MySQL/PostgreSQL** | - | 关系型数据库 |
-| **Redis** | - | 缓存数据库 |
-| **Viper** | 1.19.0 | 配置管理 |
-| **Zap** | 1.27.0 | 结构化日志 |
-
-## 🏗️ 架构设计
-
-### 分层架构
-```
-┌─────────────────────────────────┐
-│          HTTP Layer             │
-│     (Gin Router & Middleware)   │
-├─────────────────────────────────┤
-│        Controller Layer         │
-│    (Request/Response Handling)  │
-├─────────────────────────────────┤
-│         Service Layer           │
-│      (Business Logic)           │
-├─────────────────────────────────┤
-│          DAO Layer              │
-│     (Data Access Objects)       │
-├─────────────────────────────────┤
-│         Model Layer             │
-│    (Database Models)            │
-└─────────────────────────────────┘
-```
-
-### 依赖注入
-项目采用 Assembly 模式实现依赖注入：
-
-```go
-// Assembly 接口
-type AssemblyInterface interface {
-    Assembly()
-}
-
-// 配置装配顺序
-func (receiver AssemblyConfig) Get() []interfaces.AssemblyInterface {
-    return []interfaces.AssemblyInterface{
-        assembly.Env{},      // 环境配置
-        assembly.Logger{},   // 日志系统
-        assembly.Database{}, // 数据库连接
-        assembly.Redis{},    // Redis连接
-    }
-}
-```
-
-## 📋 API接口
-
-### 健康检查
-```http
-# 完整健康检查
-GET /health
-
-# 简单健康检查  
-GET /health/simple
-```
-
-**响应示例：**
-```json
-{
-  "code": 0,
-  "message": "操作成功",
-  "data": {
-    "status": "UP",
-    "timestamp": 1703123456,
-    "services": {
-      "database": {
-        "status": "UP"
-      },
-      "redis": {
-        "status": "UP"
-      }
-    }
-  }
-}
-```
-
-### 首页
-```http
-GET /
-```
-
-## ⚙️ 配置说明
-
-### 配置文件示例 (config.yaml)
-```yaml
-# 服务配置
-addr: ":8080"
-mode: "debug"  # debug, release
-
-# 数据库配置
-db:
-  driver: "postgresql"    # postgresql, mysql
-  host: "127.0.0.1"
-  port: 5432
-  username: "test"
-  password: "123456"
-  dbname: "test"
-
-# Redis配置
-redis:
-  host: "127.0.0.1"
-  port: 6379
-  password: ""
-  db: 0
-
-# 数据库迁移配置
-database:
-  halt_on_migration_failure: true
-```
-
-## 🔧 开发指南
-
-### 编码规范
-- 使用 `gofmt` 格式化代码
-- 遵循 Go 官方命名规范
-- 导出函数和类型必须添加注释
-- 优先使用小接口，遵循单一职责原则
-
-### 错误处理
-项目使用统一的错误码和响应格式：
-
-```go
-// 错误码定义
-const (
-    ErrCodeSuccess      = 0   // 成功
-    ErrCodeBadRequest   = 400 // 请求参数错误  
-    ErrCodeUnauthorized = 401 // 未授权
-    ErrCodeNotFound     = 404 // 资源不存在
-    ErrCodeInternal     = 500 // 内部服务器错误
-)
-
-// 统一响应格式
-type Response struct {
-    Code    int         `json:"code"`
-    Message string      `json:"message"`
-    Data    interface{} `json:"data,omitempty"`
-}
-```
-
-### 数据库操作
-使用 DAO 层封装数据库操作：
-
-```go
-// app/dao/user_dao.go
-func GetUserByUsername(username string) (*model.User, error) {
-    var user model.User
-    if err := helper.Database().Where("username = ?", username).First(&user); err != nil {
-        return nil, err
-    }
-    return &user, nil
-}
-```
-
-## 🚀 部署
-
-### Docker 部署
+5. **Docker 部署**
 ```bash
-# 构建镜像
-docker build -t go-web-app .
-
-# 运行容器
-docker run -d -p 8080:8080 go-web-app
+docker build -t mliev-iam .
+docker run -p 8080:8080 mliev-iam
 ```
 
-### Docker Compose
-```bash
-# 启动服务（包含数据库和Redis）
-docker-compose up -d
+### API 文档
 
-# 查看日志
-docker-compose logs -f
+启动服务后，访问以下端点：
 
-# 停止服务
-docker-compose down
+- 健康检查: `GET /health`
+- 简单健康检查: `GET /health/simple`
+- 首页: `GET /`
+
+## 数据模型设计
+
+系统采用完整的RBAC权限控制模型，包含以下核心数据模型：
+
+### 📊 核心模型关系图
+
+```
+用户(User) ←→ 用户角色(UserRole) ←→ 角色(Role) ←→ 角色权限(RolePermission) ←→ 权限(Permission)
+     ↓                                        ↓                                                    ↓
+ 部门(Department)                        层级结构                                            资源控制
 ```
 
-### 手动部署
-```bash
-# 编译
-go build -o bin/go-web main.go
+### 🗃️ 数据模型详细设计
 
-# 运行
-./bin/go-web
+#### 用户模型 (`User`)
+- **基础信息**: 用户名、邮箱、手机、昵称、真实姓名、头像
+- **认证安全**: 密码哈希、盐值、密码过期时间
+- **状态管理**: 用户状态（未激活/激活/禁用/锁定）、登录统计
+- **扩展属性**: JSON格式扩展字段，支持自定义用户属性
+
+#### 角色模型 (`Role`)
+- **角色类型**: 系统角色/自定义角色
+- **层级结构**: 支持父子角色关系，自动路径计算
+- **数据权限**: 支持4级数据权限范围控制
+- **状态管理**: 角色启用/禁用状态
+
+#### 权限模型 (`Permission`)
+- **权限类型**: 菜单权限/按钮权限/API权限/数据权限
+- **资源定义**: 支持资源标识符、HTTP方法、URL路径
+- **层级结构**: 权限树形结构，支持权限继承
+- **前端集成**: 组件路径、图标、重定向等前端特性
+
+#### 部门模型 (`Department`)
+- **组织类型**: 公司/事业部/部门/团队
+- **层级管理**: 自动维护父子关系和叶子节点
+- **组织信息**: 负责人、联系方式、成本中心等
+- **数据权限**: 部门级数据权限隔离
+
+#### 关联关系模型
+- **用户角色关联** (`UserRole`): 支持审批流程、范围控制、时效管理
+- **角色权限关联** (`RolePermission`): 支持权限约束、条件匹配
+
+### 🔐 权限控制特性
+
+- **多级数据权限**: 全部数据/本部门/本部门及下级/仅本人
+- **权限继承**: 基于层级路径的权限继承机制
+- **时效控制**: 支持角色和权限的有效期管理
+- **审批流程**: 用户角色分配支持审批机制
+- **条件约束**: 支持基于条件的权限验证
+
+### 📁 模型文件概览
+
+| 模型文件 | 说明 | 核心特性 |
+|---------|------|----------|
+| `user.go` | 用户模型 | 状态管理、多属性、认证安全、部门关联 |
+| `role.go` | 角色模型 | 层级结构、数据权限范围、系统/自定义角色 |
+| `permission.go` | 权限模型 | 多类型权限、资源控制、层级继承、前端集成 |
+| `department.go` | 部门模型 | 组织架构、层级管理、负责人、成本中心 |
+| `user_role.go` | 用户角色关联 | 审批流程、范围控制、时效管理、主要角色 |
+| `role_permission.go` | 角色权限关联 | 权限约束、条件匹配、RBAC实现 |
+
+所有模型均支持：
+- ✅ GORM ORM 集成
+- ✅ 软删除保护
+- ✅ 自动时间戳
+- ✅ JSON扩展字段
+- ✅ 数据验证标签
+- ✅ 业务方法封装
+
+## 开发指南
+
+项目遵循严格的代码规范和最佳实践，详细的开发规范请参考 [项目开发规范文档](_docs/PROJECT_SPECIFICATION.md)。
+
+### 项目结构
+
+```
+mliev-iam/
+├── app/                    # 应用核心代码
+│   ├── controller/         # 控制器层
+│   ├── service/           # 服务层
+│   ├── dao/               # 数据访问层
+│   ├── model/             # 数据模型
+│   │   ├── user.go        # 用户模型（支持状态管理、多属性）
+│   │   ├── role.go        # 角色模型（支持层级结构、数据权限）
+│   │   ├── permission.go  # 权限模型（菜单/按钮/API/数据权限）
+│   │   ├── department.go  # 部门模型（组织架构、层级管理）
+│   │   ├── user_role.go   # 用户角色关联（审批流程、范围控制）
+│   │   └── role_permission.go # 角色权限关联（约束条件、时效管理）
+│   ├── dto/               # 数据传输对象
+│   └── middleware/        # 中间件
+├── config/                # 配置管理
+│   └── autoload/          # 自动加载配置
+├── internal/              # 内部包
+│   ├── interfaces/        # 接口定义
+│   └── pkg/               # 基础包
+├── static/                # 静态资源
+├── templates/             # 模板文件
+└── _docs/                 # 项目文档
+    ├── PROJECT_SPECIFICATION.md # 开发规范
+    └── TEMPLATE_INIT.md   # 模板初始化
 ```
 
-## 🔨 开发命令
+## 贡献指南
 
-项目支持 Makefile 快速操作：
-
-```bash
-# 启动开发服务器
-make run
-
-# 构建项目
-make build
-
-# 运行测试
-make test
-
-# 格式化代码
-make fmt
-
-# 静态检查
-make vet
-
-# 清理构建文件
-make clean
-```
-
-## 📊 监控和日志
-
-### 健康检查端点
-- **完整检查**：`GET /health` - 检查数据库、Redis等所有依赖服务
-- **简单检查**：`GET /health/simple` - 仅检查服务是否启动
-
-### 日志配置
-项目使用 Zap 进行结构化日志记录：
-
-```go
-// 记录结构化日志
-helper.Logger().Info("用户创建成功", 
-    zap.String("username", username),
-    zap.Int("userID", userID),
-)
-```
-
-## 🌍 环境变量
-
-支持通过环境变量覆盖配置文件：
-
-```bash
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_USERNAME=myuser
-export DB_PASSWORD=mypass
-export DB_DBNAME=mydb
-export REDIS_HOST=localhost
-export REDIS_PORT=6379
-```
-
-## ❓ 常见问题
-
-### Q: 如何添加新的API路由？
-A: 在 `config/autoload/router.go` 中添加路由配置，在 `app/controller/` 中实现控制器。
-
-### Q: 如何添加新的中间件？
-A: 在 `app/middleware/` 中实现中间件，然后在 `config/autoload/middleware.go` 中注册。
-
-### Q: 数据库迁移如何工作？
-A: 项目启动时会自动执行 `AutoMigrate()`，根据 Model 定义创建或更新表结构。
-
-### Q: 如何更换数据库驱动？
-A: 修改 `config.yaml` 中的 `db.driver` 配置，支持 `postgresql` 和 `mysql`。
-
-
-## 📝 开发规范
-
-详细的开发规范请参考：
-- [项目规范文档](docs/PROJECT_SPECIFICATION.md)
-- [模板初始化说明](docs/TEMPLATE_INIT.md)
-
-## 🤝 贡献指南
+我们欢迎社区贡献！请阅读贡献指南并遵循以下步骤：
 
 1. Fork 项目
-2. 创建功能分支：`git checkout -b feature/AmazingFeature`
-3. 提交更改：`git commit -m 'Add some AmazingFeature'`
-4. 推送到分支：`git push origin feature/AmazingFeature`
-5. 开启 Pull Request
+2. 创建功能分支
+3. 提交代码变更
+4. 创建 Pull Request
 
-## 📄 许可证
+## 许可证
 
-本项目基于 MIT 许可证，详情请查看 [LICENSE](LICENSE) 文件。
+本项目采用 [MIT License](LICENSE)。
+
+## 联系我们
+
+如有问题或建议，请通过以下方式联系：
+
+- 提交 Issue
+- 发送邮件至项目维护者
+- 加入我们的开发者社区
+
+---
+
+© 2025 MLiev IAM. All rights reserved.
