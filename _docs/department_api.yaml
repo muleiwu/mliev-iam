@@ -1,0 +1,1312 @@
+openapi: 3.0.3
+info:
+  title: 部门管理 API
+  description: |
+    IAM系统部门管理模块的RESTful API接口文档
+    
+    ## 功能特性
+    - 完整的部门CRUD操作
+    - 树形层级结构管理
+    - 批量操作支持
+    - 状态管理
+    - 统计信息
+    - 层级结构维护工具
+    
+    ## 认证方式
+    所有API接口都需要管理员权限认证。
+    
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@example.com
+
+servers:
+  - url: http://localhost:8080/api
+    description: 开发环境
+  - url: https://api.example.com/api
+    description: 生产环境
+
+paths:
+  /admin/departments:
+    post:
+      tags:
+        - 部门管理
+      summary: 创建部门
+      description: 创建新部门，支持指定父部门创建层级结构
+      operationId: createDepartment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDepartmentRequest'
+            example:
+              name: "研发部"
+              code: "RD001"
+              shortName: "研发"
+              description: "负责产品研发工作"
+              type: 2
+              status: 1
+              parentId: 1
+              sort: 1
+              managerId: 10
+              phone: "010-12345678"
+              email: "rd@example.com"
+              address: "北京市海淀区"
+              dataScope: 2
+              remark: "核心研发团队"
+      responses:
+        '200':
+          description: 部门创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: 0
+                message: "部门创建成功"
+                data:
+                  id: 10
+                  name: "研发部"
+                  code: "RD001"
+                  type: 2
+                  typeText: "department"
+                  status: 1
+                  statusText: "enabled"
+                  level: 2
+                  path: "/1/10"
+                  hasChildren: false
+                  isLeaf: true
+                  createdAt: "2024-01-01T10:00:00Z"
+                  updatedAt: "2024-01-01T10:00:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      tags:
+        - 部门管理
+      summary: 获取部门列表
+      description: 分页查询部门列表，支持多种条件筛选
+      operationId: getDepartmentList
+      parameters:
+        - name: page
+          in: query
+          description: 页码（从1开始）
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          description: 每页数量
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+        - name: name
+          in: query
+          description: 部门名称（支持模糊查询）
+          required: false
+          schema:
+            type: string
+        - name: code
+          in: query
+          description: 部门编码（支持模糊查询）
+          required: false
+          schema:
+            type: string
+        - name: type
+          in: query
+          description: 部门类型（0:公司 1:事业部 2:部门 3:团队）
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1, 2, 3]
+        - name: status
+          in: query
+          description: 部门状态（0:禁用 1:启用 2:冻结）
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1, 2]
+        - name: parentId
+          in: query
+          description: 父部门ID
+          required: false
+          schema:
+            type: integer
+        - name: managerId
+          in: query
+          description: 负责人ID
+          required: false
+          schema:
+            type: integer
+        - name: keyword
+          in: query
+          description: 关键词搜索（部门名称、编码、简称）
+          required: false
+          schema:
+            type: string
+        - name: includeTree
+          in: query
+          description: 是否包含树形结构
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DepartmentListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/tree:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取部门树形结构
+      description: 获取完整的部门树形层级结构
+      operationId: getDepartmentTree
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DepartmentTreeResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/roots:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取根部门列表
+      description: 获取所有根级别部门
+      operationId: getRootDepartments
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DepartmentResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/{id}:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取部门详情
+      description: 根据ID获取部门详细信息
+      operationId: getDepartment
+      parameters:
+        - name: id
+          in: path
+          description: 部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags:
+        - 部门管理
+      summary: 更新部门信息
+      description: 更新指定部门的信息
+      operationId: updateDepartment
+      parameters:
+        - name: id
+          in: path
+          description: 部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags:
+        - 部门管理
+      summary: 删除部门
+      description: 删除指定部门（软删除）。注意：存在子部门或关联用户时无法删除
+      operationId: deleteDepartment
+      parameters:
+        - name: id
+          in: path
+          description: 部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+              example:
+                code: 0
+                message: "部门删除成功"
+                data: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/{id}/status:
+    put:
+      tags:
+        - 部门管理
+      summary: 更新部门状态
+      description: 更新指定部门的状态（启用/禁用/冻结）
+      operationId: updateDepartmentStatus
+      parameters:
+        - name: id
+          in: path
+          description: 部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartmentStatusUpdateRequest'
+      responses:
+        '200':
+          description: 状态更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/{id}/move:
+    put:
+      tags:
+        - 部门管理
+      summary: 移动部门
+      description: 将部门移动到新的父级位置
+      operationId: moveDepartment
+      parameters:
+        - name: id
+          in: path
+          description: 要移动的部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveDepartmentRequest'
+      responses:
+        '200':
+          description: 移动成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/{id}/children:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取子部门列表
+      description: 获取指定部门的直接子部门
+      operationId: getChildrenDepartments
+      parameters:
+        - name: id
+          in: path
+          description: 父部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/{id}/descendants:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取所有后代部门
+      description: 获取指定部门的所有后代部门（包括子部门的子部门）
+      operationId: getDescendantDepartments
+      parameters:
+        - name: id
+          in: path
+          description: 父部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/{departmentId}/users:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取部门用户列表
+      description: 获取指定部门下的所有用户
+      operationId: getUsersByDepartment
+      parameters:
+        - name: departmentId
+          in: path
+          description: 部门ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/batch:
+    post:
+      tags:
+        - 部门管理
+      summary: 批量操作部门
+      description: 对多个部门执行批量操作（启用、禁用、冻结、删除）
+      operationId: batchOperationDepartments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchDepartmentRequest'
+      responses:
+        '200':
+          description: 批量操作成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/stats/active-count:
+    get:
+      tags:
+        - 部门管理
+      summary: 获取启用部门数量统计
+      description: 统计系统中启用状态的部门数量
+      operationId: getActiveDepartmentsCount
+      responses:
+        '200':
+          description: 统计成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          activeDepartmentsCount:
+                            type: integer
+                            description: 启用部门数量
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/validate-hierarchy:
+    post:
+      tags:
+        - 部门管理
+      summary: 验证部门层级结构
+      description: 验证部门树形结构的完整性和正确性
+      operationId: validateDepartmentHierarchy
+      responses:
+        '200':
+          description: 验证通过
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/departments/repair-hierarchy:
+    post:
+      tags:
+        - 部门管理
+      summary: 修复部门层级结构
+      description: 自动修复部门树形结构中的错误
+      operationId: repairDepartmentHierarchy
+      responses:
+        '200':
+          description: 修复成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /admin/managers/{managerId}/departments:
+    get:
+      tags:
+        - 部门管理
+      summary: 根据负责人获取部门列表
+      description: 获取指定用户作为负责人的所有部门
+      operationId: getDepartmentsByManager
+      parameters:
+        - name: managerId
+          in: path
+          description: 负责人ID
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DepartmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    ApiResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          description: 响应状态码（0表示成功）
+          example: 0
+        message:
+          type: string
+          description: 响应消息
+          example: "操作成功"
+        data:
+          type: object
+          description: 响应数据
+          nullable: true
+
+    CreateDepartmentRequest:
+      type: object
+      required:
+        - name
+        - code
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: 部门名称
+          example: "研发部"
+        code:
+          type: string
+          minLength: 2
+          maxLength: 50
+          description: 部门编码（唯一）
+          example: "RD001"
+        shortName:
+          type: string
+          maxLength: 50
+          description: 部门简称
+          example: "研发"
+        description:
+          type: string
+          maxLength: 255
+          description: 部门描述
+          example: "负责产品研发工作"
+        type:
+          type: integer
+          enum: [0, 1, 2, 3]
+          description: 部门类型（0:公司 1:事业部 2:部门 3:团队）
+          example: 2
+        status:
+          type: integer
+          enum: [0, 1, 2]
+          description: 部门状态（0:禁用 1:启用 2:冻结）
+          example: 1
+        parentId:
+          type: integer
+          nullable: true
+          description: 父部门ID
+          example: 1
+        sort:
+          type: integer
+          description: 排序值
+          example: 1
+        managerId:
+          type: integer
+          nullable: true
+          description: 负责人用户ID
+          example: 10
+        phone:
+          type: string
+          maxLength: 20
+          description: 部门电话
+          example: "010-12345678"
+        email:
+          type: string
+          maxLength: 100
+          format: email
+          description: 部门邮箱
+          example: "dept@example.com"
+        address:
+          type: string
+          maxLength: 255
+          description: 部门地址
+          example: "北京市海淀区中关村"
+        postalCode:
+          type: string
+          maxLength: 20
+          description: 邮政编码
+          example: "100000"
+        fax:
+          type: string
+          maxLength: 20
+          description: 传真号码
+          example: "010-87654321"
+        website:
+          type: string
+          maxLength: 255
+          description: 部门网站
+          example: "https://dept.example.com"
+        location:
+          type: string
+          maxLength: 255
+          description: 地理位置
+          example: "北京市海淀区"
+        costCenter:
+          type: string
+          maxLength: 50
+          description: 成本中心
+          example: "CC001"
+        budgetCode:
+          type: string
+          maxLength: 50
+          description: 预算代码
+          example: "BG001"
+        taxId:
+          type: string
+          maxLength: 50
+          description: 税务识别号
+          example: "91110000000000000X"
+        legalEntity:
+          type: string
+          maxLength: 100
+          description: 法律实体
+          example: "北京某某科技有限公司"
+        businessType:
+          type: string
+          maxLength: 100
+          description: 业务类型
+          example: "软件开发"
+        dataScope:
+          type: integer
+          description: 数据权限范围（1:全部 2:本部门 3:本部门及下级 4:仅本人）
+          example: 2
+        dataScopeDesc:
+          type: string
+          maxLength: 255
+          description: 数据权限描述
+          example: "本部门数据权限"
+        establishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 成立时间
+          example: "2020-01-01T00:00:00Z"
+        attributes:
+          type: object
+          additionalProperties: true
+          description: 扩展属性（JSON格式）
+          example:
+            budget: 1000000
+            headcount: 50
+        remark:
+          type: string
+          description: 备注
+          example: "核心研发团队"
+
+    UpdateDepartmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: 部门名称
+        code:
+          type: string
+          minLength: 2
+          maxLength: 50
+          description: 部门编码
+        shortName:
+          type: string
+          maxLength: 50
+          description: 部门简称
+        description:
+          type: string
+          maxLength: 255
+          description: 部门描述
+        type:
+          type: integer
+          enum: [0, 1, 2, 3]
+          nullable: true
+          description: 部门类型
+        status:
+          type: integer
+          enum: [0, 1, 2]
+          nullable: true
+          description: 部门状态
+        parentId:
+          type: integer
+          nullable: true
+          description: 父部门ID
+        sort:
+          type: integer
+          nullable: true
+          description: 排序值
+        managerId:
+          type: integer
+          nullable: true
+          description: 负责人用户ID
+        phone:
+          type: string
+          maxLength: 20
+          description: 部门电话
+        email:
+          type: string
+          maxLength: 100
+          format: email
+          description: 部门邮箱
+        address:
+          type: string
+          maxLength: 255
+          description: 部门地址
+        postalCode:
+          type: string
+          maxLength: 20
+          description: 邮政编码
+        fax:
+          type: string
+          maxLength: 20
+          description: 传真号码
+        website:
+          type: string
+          maxLength: 255
+          description: 部门网站
+        location:
+          type: string
+          maxLength: 255
+          description: 地理位置
+        costCenter:
+          type: string
+          maxLength: 50
+          description: 成本中心
+        budgetCode:
+          type: string
+          maxLength: 50
+          description: 预算代码
+        taxId:
+          type: string
+          maxLength: 50
+          description: 税务识别号
+        legalEntity:
+          type: string
+          maxLength: 100
+          description: 法律实体
+        businessType:
+          type: string
+          maxLength: 100
+          description: 业务类型
+        dataScope:
+          type: integer
+          nullable: true
+          description: 数据权限范围
+        dataScopeDesc:
+          type: string
+          maxLength: 255
+          description: 数据权限描述
+        establishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 成立时间
+        attributes:
+          type: object
+          additionalProperties: true
+          description: 扩展属性
+        remark:
+          type: string
+          description: 备注
+
+    DepartmentResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: 部门ID
+          example: 1
+        name:
+          type: string
+          description: 部门名称
+          example: "研发部"
+        code:
+          type: string
+          description: 部门编码
+          example: "RD001"
+        shortName:
+          type: string
+          description: 部门简称
+          example: "研发"
+        description:
+          type: string
+          description: 部门描述
+          example: "负责产品研发工作"
+        type:
+          type: integer
+          description: 部门类型
+          example: 2
+        typeText:
+          type: string
+          description: 部门类型文本
+          example: "department"
+        status:
+          type: integer
+          description: 部门状态
+          example: 1
+        statusText:
+          type: string
+          description: 部门状态文本
+          example: "enabled"
+        parentId:
+          type: integer
+          nullable: true
+          description: 父部门ID
+          example: 1
+        level:
+          type: integer
+          description: 层级深度
+          example: 2
+        path:
+          type: string
+          description: 层级路径
+          example: "/1/10"
+        sort:
+          type: integer
+          description: 排序值
+          example: 1
+        managerId:
+          type: integer
+          nullable: true
+          description: 负责人ID
+          example: 10
+        phone:
+          type: string
+          description: 部门电话
+          example: "010-12345678"
+        email:
+          type: string
+          description: 部门邮箱
+          example: "dept@example.com"
+        address:
+          type: string
+          description: 部门地址
+          example: "北京市海淀区"
+        postalCode:
+          type: string
+          description: 邮政编码
+          example: "100000"
+        fax:
+          type: string
+          description: 传真号码
+          example: "010-87654321"
+        website:
+          type: string
+          description: 部门网站
+          example: "https://dept.example.com"
+        location:
+          type: string
+          description: 地理位置
+          example: "北京市海淀区"
+        costCenter:
+          type: string
+          description: 成本中心
+          example: "CC001"
+        budgetCode:
+          type: string
+          description: 预算代码
+          example: "BG001"
+        taxId:
+          type: string
+          description: 税务识别号
+          example: "91110000000000000X"
+        legalEntity:
+          type: string
+          description: 法律实体
+          example: "北京某某科技有限公司"
+        businessType:
+          type: string
+          description: 业务类型
+          example: "软件开发"
+        dataScope:
+          type: integer
+          description: 数据权限范围
+          example: 2
+        dataScopeDesc:
+          type: string
+          description: 数据权限描述
+          example: "本部门数据权限"
+        isLeaf:
+          type: boolean
+          description: 是否叶子节点
+          example: true
+        hasChildren:
+          type: boolean
+          description: 是否有子部门
+          example: false
+        establishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 成立时间
+          example: "2020-01-01T00:00:00Z"
+        attributes:
+          type: object
+          additionalProperties: true
+          description: 扩展属性
+        remark:
+          type: string
+          description: 备注
+          example: "核心研发团队"
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+          example: "2024-01-01T10:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: 更新时间
+          example: "2024-01-01T10:00:00Z"
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentResponse'
+          description: 子部门列表（在树形结构中使用）
+        parent:
+          $ref: '#/components/schemas/DepartmentResponse'
+          nullable: true
+          description: 父部门信息
+        manager:
+          $ref: '#/components/schemas/UserResponse'
+          nullable: true
+          description: 负责人信息
+
+    DepartmentListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: 总记录数
+          example: 100
+        page:
+          type: integer
+          description: 当前页码
+          example: 1
+        size:
+          type: integer
+          description: 每页数量
+          example: 10
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentResponse'
+          description: 部门列表
+
+    DepartmentTreeResponse:
+      type: object
+      properties:
+        tree:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentResponse'
+          description: 部门树形结构
+
+    DepartmentStatusUpdateRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: integer
+          enum: [0, 1, 2]
+          description: 部门状态（0:禁用 1:启用 2:冻结）
+          example: 1
+        remark:
+          type: string
+          description: 备注
+          example: "状态变更原因"
+
+    BatchDepartmentRequest:
+      type: object
+      required:
+        - departmentIds
+        - action
+      properties:
+        departmentIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          minItems: 1
+          description: 部门ID列表
+          example: [1, 2, 3]
+        action:
+          type: string
+          enum: [enable, disable, freeze, delete]
+          description: 操作类型
+          example: "enable"
+        remark:
+          type: string
+          description: 备注
+          example: "批量操作原因"
+
+    MoveDepartmentRequest:
+      type: object
+      properties:
+        targetParentId:
+          type: integer
+          nullable: true
+          description: 目标父部门ID（null表示移动到根级别）
+          example: 2
+        sort:
+          type: integer
+          description: 新的排序值
+          example: 5
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: 用户ID
+          example: 1
+        username:
+          type: string
+          description: 用户名
+          example: "admin"
+        email:
+          type: string
+          description: 邮箱
+          example: "admin@example.com"
+        phone:
+          type: string
+          description: 手机号
+          example: "13800138000"
+        nickname:
+          type: string
+          description: 昵称
+          example: "管理员"
+        realName:
+          type: string
+          description: 真实姓名
+          example: "张三"
+        avatar:
+          type: string
+          description: 头像URL
+          example: "https://example.com/avatar.jpg"
+        status:
+          type: integer
+          description: 用户状态
+          example: 1
+        statusText:
+          type: string
+          description: 用户状态文本
+          example: "active"
+        isActivated:
+          type: boolean
+          description: 是否激活
+          example: true
+        isVerified:
+          type: boolean
+          description: 是否验证
+          example: true
+        loginCount:
+          type: integer
+          format: int64
+          description: 登录次数
+          example: 100
+        failureCount:
+          type: integer
+          description: 失败次数
+          example: 0
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最后登录时间
+          example: "2024-01-01T10:00:00Z"
+        lastLoginIP:
+          type: string
+          description: 最后登录IP
+          example: "192.168.1.100"
+        departmentId:
+          type: integer
+          nullable: true
+          description: 部门ID
+          example: 1
+        attributes:
+          type: object
+          additionalProperties: true
+          description: 扩展属性
+        remark:
+          type: string
+          description: 备注
+          example: "系统管理员"
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间
+          example: "2024-01-01T10:00:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          description: 更新时间
+          example: "2024-01-01T10:00:00Z"
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          description: 错误码
+          example: 400
+        message:
+          type: string
+          description: 错误信息
+          example: "请求参数错误"
+        data:
+          nullable: true
+          description: 错误详情
+          example: null
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 400
+            message: "请求参数错误"
+            data: null
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 404
+            message: "部门不存在"
+            data: null
+
+    InternalError:
+      description: 内部服务器错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 500
+            message: "内部服务器错误"
+            data: null
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT认证token
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: 部门管理
+    description: 部门管理相关接口，包括CRUD操作、树形结构管理、批量操作等

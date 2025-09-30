@@ -2,6 +2,7 @@ package autoload
 
 import (
 	"cnb.cool/mliev/examples/go-web/app/controller"
+	AdminDepartmentController "cnb.cool/mliev/examples/go-web/app/controller/admin"
 	AdminUserController "cnb.cool/mliev/examples/go-web/app/controller/admin"
 	envInterface "cnb.cool/mliev/examples/go-web/internal/interfaces"
 	"cnb.cool/mliev/examples/go-web/internal/pkg/http_server/impl"
@@ -54,10 +55,44 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						adminUsers.GET("/stats/active-count", deps.WrapHandler(AdminUserController.AdminUserController{}.GetActiveUsersCount)) // 活跃用户统计
 					}
 
-					// 部门相关的用户路由（管理员）
+					// 部门管理路由（管理员）
 					adminDepartments := admin.Group("/departments")
 					{
+						// 部门基础CRUD操作（管理员）
+						adminDepartments.POST("", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.CreateDepartment))        // 创建部门
+						adminDepartments.GET("", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetDepartmentList))        // 获取部门列表
+						adminDepartments.GET("/tree", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetDepartmentTree))   // 获取部门树形结构
+						adminDepartments.GET("/roots", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetRootDepartments)) // 获取根部门列表
+						adminDepartments.GET("/:id", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetDepartment))        // 获取部门详情
+						adminDepartments.PUT("/:id", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.UpdateDepartment))     // 更新部门信息
+						adminDepartments.DELETE("/:id", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.DeleteDepartment))  // 删除部门
+
+						// 部门状态管理（管理员）
+						adminDepartments.PUT("/:id/status", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.UpdateDepartmentStatus)) // 更新部门状态
+
+						// 部门结构管理（管理员）
+						adminDepartments.PUT("/:id/move", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.MoveDepartment))                  // 移动部门
+						adminDepartments.GET("/:id/children", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetChildrenDepartments))      // 获取子部门列表
+						adminDepartments.GET("/:id/descendants", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetDescendantDepartments)) // 获取所有后代部门
+
+						// 批量操作（管理员）
+						adminDepartments.POST("/batch", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.BatchOperation)) // 批量操作部门
+
+						// 统计信息（管理员）
+						adminDepartments.GET("/stats/active-count", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetActiveDepartmentsCount)) // 启用部门统计
+
+						// 维护操作（管理员）
+						adminDepartments.POST("/validate-hierarchy", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.ValidateHierarchy)) // 验证部门层级结构
+						adminDepartments.POST("/repair-hierarchy", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.RepairHierarchy))     // 修复部门层级结构
+
+						// 部门相关的用户路由（管理员）
 						adminDepartments.GET("/:departmentId/users", deps.WrapHandler(AdminUserController.AdminUserController{}.GetUsersByDepartment)) // 根据部门获取用户
+					}
+
+					// 负责人相关路由（管理员）
+					adminManagers := admin.Group("/managers")
+					{
+						adminManagers.GET("/:managerId/departments", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetDepartmentsByManager)) // 根据负责人获取部门
 					}
 				}
 
