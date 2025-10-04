@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"cnb.cool/mliev/examples/go-web/internal/interfaces"
+	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/redis/go-redis/v9"
 )
 

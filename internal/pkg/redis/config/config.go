@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	configInterface "cnb.cool/mliev/examples/go-web/internal/pkg/config/interfaces"
+	configInterface "cnb.cool/mliev/iam/mliev-iam/internal/pkg/config/interfaces"
 	"github.com/redis/go-redis/v9"
 )
 

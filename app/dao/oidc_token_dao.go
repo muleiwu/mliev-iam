@@ -3,7 +3,7 @@ package dao
 import (
 	"time"
 
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"gorm.io/gorm"
 )
 

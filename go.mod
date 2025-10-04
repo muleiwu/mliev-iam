@@ -1,4 +1,4 @@
-module cnb.cool/mliev/examples/go-web
+module cnb.cool/mliev/iam/mliev-iam
 
 go 1.25.0
 

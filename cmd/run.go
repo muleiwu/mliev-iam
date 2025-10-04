@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"cnb.cool/mliev/examples/go-web/config"
-	helper2 "cnb.cool/mliev/examples/go-web/internal/helper"
+	"cnb.cool/mliev/iam/mliev-iam/config"
+	helper2 "cnb.cool/mliev/iam/mliev-iam/internal/helper"
 )
 
 // Start 启动应用程序

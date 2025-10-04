@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"cnb.cool/mliev/examples/go-web/internal/interfaces"
+	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )

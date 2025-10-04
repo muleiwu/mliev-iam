@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"cnb.cool/mliev/examples/go-web/app/dao"
-	"cnb.cool/mliev/examples/go-web/app/dto"
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"gorm.io/gorm"
 )
 

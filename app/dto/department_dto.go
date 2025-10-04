@@ -3,7 +3,7 @@ package dto
 import (
 	"time"
 
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 // CreateDepartmentRequest 创建部门请求

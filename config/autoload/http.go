@@ -1,6 +1,6 @@
 package autoload
 
-import envInterface "cnb.cool/mliev/examples/go-web/internal/interfaces"
+import envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 
 type Http struct {
 }
