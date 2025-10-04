@@ -94,6 +94,27 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					{
 						adminManagers.GET("/:managerId/departments", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.GetDepartmentsByManager)) // 根据负责人获取部门
 					}
+
+					// OIDC客户端管理路由（管理员）
+					adminOIDC := admin.Group("/oidc")
+					{
+						// OIDC客户端基础CRUD操作（管理员）
+						adminOIDCClients := adminOIDC.Group("/clients")
+						{
+							adminOIDCClients.POST("", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.CreateClient))       // 创建OIDC客户端
+							adminOIDCClients.GET("", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.GetClientList))       // 获取OIDC客户端列表
+							adminOIDCClients.GET("/:id", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.GetClient))       // 获取OIDC客户端详情
+							adminOIDCClients.PUT("/:id", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.UpdateClient))    // 更新OIDC客户端
+							adminOIDCClients.DELETE("/:id", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.DeleteClient)) // 删除OIDC客户端
+
+							// 批量操作（管理员）
+							adminOIDCClients.POST("/batch", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.BatchOperation)) // 批量操作OIDC客户端
+						}
+
+						// OIDC统计信息和管理（管理员）
+						adminOIDC.GET("/stats", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.GetStats))              // 获取OIDC统计信息
+						adminOIDC.POST("/cleanup", deps.WrapHandler(AdminDepartmentController.OIDCClientController{}.CleanupExpiredData)) // 清理过期数据
+					}
 				}
 
 				// 普通用户路由组
@@ -109,7 +130,22 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					// 用户密码管理
 					user.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
 				}
+
+				// OIDC 路由组（公开端点）
+				oidc := api.Group("/oidc")
+				{
+					// OIDC 核心端点
+					oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))    // 授权端点
+					oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token))           // 令牌端点
+					oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))      // 用户信息端点
+					oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
+					oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
+					oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点
+				}
 			}
+
+			// OIDC 发现文档端点（标准位置）
+			router.GET("/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
 
 		},
 	}

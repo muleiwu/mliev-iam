@@ -108,6 +108,16 @@ func (s *UserService) GetUserByID(id uint) (*dto.UserResponse, error) {
 	return &response, nil
 }
 
+// GetUserModelByID 根据ID获取用户模型（返回Model，供OIDC使用）
+func (s *UserService) GetUserModelByID(id uint) (*model.User, error) {
+	user, err := s.userDao.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
 // UpdateUser 更新用户信息
 func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.UserResponse, error) {
 	// 获取用户

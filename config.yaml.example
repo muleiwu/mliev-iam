@@ -74,4 +74,64 @@ cors:
   allow_headers:
     - "Origin"
     - "Content-Type"
-    - "Authorization" 
+    - "Authorization"
+
+# OIDC 配置
+oidc:
+  # 颁发者标识符（通常是服务的基础URL）
+  issuer: "http://localhost:8080"
+  
+  # 签名密钥配置
+  signing:
+    # JWT签名算法，支持 RS256, HS256
+    algorithm: "HS256"
+    # HMAC密钥（用于HS256算法）
+    hmac_secret: "your-oidc-hmac-secret-key"
+    # RSA私钥路径（用于RS256算法）
+    # rsa_private_key_path: "/path/to/private.pem"
+    # RSA公钥路径（用于RS256算法）
+    # rsa_public_key_path: "/path/to/public.pem"
+  
+  # 默认令牌生命周期（秒）
+  token_lifetime:
+    # 访问令牌过期时间
+    access_token: 3600     # 1小时
+    # 刷新令牌过期时间
+    refresh_token: 2592000 # 30天
+    # ID令牌过期时间
+    id_token: 3600         # 1小时
+    # 授权码过期时间
+    authorization_code: 600 # 10分钟
+  
+  # 支持的功能配置
+  features:
+    # 是否启用PKCE支持
+    pkce_enabled: true
+    # 是否启用令牌内省端点
+    introspection_enabled: true
+    # 是否启用令牌撤销端点
+    revocation_enabled: true
+    # 是否启用刷新令牌
+    refresh_token_enabled: true
+  
+  # 客户端默认配置
+  defaults:
+    # 默认作用域
+    scopes: ["openid", "profile", "email"]
+    # 默认授权类型
+    grant_types: ["authorization_code", "refresh_token"]
+    # 默认响应类型
+    response_types: ["code"]
+    # 默认客户端类型
+    client_type: "confidential"
+  
+  # 安全配置
+  security:
+    # 授权码最大尝试次数
+    max_authorization_attempts: 5
+    # 客户端最大失败尝试次数
+    max_client_failure_attempts: 10
+    # 令牌最大刷新次数
+    max_token_refresh_attempts: 100
+    # 是否启用速率限制
+    rate_limit_enabled: true 
