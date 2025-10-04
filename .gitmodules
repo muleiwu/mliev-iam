@@ -1,0 +1,3 @@
+[submodule "admin-web"]
+	path = admin-web
+	url = https://cnb.cool/mliev/iam/iam-admin-web
