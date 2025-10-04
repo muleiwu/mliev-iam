@@ -65,11 +65,11 @@ type User struct {
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 扩展属性
-	Attributes map[string]interface{} `gorm:"type:json" json:"attributes,omitempty"`
-	Remark     string                 `gorm:"type:text" json:"remark"`
+	Attributes JSONObject `gorm:"type:json" json:"attributes,omitempty"`
+	Remark     string     `gorm:"type:text" json:"remark"`
 
 	// 部门和角色关联（外键关联）
-	DepartmentID *uint `gorm:"index" json:"departmentId"`
+	DepartmentID *uint `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"departmentId"`
 	// Department   *Department `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
 	// Roles        []Role      `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 }

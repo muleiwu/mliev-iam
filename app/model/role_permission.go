@@ -1,10 +1,34 @@
 package model
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+type JSONObject map[string]any
+
+func (j *JSONObject) Scan(value interface{}) error {
+	if value == nil {
+		*j = JSONObject{}
+		return nil
+	}
+	bytes, ok := value.([]byte)
+	if !ok {
+		return errors.New("failed to scan JSONB")
+	}
+	return json.Unmarshal(bytes, j)
+}
+
+func (j JSONObject) Value() (driver.Value, error) {
+	if j == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(j)
+}
 
 // RolePermission represents the many-to-many relationship between roles and permissions.
 // 角色权限关联表，用于实现RBAC（基于角色的访问控制）
@@ -19,9 +43,9 @@ type RolePermission struct {
 	ExpiresAt *time.Time `json:"expiresAt"`                 // 过期时间，空表示永不过期
 
 	// 约束条件
-	Conditions map[string]interface{} `gorm:"type:json" json:"conditions,omitempty"` // 权限约束条件
-	DataScope  int                    `gorm:"default:1" json:"dataScope"`            // 数据权限范围
-	IsActive   bool                   `gorm:"default:true;not null" json:"isActive"` // 是否激活
+	Conditions JSONObject `gorm:"type:json" json:"conditions,omitempty"` // 权限约束条件
+	DataScope  int        `gorm:"default:1" json:"dataScope"`            // 数据权限范围
+	IsActive   bool       `gorm:"default:true;not null" json:"isActive"` // 是否激活
 
 	// 时间信息
 	CreatedAt time.Time      `json:"createdAt"`

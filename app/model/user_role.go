@@ -19,10 +19,10 @@ type UserRole struct {
 	ExpiresAt  *time.Time `json:"expiresAt"`                  // 过期时间，空表示永不过期
 
 	// 角色约束
-	Constraints map[string]interface{} `gorm:"type:json" json:"constraints,omitempty"` // 角色约束条件
-	DataScope   int                    `gorm:"default:1" json:"dataScope"`             // 数据权限范围
-	IsActive    bool                   `gorm:"default:true;not null" json:"isActive"`  // 是否激活
-	IsPrimary   bool                   `gorm:"default:false" json:"isPrimary"`         // 是否主要角色
+	Constraints JSONObject `gorm:"type:json" json:"constraints,omitempty"` // 角色约束条件
+	DataScope   int        `gorm:"default:1" json:"dataScope"`             // 数据权限范围
+	IsActive    bool       `gorm:"default:true;not null" json:"isActive"`  // 是否激活
+	IsPrimary   bool       `gorm:"default:false" json:"isPrimary"`         // 是否主要角色
 
 	// 组织约束
 	DepartmentID   *uint `gorm:"index" json:"departmentId"`   // 生效部门ID（空表示全局生效）
