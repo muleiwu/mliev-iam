@@ -1,32 +1,146 @@
-master:
-  push:
-    - services:
-        # 流水线中启用 docker 服务
-        - docker
-      stages:
-        # 云原生构建自动构建Docker镜像并将它发布到制品库
-        - name: docker login
-          script:
-            - docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
-        - name: docker build
-          script:
-            - docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_BRANCH} .
-        - name: docker push
-          script:
-            - docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_BRANCH}
 develop:
   push:
+    - git:
+        enable: true
+        submodules: true
+    - runner:
+        tags: cnb:arch:amd64
+      services:
+        - docker
+      env:
+        IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:develop-linux-amd64
+      stages:
+        - name: docker login
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+        - name: docker build
+          script: docker build -t ${IMAGE_TAG} .
+        - name: docker push
+          script: docker push ${IMAGE_TAG}
+        - name: resolve
+          type: cnb:resolve
+          options:
+            key: build-amd64
+
+    - runner:
+        tags: cnb:arch:arm64:v8
+      services:
+        - docker
+      env:
+        IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:develop-linux-arm64
+      stages:
+        - name: docker login
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+        - name: docker build
+          script: docker build -t ${IMAGE_TAG} .
+        - name: docker push
+          script: docker push ${IMAGE_TAG}
+        - name: resolve
+          type: cnb:resolve
+          options:
+            key: build-arm64
+
     - services:
-        # 流水线中启用 docker 服务
+        - docker
+      env:
+        IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:develop
+      stages:
+        - name: await the amd64
+          type: cnb:await
+          options:
+            key: build-amd64
+        - name: await the arm64
+          type: cnb:await
+          options:
+            key: build-arm64
+        - name: manifest
+          image: cnbcool/manifest
+          settings:
+            target: ${IMAGE_TAG}
+            template: ${IMAGE_TAG}-OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+        - name: remove tag
+          type: artifact:remove-tag
+          options:
+            name: ${CNB_REPO_NAME}
+            tags:
+              - develop-linux-amd64
+              - develop-linux-arm64
+            type: docker
+$:
+  tag_push:
+    - git:
+        enable: true
+        submodules: true
+    - runner:
+        tags: cnb:arch:amd64
+      services:
+        - docker
+      env:
+        IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:linux-amd64
+      stages:
+        - name: docker login
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+        - name: docker build
+          script: docker build -t ${IMAGE_TAG} .
+        - name: docker push
+          script: docker push ${IMAGE_TAG}
+        - name: resolve
+          type: cnb:resolve
+          options:
+            key: build-amd64
+
+    - runner:
+        tags: cnb:arch:arm64:v8
+      services:
+        - docker
+      env:
+        IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:linux-arm64
+      stages:
+        - name: docker login
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+        - name: docker build
+          script: docker build -t ${IMAGE_TAG} .
+        - name: docker push
+          script: docker push ${IMAGE_TAG}
+        - name: resolve
+          type: cnb:resolve
+          options:
+            key: build-arm64
+
+    - services:
         - docker
       stages:
-        # 云原生构建自动构建Docker镜像并将它发布到制品库
-        - name: docker login
-          script:
-            - docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
-        - name: docker build
-          script:
-            - docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_BRANCH} .
-        - name: docker push
-          script:
-            - docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_BRANCH}
+        - name: await the amd64
+          type: cnb:await
+          options:
+            key: build-amd64
+        - name: await the arm64
+          type: cnb:await
+          options:
+            key: build-arm64
+        - name: manifest latest
+          image: cnbcool/manifest
+          settings:
+            target: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+            template: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+        - name: manifest version
+          image: cnbcool/manifest
+          settings:
+            target: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_BRANCH}
+            template: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+        - name: remove tag
+          type: artifact:remove-tag
+          options:
+            name: ${CNB_REPO_NAME}
+            tags:
+              - linux-amd64
+              - linux-arm64
+            type: docker
