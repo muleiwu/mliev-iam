@@ -86,7 +86,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						adminDepartments.POST("/repair-hierarchy", deps.WrapHandler(AdminDepartmentController.AdminDepartmentController{}.RepairHierarchy))     // 修复部门层级结构
 
 						// 部门相关的用户路由（管理员）
-						adminDepartments.GET("/:departmentId/users", deps.WrapHandler(AdminUserController.AdminUserController{}.GetUsersByDepartment)) // 根据部门获取用户
+						adminDepartments.GET("/:id/users", deps.WrapHandler(AdminUserController.AdminUserController{}.GetUsersByDepartment)) // 根据部门获取用户
 					}
 
 					// 负责人相关路由（管理员）

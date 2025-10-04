@@ -236,7 +236,7 @@ func (auc AdminUserController) BatchOperation(c *gin.Context, helper interfaces.
 // GetUsersByDepartment 根据部门获取用户列表（管理员操作）
 // GET /api/admin/departments/:departmentId/users
 func (auc AdminUserController) GetUsersByDepartment(c *gin.Context, helper interfaces.HelperInterface) {
-	departmentIdStr := c.Param("departmentId")
+	departmentIdStr := c.Param("id")
 	departmentId, err := strconv.ParseUint(departmentIdStr, 10, 32)
 	if err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "部门ID格式错误")
