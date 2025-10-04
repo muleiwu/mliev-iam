@@ -5,6 +5,7 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
@@ -63,8 +64,13 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 		return
 	}
 
-	// 生成访问令牌（这里应该使用JWT或其他令牌机制）
-	accessToken := ac.generateAccessToken(userResponse)
+	// 生成访问令牌
+	jwtAuthService := service.NewJWTAuthService()
+	accessToken, err := jwtAuthService.GenerateToken(userResponse)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeInternal, "生成访问令牌失败: "+err.Error())
+		return
+	}
 
 	// 更新用户登录IP
 	clientIP := c.ClientIP()
@@ -77,7 +83,7 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 		User:        *userResponse,
 		AccessToken: accessToken,
 		TokenType:   "Bearer",
-		ExpiresIn:   3600, // 1小时
+		ExpiresIn:   int64(jwtAuthService.GetConfig().GetAccessTokenHours() * 3600), // 转换为秒
 	}
 
 	ac.SuccessWithMessage(c, "管理员登录成功", response)
@@ -109,17 +115,17 @@ func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 	}
 
 	// 验证刷新令牌并生成新的访问令牌
-	// 这里应该实现具体的令牌验证和生成逻辑
-	newAccessToken := ac.refreshAccessToken(refreshToken)
-	if newAccessToken == "" {
-		ac.Error(c, constants.ErrCodeUnauthorized, "刷新令牌无效或已过期")
+	jwtAuthService := service.NewJWTAuthService()
+	newAccessToken, err := jwtAuthService.RefreshToken(refreshToken)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeUnauthorized, "刷新令牌无效或已过期: "+err.Error())
 		return
 	}
 
 	response := gin.H{
 		"accessToken": newAccessToken,
 		"tokenType":   "Bearer",
-		"expiresIn":   3600,
+		"expiresIn":   jwtAuthService.GetConfig().GetAccessTokenHours() * 3600, // 转换为秒
 	}
 
 	ac.SuccessWithMessage(c, "令牌刷新成功", response)
@@ -128,25 +134,31 @@ func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 // GetAdminProfile 获取管理员个人信息
 // GET /api/admin/auth/profile
 func (ac AuthController) GetAdminProfile(c *gin.Context, helper interfaces.HelperInterface) {
-	// 这里需要从认证中间件或JWT中获取当前管理员用户ID
-	// 暂时使用查询参数模拟
-	adminUserIDStr := c.Query("adminUserId")
-	if adminUserIDStr == "" {
+	// 从认证中间件获取当前用户信息
+	userID, _, exists := middleware.GetCurrentUser(c)
+	if !exists {
 		ac.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
 	}
 
-	// userService := service.NewUserService(helper.GetDatabase())
-	// 这里需要解析管理员用户ID并获取用户信息
-	// 为了简化，暂时返回模拟数据
-	response := gin.H{
-		"id":       1,
-		"username": "admin",
-		"email":    "admin@example.com",
-		"role":     "administrator",
+	// 通过用户服务获取完整的用户信息
+	userService := service.NewUserService(helper.GetDatabase())
+	userResponse, err := userService.GetUserByID(userID)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeNotFound, "用户信息不存在")
+		return
 	}
 
-	ac.Success(c, response)
+	// 返回用户信息（不包含敏感信息）
+	response := gin.H{
+		"id":       userResponse.ID,
+		"username": userResponse.Username,
+		"email":    userResponse.Email,
+		"role":     "administrator",
+		"profile":  userResponse,
+	}
+
+	ac.SuccessWithMessage(c, "获取管理员信息成功", response)
 }
 
 // isAdminUser 检查用户是否为管理员
@@ -166,23 +178,4 @@ func (ac AuthController) isAdminUser(user *dto.UserResponse) bool {
 	// return user.HasRole("admin") || user.HasPermission("admin_access")
 
 	return false
-}
-
-// generateAccessToken 生成访问令牌
-// 这里应该使用JWT或其他安全的令牌机制
-func (ac AuthController) generateAccessToken(user *dto.UserResponse) string {
-	// 简化的令牌生成逻辑
-	// 实际应用中应该使用JWT或类似的安全令牌
-	return "admin_token_" + user.Username + "_" + "1234567890"
-}
-
-// refreshAccessToken 刷新访问令牌
-// 这里应该验证刷新令牌并生成新的访问令牌
-func (ac AuthController) refreshAccessToken(refreshToken string) string {
-	// 简化的令牌刷新逻辑
-	// 实际应用中应该验证刷新令牌的有效性
-	if refreshToken != "" {
-		return "new_admin_token_" + "1234567890"
-	}
-	return ""
 }

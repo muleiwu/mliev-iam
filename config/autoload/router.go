@@ -3,6 +3,7 @@ package autoload
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/http_server/impl"
 	"github.com/gin-gonic/gin"
@@ -34,14 +35,14 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					// 管理员认证路由
 					adminAuth := admin.Group("/auth")
 					{
-						adminAuth.POST("/login", deps.WrapHandler(AdminController.AuthController{}.Login))            // 管理员登录
-						adminAuth.POST("/logout", deps.WrapHandler(AdminController.AuthController{}.Logout))          // 管理员退出登录
-						adminAuth.POST("/refresh", deps.WrapHandler(AdminController.AuthController{}.RefreshToken))   // 刷新令牌
-						adminAuth.GET("/profile", deps.WrapHandler(AdminController.AuthController{}.GetAdminProfile)) // 获取管理员个人信息
+						adminAuth.POST("/login", deps.WrapHandler(AdminController.AuthController{}.Login))                                                    // 管理员登录
+						adminAuth.POST("/logout", middleware.AdminAuthMiddleware(helper), deps.WrapHandler(AdminController.AuthController{}.Logout))          // 管理员退出登录
+						adminAuth.POST("/refresh", middleware.AdminAuthMiddleware(helper), deps.WrapHandler(AdminController.AuthController{}.RefreshToken))   // 刷新令牌
+						adminAuth.GET("/profile", middleware.AdminAuthMiddleware(helper), deps.WrapHandler(AdminController.AuthController{}.GetAdminProfile)) // 获取管理员个人信息
 					}
 
 					// 管理员用户管理路由
-					adminUsers := admin.Group("/users")
+					adminUsers := admin.Group("/users", middleware.AdminAuthMiddleware(helper))
 					{
 						// 用户基础CRUD操作（管理员）
 						adminUsers.POST("", deps.WrapHandler(AdminController.UserController{}.CreateUser))       // 创建用户
@@ -64,7 +65,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					}
 
 					// 部门管理路由（管理员）
-					adminDepartments := admin.Group("/departments")
+					adminDepartments := admin.Group("/departments", middleware.AdminAuthMiddleware(helper))
 					{
 						// 部门基础CRUD操作（管理员）
 						adminDepartments.POST("", deps.WrapHandler(AdminController.DepartmentController{}.CreateDepartment))        // 创建部门
@@ -98,13 +99,13 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					}
 
 					// 负责人相关路由（管理员）
-					adminManagers := admin.Group("/managers")
+					adminManagers := admin.Group("/managers", middleware.AdminAuthMiddleware(helper))
 					{
 						adminManagers.GET("/:managerId/departments", deps.WrapHandler(AdminController.DepartmentController{}.GetDepartmentsByManager)) // 根据负责人获取部门
 					}
 
 					// OIDC客户端管理路由（管理员）
-					adminOIDC := admin.Group("/oidc")
+					adminOIDC := admin.Group("/oidc", middleware.AdminAuthMiddleware(helper))
 					{
 						// OIDC客户端基础CRUD操作（管理员）
 						adminOIDCClients := adminOIDC.Group("/clients")
