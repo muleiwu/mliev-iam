@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"cnb.cool/mliev/examples/go-web/app/constants"
-	"cnb.cool/mliev/examples/go-web/app/controller"
 	"cnb.cool/mliev/examples/go-web/app/dto"
 	"cnb.cool/mliev/examples/go-web/app/service"
 	"cnb.cool/mliev/examples/go-web/internal/interfaces"
@@ -14,7 +13,7 @@ import (
 
 // OIDCClientController OIDC客户端管理控制器（管理员）
 type OIDCClientController struct {
-	controller.BaseResponse
+	BaseController
 }
 
 // CreateClient 创建OIDC客户端

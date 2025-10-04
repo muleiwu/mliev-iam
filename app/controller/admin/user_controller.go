@@ -5,21 +5,20 @@ import (
 	"strings"
 
 	"cnb.cool/mliev/examples/go-web/app/constants"
-	"cnb.cool/mliev/examples/go-web/app/controller"
 	"cnb.cool/mliev/examples/go-web/app/dto"
 	"cnb.cool/mliev/examples/go-web/app/service"
 	"cnb.cool/mliev/examples/go-web/internal/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
-// AdminUserController 管理员用户控制器
-type AdminUserController struct {
-	controller.BaseResponse
+// UserController 管理员用户控制器
+type UserController struct {
+	BaseController
 }
 
 // CreateUser 创建用户（管理员操作）
 // POST /api/admin/users
-func (auc AdminUserController) CreateUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) CreateUser(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -50,7 +49,7 @@ func (auc AdminUserController) CreateUser(c *gin.Context, helper interfaces.Help
 
 // GetUser 获取用户详情（管理员操作）
 // GET /api/admin/users/:id
-func (auc AdminUserController) GetUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUser(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -74,7 +73,7 @@ func (auc AdminUserController) GetUser(c *gin.Context, helper interfaces.HelperI
 
 // UpdateUser 更新用户信息（管理员操作）
 // PUT /api/admin/users/:id
-func (auc AdminUserController) UpdateUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) UpdateUser(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -111,7 +110,7 @@ func (auc AdminUserController) UpdateUser(c *gin.Context, helper interfaces.Help
 
 // DeleteUser 删除用户（管理员操作）
 // DELETE /api/admin/users/:id
-func (auc AdminUserController) DeleteUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) DeleteUser(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -135,7 +134,7 @@ func (auc AdminUserController) DeleteUser(c *gin.Context, helper interfaces.Help
 
 // GetUserList 获取用户列表（管理员操作）
 // GET /api/admin/users
-func (auc AdminUserController) GetUserList(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserList(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.UserQueryRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
@@ -154,7 +153,7 @@ func (auc AdminUserController) GetUserList(c *gin.Context, helper interfaces.Hel
 
 // UpdateUserStatus 更新用户状态（管理员操作）
 // PUT /api/admin/users/:id/status
-func (auc AdminUserController) UpdateUserStatus(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) UpdateUserStatus(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -184,7 +183,7 @@ func (auc AdminUserController) UpdateUserStatus(c *gin.Context, helper interface
 
 // ResetPassword 重置用户密码（管理员操作）
 // PUT /api/admin/users/:id/reset-password
-func (auc AdminUserController) ResetPassword(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) ResetPassword(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -216,7 +215,7 @@ func (auc AdminUserController) ResetPassword(c *gin.Context, helper interfaces.H
 
 // BatchOperation 批量操作用户（管理员操作）
 // POST /api/admin/users/batch
-func (auc AdminUserController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.BatchUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -235,7 +234,7 @@ func (auc AdminUserController) BatchOperation(c *gin.Context, helper interfaces.
 
 // GetUsersByDepartment 根据部门获取用户列表（管理员操作）
 // GET /api/admin/departments/:departmentId/users
-func (auc AdminUserController) GetUsersByDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUsersByDepartment(c *gin.Context, helper interfaces.HelperInterface) {
 	departmentIdStr := c.Param("id")
 	departmentId, err := strconv.ParseUint(departmentIdStr, 10, 32)
 	if err != nil {
@@ -255,7 +254,7 @@ func (auc AdminUserController) GetUsersByDepartment(c *gin.Context, helper inter
 
 // GetActiveUsersCount 获取活跃用户数量统计（管理员操作）
 // GET /api/admin/users/stats/active-count
-func (auc AdminUserController) GetActiveUsersCount(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetActiveUsersCount(c *gin.Context, helper interfaces.HelperInterface) {
 	userService := service.NewUserService(helper.GetDatabase())
 	count, err := userService.GetActiveUsersCount()
 	if err != nil {
