@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -25,29 +26,28 @@ func (occ OIDCClientController) CreateClient(c *gin.Context, helper interfaces.H
 		return
 	}
 
-	// 获取当前管理员用户ID（这里应该从认证中间件获取）
-	// 暂时使用查询参数模拟
-	adminUserIDStr := c.Query("adminUserId")
-	if adminUserIDStr == "" {
+	// 从认证中间件获取当前管理员用户ID
+	adminUserID, exists := c.Get("user_id")
+	if !exists {
 		occ.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
 	}
 
-	adminUserID, err := strconv.ParseUint(adminUserIDStr, 10, 32)
-	if err != nil {
-		occ.Error(c, constants.ErrCodeBadRequest, "管理员用户ID格式错误")
+	userID, ok := adminUserID.(uint)
+	if !ok {
+		occ.Error(c, constants.ErrCodeInternal, "用户ID类型错误")
 		return
 	}
 
 	clientService := service.NewOIDCClientService(helper.GetDatabase())
-	response, err := clientService.CreateClient(&req, uint(adminUserID))
+	response, err := clientService.CreateClient(&req, userID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
 		if strings.Contains(errMsg, "客户端ID已存在") {
 			errCode = constants.ErrCodeConflict
-		} else if strings.Contains(errMsg, "请求参数错误") {
+		} else if strings.Contains(errMsg, "请求参数错误") || strings.Contains(errMsg, "至少需要") || strings.Contains(errMsg, "必须包含") {
 			errCode = constants.ErrCodeBadRequest
 		}
 
@@ -115,7 +115,7 @@ func (occ OIDCClientController) GetClient(c *gin.Context, helper interfaces.Help
 	response, err := clientService.GetClient(uint(id))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
-		if strings.Contains(err.Error(), "客户端不存在") {
+		if errors.Is(err, service.ErrClientNotFound) {
 			errCode = constants.ErrCodeNotFound
 		}
 		occ.Error(c, errCode, err.Error())
@@ -145,15 +145,14 @@ func (occ OIDCClientController) UpdateClient(c *gin.Context, helper interfaces.H
 	response, err := clientService.UpdateClient(uint(id), &req)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
-		errMsg := err.Error()
 
-		if strings.Contains(errMsg, "客户端不存在") {
+		if errors.Is(err, service.ErrClientNotFound) {
 			errCode = constants.ErrCodeNotFound
-		} else if strings.Contains(errMsg, "请求参数错误") {
+		} else if strings.Contains(err.Error(), "请求参数错误") || strings.Contains(err.Error(), "至少需要") || strings.Contains(err.Error(), "必须包含") {
 			errCode = constants.ErrCodeBadRequest
 		}
 
-		occ.Error(c, errCode, errMsg)
+		occ.Error(c, errCode, err.Error())
 		return
 	}
 
@@ -174,7 +173,7 @@ func (occ OIDCClientController) DeleteClient(c *gin.Context, helper interfaces.H
 	err = clientService.DeleteClient(uint(id))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
-		if strings.Contains(err.Error(), "客户端不存在") {
+		if errors.Is(err, service.ErrClientNotFound) {
 			errCode = constants.ErrCodeNotFound
 		}
 		occ.Error(c, errCode, err.Error())

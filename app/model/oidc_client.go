@@ -36,10 +36,10 @@ type OIDCClient struct {
 	Description  string `gorm:"type:text" json:"description"`
 
 	// OIDC 配置
-	RedirectURIs  []string `gorm:"type:json;not null" json:"redirectUris" validate:"required"`
-	GrantTypes    []string `gorm:"type:json;not null" json:"grantTypes" validate:"required"`
-	ResponseTypes []string `gorm:"type:json;not null" json:"responseTypes" validate:"required"`
-	Scopes        []string `gorm:"type:json;not null" json:"scopes" validate:"required"`
+	RedirectURIs  []string `gorm:"type:json;serializer:json;not null" json:"redirectUris" validate:"required"`
+	GrantTypes    []string `gorm:"type:json;serializer:json;not null" json:"grantTypes" validate:"required"`
+	ResponseTypes []string `gorm:"type:json;serializer:json;not null" json:"responseTypes" validate:"required"`
+	Scopes        []string `gorm:"type:json;serializer:json;not null" json:"scopes" validate:"required"`
 
 	// 客户端类型和配置
 	ClientType    string `gorm:"size:20;default:'confidential'" json:"clientType"` // confidential, public
@@ -58,7 +58,7 @@ type OIDCClient struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 扩展属性
-	Attributes map[string]interface{} `gorm:"type:json" json:"attributes,omitempty"`
+	Attributes map[string]interface{} `gorm:"type:json;serializer:json" json:"attributes,omitempty"`
 
 	// 创建者信息
 	CreatedByUserID *uint `gorm:"index" json:"createdByUserId"`

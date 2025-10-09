@@ -16,6 +16,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// Custom errors for better error handling
+var (
+	ErrClientNotFound       = errors.New("OIDC客户端不存在")
+	ErrClientDisabled       = errors.New("客户端已被禁用")
+	ErrInvalidClientSecret  = errors.New("客户端密钥错误")
+	ErrInvalidRedirectURI   = errors.New("无效的重定向URI")
+	ErrClientSecretRequired = errors.New("机密客户端需要提供客户端密钥")
+)
+
 // OIDCClientService OIDC客户端服务
 type OIDCClientService struct {
 	clientDAO *dao.OIDCClientDAO
@@ -48,9 +57,11 @@ func (s *OIDCClientService) CreateClient(req *dto.CreateOIDCClientRequest, creat
 		Description:     req.Description,
 		RedirectURIs:    req.RedirectURIs,
 		GrantTypes:      req.GrantTypes,
+		ResponseTypes:   req.ResponseTypes,
 		Scopes:          req.Scopes,
 		ClientType:      req.ClientType,
 		RequirePKCE:     req.RequirePKCE,
+		Attributes:      make(map[string]interface{}),
 		CreatedByUserID: &creatorID,
 		IsActive:        true,
 		IsVerified:      false,
@@ -62,19 +73,21 @@ func (s *OIDCClientService) CreateClient(req *dto.CreateOIDCClientRequest, creat
 
 	return &dto.OIDCClientWithSecretResponse{
 		OIDCClientResponse: dto.OIDCClientResponse{
-			ID:           client.ID,
-			ClientID:     client.ClientID,
-			Name:         client.Name,
-			Description:  client.Description,
-			RedirectURIs: client.RedirectURIs,
-			GrantTypes:   client.GrantTypes,
-			Scopes:       client.Scopes,
-			ClientType:   client.ClientType,
-			RequirePKCE:  client.RequirePKCE,
-			IsActive:     client.IsActive,
-			IsVerified:   client.IsVerified,
-			CreatedAt:    client.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:    client.UpdatedAt.Format(time.RFC3339),
+			ID:            client.ID,
+			ClientID:      client.ClientID,
+			Name:          client.Name,
+			Description:   client.Description,
+			RedirectURIs:  client.RedirectURIs,
+			GrantTypes:    client.GrantTypes,
+			ResponseTypes: client.ResponseTypes,
+			Scopes:        client.Scopes,
+			ClientType:    client.ClientType,
+			TokenLifetime: client.TokenLifetime,
+			RequirePKCE:   client.RequirePKCE,
+			IsActive:      client.IsActive,
+			IsVerified:    client.IsVerified,
+			CreatedAt:     client.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:     client.UpdatedAt.Format(time.RFC3339),
 		},
 		ClientSecret: clientSecret,
 	}, nil
@@ -85,7 +98,7 @@ func (s *OIDCClientService) GetClient(id uint) (*dto.OIDCClientResponse, error) 
 	client, err := s.clientDAO.GetByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("OIDC客户端不存在")
+			return nil, ErrClientNotFound
 		}
 		return nil, fmt.Errorf("获取OIDC客户端失败: %w", err)
 	}
@@ -98,7 +111,7 @@ func (s *OIDCClientService) GetClientByClientID(clientID string) (*model.OIDCCli
 	client, err := s.clientDAO.GetByClientID(clientID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("OIDC客户端不存在")
+			return nil, ErrClientNotFound
 		}
 		return nil, fmt.Errorf("获取OIDC客户端失败: %w", err)
 	}
@@ -111,7 +124,7 @@ func (s *OIDCClientService) UpdateClient(id uint, req *dto.UpdateOIDCClientReque
 	client, err := s.clientDAO.GetByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("OIDC客户端不存在")
+			return nil, ErrClientNotFound
 		}
 		return nil, fmt.Errorf("获取OIDC客户端失败: %w", err)
 	}
@@ -128,6 +141,9 @@ func (s *OIDCClientService) UpdateClient(id uint, req *dto.UpdateOIDCClientReque
 	}
 	if req.GrantTypes != nil {
 		client.GrantTypes = req.GrantTypes
+	}
+	if req.ResponseTypes != nil {
+		client.ResponseTypes = req.ResponseTypes
 	}
 	if req.Scopes != nil {
 		client.Scopes = req.Scopes
@@ -155,7 +171,7 @@ func (s *OIDCClientService) DeleteClient(id uint) error {
 	_, err := s.clientDAO.GetByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.New("OIDC客户端不存在")
+			return ErrClientNotFound
 		}
 		return fmt.Errorf("获取OIDC客户端失败: %w", err)
 	}
@@ -192,7 +208,7 @@ func (s *OIDCClientService) ValidateClient(clientID, clientSecret string) (*mode
 	}
 
 	if !client.IsActive {
-		return nil, errors.New("客户端已被禁用")
+		return nil, ErrClientDisabled
 	}
 
 	// 对于公开客户端，不需要验证客户端密钥
@@ -202,11 +218,11 @@ func (s *OIDCClientService) ValidateClient(clientID, clientSecret string) (*mode
 
 	// 对于机密客户端，需要验证客户端密钥
 	if clientSecret == "" {
-		return nil, errors.New("机密客户端需要提供客户端密钥")
+		return nil, ErrClientSecretRequired
 	}
 
 	if !s.verifyClientSecret(clientSecret, client.ClientSecret) {
-		return nil, errors.New("客户端密钥错误")
+		return nil, ErrInvalidClientSecret
 	}
 
 	return client, nil
@@ -215,7 +231,7 @@ func (s *OIDCClientService) ValidateClient(clientID, clientSecret string) (*mode
 // ValidateRedirectURI 验证重定向URI
 func (s *OIDCClientService) ValidateRedirectURI(client *model.OIDCClient, redirectURI string) error {
 	if !client.IsRedirectURIValid(redirectURI) {
-		return errors.New("无效的重定向URI")
+		return ErrInvalidRedirectURI
 	}
 	return nil
 }
@@ -278,8 +294,19 @@ func (s *OIDCClientService) validateCreateRequest(req *dto.CreateOIDCClientReque
 		return errors.New("至少需要一个重定向URI")
 	}
 
+	// 验证重定向URI格式
+	for _, uri := range req.RedirectURIs {
+		if err := s.validateRedirectURIFormat(uri); err != nil {
+			return fmt.Errorf("重定向URI格式错误 (%s): %w", uri, err)
+		}
+	}
+
 	if len(req.GrantTypes) == 0 {
 		return errors.New("至少需要一个授权类型")
+	}
+
+	if len(req.ResponseTypes) == 0 {
+		return errors.New("至少需要一个响应类型")
 	}
 
 	if len(req.Scopes) == 0 {
@@ -301,21 +328,67 @@ func (s *OIDCClientService) validateCreateRequest(req *dto.CreateOIDCClientReque
 	return nil
 }
 
+// validateRedirectURIFormat 验证重定向URI格式
+func (s *OIDCClientService) validateRedirectURIFormat(uri string) error {
+	if uri == "" {
+		return errors.New("URI不能为空")
+	}
+
+	// 简单的URL格式验证
+	// 允许 http://, https://, 和自定义scheme://
+	if len(uri) < 7 {
+		return errors.New("URI格式无效")
+	}
+
+	// 检查是否包含scheme
+	hasValidScheme := false
+	validSchemes := []string{"http://", "https://", "custom-scheme://"}
+	for _, scheme := range validSchemes {
+		if len(uri) >= len(scheme) && uri[:len(scheme)] == scheme {
+			hasValidScheme = true
+			break
+		}
+	}
+
+	// 也支持自定义scheme格式 (例如: myapp://)
+	if !hasValidScheme {
+		// 检查是否匹配自定义scheme格式 scheme://
+		schemeEndIdx := -1
+		for i := 0; i < len(uri) && i < 50; i++ { // 限制scheme长度
+			if i+3 < len(uri) && uri[i:i+3] == "://" {
+				schemeEndIdx = i
+				break
+			}
+		}
+		if schemeEndIdx > 0 {
+			hasValidScheme = true
+		}
+	}
+
+	if !hasValidScheme {
+		return errors.New("URI必须包含有效的scheme (http://, https://, 或自定义scheme://)")
+	}
+
+	return nil
+}
+
 // modelToResponse 将模型转换为响应
 func (s *OIDCClientService) modelToResponse(client *model.OIDCClient) *dto.OIDCClientResponse {
 	return &dto.OIDCClientResponse{
-		ID:           client.ID,
-		ClientID:     client.ClientID,
-		Name:         client.Name,
-		Description:  client.Description,
-		RedirectURIs: client.RedirectURIs,
-		GrantTypes:   client.GrantTypes,
-		Scopes:       client.Scopes,
-		ClientType:   client.ClientType,
-		RequirePKCE:  client.RequirePKCE,
-		IsActive:     client.IsActive,
-		IsVerified:   client.IsVerified,
-		CreatedAt:    client.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    client.UpdatedAt.Format(time.RFC3339),
+		ID:            client.ID,
+		ClientID:      client.ClientID,
+		Name:          client.Name,
+		Description:   client.Description,
+		RedirectURIs:  client.RedirectURIs,
+		GrantTypes:    client.GrantTypes,
+		ResponseTypes: client.ResponseTypes,
+		Scopes:        client.Scopes,
+		ClientType:    client.ClientType,
+		TokenLifetime: client.TokenLifetime,
+		RequirePKCE:   client.RequirePKCE,
+		IsActive:      client.IsActive,
+		IsVerified:    client.IsVerified,
+		CreatedAt:     client.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     client.UpdatedAt.Format(time.RFC3339),
 	}
 }

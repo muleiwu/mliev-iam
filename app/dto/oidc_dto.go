@@ -6,42 +6,46 @@ import "time"
 
 // CreateOIDCClientRequest 创建OIDC客户端请求
 type CreateOIDCClientRequest struct {
-	Name         string   `json:"name" binding:"required" validate:"max=100"`
-	Description  string   `json:"description" validate:"max=500"`
-	RedirectURIs []string `json:"redirectUris" binding:"required,min=1"`
-	GrantTypes   []string `json:"grantTypes" binding:"required,min=1"`
-	Scopes       []string `json:"scopes" binding:"required,min=1"`
-	ClientType   string   `json:"clientType" binding:"oneof=confidential public"`
-	RequirePKCE  bool     `json:"requirePkce"`
+	Name          string   `json:"name" binding:"required" validate:"max=100"`
+	Description   string   `json:"description" validate:"max=500"`
+	RedirectURIs  []string `json:"redirectUris" binding:"required,min=1"`
+	GrantTypes    []string `json:"grantTypes" binding:"required,min=1"`
+	ResponseTypes []string `json:"responseTypes" binding:"required,min=1"`
+	Scopes        []string `json:"scopes" binding:"required,min=1"`
+	ClientType    string   `json:"clientType" binding:"oneof=confidential public"`
+	RequirePKCE   bool     `json:"requirePkce"`
 }
 
 // UpdateOIDCClientRequest 更新OIDC客户端请求
 type UpdateOIDCClientRequest struct {
-	Name         *string  `json:"name,omitempty" validate:"max=100"`
-	Description  *string  `json:"description,omitempty" validate:"max=500"`
-	RedirectURIs []string `json:"redirectUris,omitempty" validate:"min=1"`
-	GrantTypes   []string `json:"grantTypes,omitempty" validate:"min=1"`
-	Scopes       []string `json:"scopes,omitempty" validate:"min=1"`
-	ClientType   *string  `json:"clientType,omitempty" validate:"oneof=confidential public"`
-	RequirePKCE  *bool    `json:"requirePkce,omitempty"`
-	IsActive     *bool    `json:"isActive,omitempty"`
+	Name          *string  `json:"name,omitempty" validate:"max=100"`
+	Description   *string  `json:"description,omitempty" validate:"max=500"`
+	RedirectURIs  []string `json:"redirectUris,omitempty" validate:"min=1"`
+	GrantTypes    []string `json:"grantTypes,omitempty" validate:"min=1"`
+	ResponseTypes []string `json:"responseTypes,omitempty" validate:"min=1"`
+	Scopes        []string `json:"scopes,omitempty" validate:"min=1"`
+	ClientType    *string  `json:"clientType,omitempty" validate:"oneof=confidential public"`
+	RequirePKCE   *bool    `json:"requirePkce,omitempty"`
+	IsActive      *bool    `json:"isActive,omitempty"`
 }
 
 // OIDCClientResponse OIDC客户端响应
 type OIDCClientResponse struct {
-	ID           uint     `json:"id"`
-	ClientID     string   `json:"clientId"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	RedirectURIs []string `json:"redirectUris"`
-	GrantTypes   []string `json:"grantTypes"`
-	Scopes       []string `json:"scopes"`
-	ClientType   string   `json:"clientType"`
-	RequirePKCE  bool     `json:"requirePkce"`
-	IsActive     bool     `json:"isActive"`
-	IsVerified   bool     `json:"isVerified"`
-	CreatedAt    string   `json:"createdAt"`
-	UpdatedAt    string   `json:"updatedAt"`
+	ID            uint     `json:"id"`
+	ClientID      string   `json:"clientId"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	RedirectURIs  []string `json:"redirectUris"`
+	GrantTypes    []string `json:"grantTypes"`
+	ResponseTypes []string `json:"responseTypes"`
+	Scopes        []string `json:"scopes"`
+	ClientType    string   `json:"clientType"`
+	TokenLifetime int      `json:"tokenLifetime"`
+	RequirePKCE   bool     `json:"requirePkce"`
+	IsActive      bool     `json:"isActive"`
+	IsVerified    bool     `json:"isVerified"`
+	CreatedAt     string   `json:"createdAt"`
+	UpdatedAt     string   `json:"updatedAt"`
 }
 
 // OIDCClientWithSecretResponse 包含客户端密钥的响应（仅在创建时返回）
