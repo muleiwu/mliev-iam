@@ -151,8 +151,9 @@ type BatchDepartmentRequest struct {
 
 // MoveDepartmentRequest 移动部门请求
 type MoveDepartmentRequest struct {
-	TargetParentID *uint `json:"targetParentId" binding:"omitempty"`
-	Sort           int   `json:"sort" binding:"omitempty"`
+	TargetParentID *uint  `json:"targetParentId" binding:"omitempty"`
+	Sort           int    `json:"sort" binding:"omitempty"`
+	Remark         string `json:"remark" binding:"omitempty"`
 }
 
 // ConvertToDepartmentResponse 将部门模型转换为响应DTO
