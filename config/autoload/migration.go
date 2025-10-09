@@ -22,8 +22,10 @@ func (receiver Migration) Get() []any {
 		&model.UserRole{},
 		&model.RolePermission{},
 
-		// OIDC相关模型
-		&model.OIDCClient{},
+		// 应用管理模型（支持多协议）
+		&model.Application{},
+
+		// OIDC协议相关模型
 		&model.AuthorizationCode{},
 		&model.OIDCToken{},
 

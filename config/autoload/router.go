@@ -104,25 +104,21 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						adminManagers.GET("/:managerId/departments", deps.WrapHandler(AdminController.DepartmentController{}.GetDepartmentsByManager)) // 根据负责人获取部门
 					}
 
-					// OIDC客户端管理路由（管理员）
-					adminOIDC := admin.Group("/oidc", middleware.AdminAuthMiddleware(helper))
+					// 应用管理路由（管理员）- 支持多协议
+					adminApps := admin.Group("/applications", middleware.AdminAuthMiddleware(helper))
 					{
-						// OIDC客户端基础CRUD操作（管理员）
-						adminOIDCClients := adminOIDC.Group("/clients")
-						{
-							adminOIDCClients.POST("", deps.WrapHandler(AdminController.OIDCClientController{}.CreateClient))       // 创建OIDC客户端
-							adminOIDCClients.GET("", deps.WrapHandler(AdminController.OIDCClientController{}.GetClientList))       // 获取OIDC客户端列表
-							adminOIDCClients.GET("/:id", deps.WrapHandler(AdminController.OIDCClientController{}.GetClient))       // 获取OIDC客户端详情
-							adminOIDCClients.PUT("/:id", deps.WrapHandler(AdminController.OIDCClientController{}.UpdateClient))    // 更新OIDC客户端
-							adminOIDCClients.DELETE("/:id", deps.WrapHandler(AdminController.OIDCClientController{}.DeleteClient)) // 删除OIDC客户端
+						// 应用基础CRUD操作（管理员）
+						adminApps.POST("", deps.WrapHandler(AdminController.ApplicationController{}.CreateApplication))       // 创建应用
+						adminApps.GET("", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationList))       // 获取应用列表
+						adminApps.GET("/:id", deps.WrapHandler(AdminController.ApplicationController{}.GetApplication))       // 获取应用详情
+						adminApps.PUT("/:id", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplication))    // 更新应用
+						adminApps.DELETE("/:id", deps.WrapHandler(AdminController.ApplicationController{}.DeleteApplication)) // 删除应用
 
-							// 批量操作（管理员）
-							adminOIDCClients.POST("/batch", deps.WrapHandler(AdminController.OIDCClientController{}.BatchOperation)) // 批量操作OIDC客户端
-						}
+						// 批量操作（管理员）
+						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
 
-						// OIDC统计信息和管理（管理员）
-						adminOIDC.GET("/stats", deps.WrapHandler(AdminController.OIDCClientController{}.GetStats))              // 获取OIDC统计信息
-						adminOIDC.POST("/cleanup", deps.WrapHandler(AdminController.OIDCClientController{}.CleanupExpiredData)) // 清理过期数据
+						// 统计信息（管理员）
+						adminApps.GET("/stats", deps.WrapHandler(AdminController.ApplicationController{}.GetStats)) // 获取应用统计信息
 					}
 				}
 

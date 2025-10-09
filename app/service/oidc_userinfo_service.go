@@ -177,21 +177,21 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse
 	}
 }
 
-// OIDCManagementService OIDC管理服务
+// OIDCManagementService OIDC管理服务（已废弃，使用ApplicationService代替）
 type OIDCManagementService struct {
-	clientService *OIDCClientService
-	tokenDAO      *dao.OIDCTokenDAO
-	authCodeDAO   *dao.AuthorizationCodeDAO
-	db            *gorm.DB
+	appService  *ApplicationService
+	tokenDAO    *dao.OIDCTokenDAO
+	authCodeDAO *dao.AuthorizationCodeDAO
+	db          *gorm.DB
 }
 
 // NewOIDCManagementService 创建新的OIDC管理服务
 func NewOIDCManagementService(db *gorm.DB) *OIDCManagementService {
 	return &OIDCManagementService{
-		clientService: NewOIDCClientService(db),
-		tokenDAO:      dao.NewOIDCTokenDAO(db),
-		authCodeDAO:   dao.NewAuthorizationCodeDAO(db),
-		db:            db,
+		appService:  NewApplicationService(db),
+		tokenDAO:    dao.NewOIDCTokenDAO(db),
+		authCodeDAO: dao.NewAuthorizationCodeDAO(db),
+		db:          db,
 	}
 }
 
@@ -199,26 +199,15 @@ func NewOIDCManagementService(db *gorm.DB) *OIDCManagementService {
 func (s *OIDCManagementService) GetStats() (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
 
-	// 获取客户端统计
-	activeClients, _, err := s.clientService.ListClients(0, 1, boolPtr(true))
+	// 使用ApplicationService获取统计
+	appStats, err := s.appService.GetStats()
 	if err != nil {
 		return nil, err
 	}
 
-	inactiveClients, _, err := s.clientService.ListClients(0, 1, boolPtr(false))
-	if err != nil {
-		return nil, err
-	}
-
-	stats["active_clients"] = len(activeClients)
-	stats["inactive_clients"] = len(inactiveClients)
-
-	// 获取活跃令牌数量
-	activeTokens, err := s.tokenDAO.CountActiveTokens()
-	if err != nil {
-		return nil, err
-	}
-	stats["active_tokens"] = activeTokens
+	stats["active_clients"] = appStats.ActiveApplications
+	stats["inactive_clients"] = appStats.InactiveApplications
+	stats["active_tokens"] = appStats.ActiveTokens
 
 	return stats, nil
 }
