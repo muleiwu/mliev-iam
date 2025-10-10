@@ -62,6 +62,64 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 
 						// 统计信息（管理员）
 						adminUsers.GET("/stats/active-count", deps.WrapHandler(AdminController.UserController{}.GetActiveUsersCount)) // 活跃用户统计
+
+						// 用户角色管理（管理员）
+						adminUsers.POST("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.AssignUserRole))            // 分配角色
+						adminUsers.DELETE("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.RemoveUserRole))          // 移除角色
+						adminUsers.GET("/:id/roles", deps.WrapHandler(AdminController.UserController{}.GetUserRoles))                       // 获取用户角色
+						adminUsers.GET("/:id/with-roles", deps.WrapHandler(AdminController.UserController{}.GetUserWithRoles))              // 获取用户及角色
+						adminUsers.POST("/:id/roles/batch", deps.WrapHandler(AdminController.UserController{}.BatchAssignUserRoles))        // 批量分配角色
+						adminUsers.DELETE("/:id/roles/batch", deps.WrapHandler(AdminController.UserController{}.BatchRemoveUserRoles))      // 批量移除角色
+						adminUsers.PUT("/:id/roles/:roleId/primary", deps.WrapHandler(AdminController.UserController{}.SetUserPrimaryRole)) // 设置主要角色
+						adminUsers.GET("/:id/permissions", deps.WrapHandler(AdminController.UserController{}.GetUserPermissions))           // 获取用户权限
+						adminUsers.GET("/:id/menu-tree", deps.WrapHandler(AdminController.UserController{}.GetUserMenuTree))                // 获取用户菜单树
+					}
+
+					// 角色管理路由（管理员）
+					adminRoles := admin.Group("/roles", middleware.AdminAuthMiddleware(helper))
+					{
+						// 角色基础CRUD操作（管理员）
+						adminRoles.POST("", deps.WrapHandler(AdminController.RoleController{}.CreateRole))       // 创建角色
+						adminRoles.GET("", deps.WrapHandler(AdminController.RoleController{}.GetRoleList))       // 获取角色列表
+						adminRoles.GET("/tree", deps.WrapHandler(AdminController.RoleController{}.GetRoleTree))  // 获取角色树形结构
+						adminRoles.GET("/:id", deps.WrapHandler(AdminController.RoleController{}.GetRole))       // 获取角色详情
+						adminRoles.PUT("/:id", deps.WrapHandler(AdminController.RoleController{}.UpdateRole))    // 更新角色信息
+						adminRoles.DELETE("/:id", deps.WrapHandler(AdminController.RoleController{}.DeleteRole)) // 删除角色
+
+						// 角色状态管理（管理员）
+						adminRoles.PUT("/:id/status", deps.WrapHandler(AdminController.RoleController{}.UpdateRoleStatus)) // 更新角色状态
+
+						// 批量操作（管理员）
+						adminRoles.POST("/batch", deps.WrapHandler(AdminController.RoleController{}.BatchOperation)) // 批量操作角色
+
+						// 角色权限管理（管理员）
+						adminRoles.POST("/:id/permissions", deps.WrapHandler(AdminController.RoleController{}.AssignPermissions)) // 分配权限
+						adminRoles.GET("/:id/permissions", deps.WrapHandler(AdminController.RoleController{}.GetRolePermissions)) // 获取角色权限
+
+						// 统计信息（管理员）
+						adminRoles.GET("/stats", deps.WrapHandler(AdminController.RoleController{}.GetRoleStats)) // 获取角色统计信息
+					}
+
+					// 权限管理路由（管理员）
+					adminPermissions := admin.Group("/permissions", middleware.AdminAuthMiddleware(helper))
+					{
+						// 权限基础CRUD操作（管理员）
+						adminPermissions.POST("", deps.WrapHandler(AdminController.PermissionController{}.CreatePermission))       // 创建权限
+						adminPermissions.GET("", deps.WrapHandler(AdminController.PermissionController{}.GetPermissionList))       // 获取权限列表
+						adminPermissions.GET("/tree", deps.WrapHandler(AdminController.PermissionController{}.GetPermissionTree))  // 获取权限树形结构
+						adminPermissions.GET("/menu-tree", deps.WrapHandler(AdminController.PermissionController{}.GetMenuTree))   // 获取菜单树形结构
+						adminPermissions.GET("/:id", deps.WrapHandler(AdminController.PermissionController{}.GetPermission))       // 获取权限详情
+						adminPermissions.PUT("/:id", deps.WrapHandler(AdminController.PermissionController{}.UpdatePermission))    // 更新权限信息
+						adminPermissions.DELETE("/:id", deps.WrapHandler(AdminController.PermissionController{}.DeletePermission)) // 删除权限
+
+						// 权限状态管理（管理员）
+						adminPermissions.PUT("/:id/status", deps.WrapHandler(AdminController.PermissionController{}.UpdatePermissionStatus)) // 更新权限状态
+
+						// 批量操作（管理员）
+						adminPermissions.POST("/batch", deps.WrapHandler(AdminController.PermissionController{}.BatchOperation)) // 批量操作权限
+
+						// 统计信息（管理员）
+						adminPermissions.GET("/stats", deps.WrapHandler(AdminController.PermissionController{}.GetPermissionStats)) // 获取权限统计信息
 					}
 
 					// 部门管理路由（管理员）
