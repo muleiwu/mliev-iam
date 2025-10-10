@@ -182,7 +182,8 @@ func ConvertToUserRoleResponse(userRole *model.UserRole) UserRoleResponse {
 
 // ConvertToUserRoleResponses 转换为用户角色响应DTO列表
 func ConvertToUserRoleResponses(userRoles []*model.UserRole) []*UserRoleResponse {
-	var responses []*UserRoleResponse
+	// 初始化为空切片而非nil，确保JSON序列化为[]而不是null
+	responses := make([]*UserRoleResponse, 0)
 	for _, userRole := range userRoles {
 		response := ConvertToUserRoleResponse(userRole)
 		responses = append(responses, &response)

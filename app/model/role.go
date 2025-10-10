@@ -62,6 +62,7 @@ type Role struct {
 	ParentID *uint  `gorm:"index" json:"parentId"`
 	Level    int    `gorm:"default:1;not null" json:"level"`
 	Path     string `gorm:"size:500" json:"path"` // 层级路径，如: /1/2/3/
+	Sort     int    `gorm:"default:0" json:"sort"`
 
 	// 权限范围
 	DataScope int    `gorm:"default:1;not null" json:"dataScope"` // 数据权限范围：1全部 2本部门 3本部门及下级 4仅本人

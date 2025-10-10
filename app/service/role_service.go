@@ -303,7 +303,7 @@ func (s *RoleService) BatchOperation(req *dto.BatchRoleRequest) error {
 }
 
 // AssignPermissions 为角色分配权限
-func (s *RoleService) AssignPermissions(roleID uint, req *dto.AssignPermissionsRequest) error {
+func (s *RoleService) AssignPermissions(roleID uint, req *dto.AssignPermissionsRequest, grantedBy uint) error {
 	// 检查角色是否存在
 	_, err := s.roleDao.GetByID(roleID)
 	if err != nil {
@@ -319,7 +319,7 @@ func (s *RoleService) AssignPermissions(roleID uint, req *dto.AssignPermissionsR
 		}
 	}
 
-	return s.roleDao.AssignPermissions(roleID, req.PermissionIDs)
+	return s.roleDao.AssignPermissions(roleID, req.PermissionIDs, grantedBy)
 }
 
 // GetRolePermissions 获取角色的权限列表

@@ -256,8 +256,15 @@ func (rc RoleController) AssignPermissions(c *gin.Context, helper interfaces.Hel
 		return
 	}
 
+	// 获取当前登录用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err = roleService.AssignPermissions(uint(id), &req)
+	err = roleService.AssignPermissions(uint(id), &req, userID.(uint))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()

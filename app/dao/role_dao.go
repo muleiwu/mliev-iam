@@ -229,7 +229,7 @@ func (d *RoleDao) GetRolesByUserID(userID uint) ([]*model.Role, error) {
 }
 
 // AssignPermissions 为角色分配权限
-func (d *RoleDao) AssignPermissions(roleID uint, permissionIDs []uint) error {
+func (d *RoleDao) AssignPermissions(roleID uint, permissionIDs []uint, grantedBy uint) error {
 	// 开启事务
 	return d.db.Transaction(func(tx *gorm.DB) error {
 		// 先删除现有权限关联
@@ -242,6 +242,7 @@ func (d *RoleDao) AssignPermissions(roleID uint, permissionIDs []uint) error {
 			rolePermission := &model.RolePermission{
 				RoleID:       roleID,
 				PermissionID: permissionID,
+				GrantedBy:    grantedBy,
 			}
 			if err := tx.Create(rolePermission).Error; err != nil {
 				return err

@@ -191,7 +191,8 @@ func ConvertToPermissionResponse(permission *model.Permission) PermissionRespons
 
 // ConvertToPermissionResponses 转换为权限响应DTO列表
 func ConvertToPermissionResponses(permissions []*model.Permission) []*PermissionResponse {
-	var responses []*PermissionResponse
+	// 初始化为空切片而非nil，确保JSON序列化为[]而不是null
+	responses := make([]*PermissionResponse, 0)
 	for _, permission := range permissions {
 		response := ConvertToPermissionResponse(permission)
 		responses = append(responses, &response)

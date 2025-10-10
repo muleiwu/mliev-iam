@@ -164,7 +164,8 @@ func ConvertToRoleResponse(role *model.Role) RoleResponse {
 
 // ConvertToRoleResponses 转换为角色响应DTO列表
 func ConvertToRoleResponses(roles []*model.Role) []*RoleResponse {
-	var responses []*RoleResponse
+	// 初始化为空切片而非nil，确保JSON序列化为[]而不是null
+	responses := make([]*RoleResponse, 0)
 	for _, role := range roles {
 		response := ConvertToRoleResponse(role)
 		responses = append(responses, &response)
