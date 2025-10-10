@@ -10,44 +10,44 @@ import (
 
 // CreatePermissionRequest 创建权限请求
 type CreatePermissionRequest struct {
-	Name        string               `json:"name" binding:"required,min=2,max=100" validate:"required"`
-	Code        string               `json:"code" binding:"required,min=2,max=100" validate:"required"`
-	Description string               `json:"description" validate:"max=255"`
-	Type        model.PermissionType `json:"type" binding:"required"`
-	ParentID    *uint                `json:"parentId"`
-	Resource    string               `json:"resource" validate:"max=255"`
-	Action      string               `json:"action" validate:"max=100"`
-	Method      string               `json:"method" validate:"max=20"`
-	URL         string               `json:"url" validate:"max=255"`
-	Component   string               `json:"component" validate:"max=255"`
-	Icon        string               `json:"icon" validate:"max=100"`
-	Redirect    string               `json:"redirect" validate:"max=255"`
-	External    bool                 `json:"external"`
-	Hidden      bool                 `json:"hidden"`
-	KeepAlive   bool                 `json:"keepAlive"`
-	ShowInMenu  bool                 `json:"showInMenu"`
-	Sort        *int                 `json:"sort"`
-	Remark      string               `json:"remark"`
-	Attributes  datatypes.JSON       `json:"attributes,omitempty"`
+	Name        string                `json:"name" binding:"required,min=2,max=100" validate:"required"`
+	Code        string                `json:"code" binding:"required,min=2,max=100" validate:"required"`
+	Description string                `json:"description" validate:"max=255"`
+	Type        *model.PermissionType `json:"type" binding:"required"`
+	ParentID    *uint                 `json:"parentId"`
+	Resource    string                `json:"resource" validate:"max=255"`
+	Action      string                `json:"action" validate:"max=100"`
+	Method      string                `json:"method" validate:"max=20"`
+	URL         string                `json:"url" validate:"max=255"`
+	Component   string                `json:"component" validate:"max=255"`
+	Icon        string                `json:"icon" validate:"max=100"`
+	Redirect    string                `json:"redirect" validate:"max=255"`
+	External    bool                  `json:"external"`
+	Hidden      bool                  `json:"hidden"`
+	KeepAlive   bool                  `json:"keepAlive"`
+	ShowInMenu  bool                  `json:"showInMenu"`
+	Sort        *int                  `json:"sort"`
+	Remark      string                `json:"remark"`
+	Attributes  datatypes.JSON        `json:"attributes,omitempty"`
 }
 
 // UpdatePermissionRequest 更新权限请求
 type UpdatePermissionRequest struct {
-	Name        string         `json:"name" validate:"min=2,max=100"`
-	Description string         `json:"description" validate:"max=255"`
-	Resource    string         `json:"resource" validate:"max=255"`
-	Action      string         `json:"action" validate:"max=100"`
-	Method      string         `json:"method" validate:"max=20"`
-	URL         string         `json:"url" validate:"max=255"`
-	Component   string         `json:"component" validate:"max=255"`
-	Icon        string         `json:"icon" validate:"max=100"`
-	Redirect    string         `json:"redirect" validate:"max=255"`
+	Name        *string        `json:"name" validate:"omitempty,min=2,max=100"`
+	Description *string        `json:"description" validate:"omitempty,max=255"`
+	Resource    *string        `json:"resource" validate:"omitempty,max=255"`
+	Action      *string        `json:"action" validate:"omitempty,max=100"`
+	Method      *string        `json:"method" validate:"omitempty,max=20"`
+	URL         *string        `json:"url" validate:"omitempty,max=255"`
+	Component   *string        `json:"component" validate:"omitempty,max=255"`
+	Icon        *string        `json:"icon" validate:"omitempty,max=100"`
+	Redirect    *string        `json:"redirect" validate:"omitempty,max=255"`
 	External    *bool          `json:"external"`
 	Hidden      *bool          `json:"hidden"`
 	KeepAlive   *bool          `json:"keepAlive"`
 	ShowInMenu  *bool          `json:"showInMenu"`
 	Sort        *int           `json:"sort"`
-	Remark      string         `json:"remark"`
+	Remark      *string        `json:"remark"`
 	Attributes  datatypes.JSON `json:"attributes,omitempty"`
 }
 
@@ -218,7 +218,11 @@ func GetPermissionTypeName(permType model.PermissionType) string {
 
 // ValidatePermissionType 验证权限类型对应的字段
 func ValidatePermissionType(req *CreatePermissionRequest) error {
-	switch req.Type {
+	if req.Type == nil {
+		return fmt.Errorf("权限类型不能为空")
+	}
+
+	switch *req.Type {
 	case model.PermissionTypeMenu:
 		if req.Component == "" && !req.External {
 			return fmt.Errorf("菜单权限必须指定组件路径或设置为外部链接")

@@ -68,7 +68,7 @@ func (s *PermissionService) CreatePermission(req *dto.CreatePermissionRequest) (
 		Name:        req.Name,
 		Code:        req.Code,
 		Description: req.Description,
-		Type:        req.Type,
+		Type:        *req.Type,
 		ParentID:    req.ParentID,
 		Resource:    req.Resource,
 		Action:      req.Action,
@@ -133,67 +133,76 @@ func (s *PermissionService) UpdatePermission(id uint, req *dto.UpdatePermissionR
 		return nil, err
 	}
 
+	// 准备更新的字段
+	updates := make(map[string]interface{})
+
 	// 验证权限名称是否已存在（排除自己）
-	if req.Name != "" && req.Name != permission.Name {
-		exists, err := s.permissionDao.ExistsName(req.Name, id)
+	if req.Name != nil && *req.Name != permission.Name {
+		exists, err := s.permissionDao.ExistsName(*req.Name, id)
 		if err != nil {
 			return nil, fmt.Errorf("检查权限名称失败: %w", err)
 		}
 		if exists {
 			return nil, fmt.Errorf("权限名称已存在")
 		}
-		permission.Name = req.Name
+		updates["name"] = *req.Name
 	}
 
-	// 更新字段
-	if req.Description != "" {
-		permission.Description = req.Description
+	// 更新字段 - 使用指针来区分"未传值"和"传了空值"
+	if req.Description != nil {
+		updates["description"] = *req.Description
 	}
-	if req.Resource != "" {
-		permission.Resource = req.Resource
+	if req.Resource != nil {
+		updates["resource"] = *req.Resource
 	}
-	if req.Action != "" {
-		permission.Action = req.Action
+	if req.Action != nil {
+		updates["action"] = *req.Action
 	}
-	if req.Method != "" {
-		permission.Method = req.Method
+	if req.Method != nil {
+		updates["method"] = *req.Method
 	}
-	if req.URL != "" {
-		permission.URL = req.URL
+	if req.URL != nil {
+		updates["url"] = *req.URL
 	}
-	if req.Component != "" {
-		permission.Component = req.Component
+	if req.Component != nil {
+		updates["component"] = *req.Component
 	}
-	if req.Icon != "" {
-		permission.Icon = req.Icon
+	if req.Icon != nil {
+		updates["icon"] = *req.Icon
 	}
-	if req.Redirect != "" {
-		permission.Redirect = req.Redirect
+	if req.Redirect != nil {
+		updates["redirect"] = *req.Redirect
 	}
 	if req.External != nil {
-		permission.External = *req.External
+		updates["external"] = *req.External
 	}
 	if req.Hidden != nil {
-		permission.Hidden = *req.Hidden
+		updates["hidden"] = *req.Hidden
 	}
 	if req.KeepAlive != nil {
-		permission.KeepAlive = *req.KeepAlive
+		updates["keep_alive"] = *req.KeepAlive
 	}
 	if req.ShowInMenu != nil {
-		permission.ShowInMenu = *req.ShowInMenu
+		updates["show_in_menu"] = *req.ShowInMenu
 	}
 	if req.Sort != nil {
-		permission.Sort = *req.Sort
+		updates["sort"] = *req.Sort
 	}
-	if req.Remark != "" {
-		permission.Remark = req.Remark
+	if req.Remark != nil {
+		updates["remark"] = *req.Remark
 	}
 	if req.Attributes != nil {
-		permission.Attributes = req.Attributes
+		updates["attributes"] = req.Attributes
 	}
 
 	// 保存更新
-	if err := s.permissionDao.Update(permission); err != nil {
+	if err := s.permissionDao.UpdateById(id, updates); err != nil {
+		return nil, err
+	}
+
+	// 重新查询获取完整信息
+	permission, err = s.permissionDao.GetByID(id)
+	if err != nil {
 		return nil, err
 	}
 
