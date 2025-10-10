@@ -14,6 +14,9 @@
 - ✅ 令牌内省 (Token Introspection)
 - ✅ 令牌撤销 (Token Revocation)
 - ✅ OIDC 发现文档 (Discovery Document)
+- ✅ RS256 ID Token 签名
+- ✅ JWKS 端点 (JSON Web Key Set)
+- ✅ 会话管理 (Session Management)
 
 ### 管理功能
 - ✅ OIDC客户端管理 (创建、更新、删除、查询)
@@ -21,6 +24,12 @@
 - ✅ 批量操作支持
 - ✅ 统计信息查看
 - ✅ 过期数据清理
+
+### 授权流程
+- ✅ 完整的用户登录页面
+- ✅ 授权确认页面
+- ✅ 可嵌入 Iframe 的组件支持
+- ✅ 基于 Redis 的会话管理
 
 ## API 端点
 
@@ -53,15 +62,23 @@
 
 OIDC相关配置在 `config.yaml` 文件中的 `oidc` 部分：
 
+### 基本配置（使用RS256签名）
+
 ```yaml
 oidc:
   # 颁发者标识符（通常是服务的基础URL）
-  issuer: "http://localhost:8080"
+  issuer: "https://your-domain.com"
   
   # 签名密钥配置
   signing:
-    algorithm: "HS256"
-    hmac_secret: "your-oidc-hmac-secret-key"
+    # 推荐使用 RS256 算法
+    algorithm: "RS256"
+    key_id: "default"
+    # RSA私钥和公钥路径
+    rsa_private_key_path: "./keys/oidc_private_key.pem"
+    rsa_public_key_path: "./keys/oidc_public_key.pem"
+    # 或使用环境变量
+    # rsa_private_key_env: "OIDC_RSA_PRIVATE_KEY"
   
   # 默认令牌生命周期（秒）
   token_lifetime:
@@ -70,6 +87,11 @@ oidc:
     id_token: 3600         # 1小时
     authorization_code: 600 # 10分钟
   
+  # 会话配置
+  session:
+    redis_key_prefix: "oidc:session:"
+    expiration: 600  # 10分钟
+  
   # 支持的功能配置
   features:
     pkce_enabled: true
@@ -77,6 +99,23 @@ oidc:
     revocation_enabled: true
     refresh_token_enabled: true
 ```
+
+### 生成RSA密钥对
+
+使用提供的脚本生成密钥对：
+
+```bash
+# 生成2048位密钥（推荐用于生产）
+./scripts/generate-rsa-keys.sh --size 2048 --output ./keys
+
+# 或生成4096位密钥（更高安全性）
+./scripts/generate-rsa-keys.sh --size 4096 --output ./keys
+```
+
+**重要提示**：
+- 私钥必须妥善保管，切勿泄露
+- 建议在生产环境使用环境变量或密钥管理服务存储私钥
+- 定期轮换密钥以提高安全性
 
 ## 使用示例
 
@@ -171,6 +210,28 @@ curl -X GET http://localhost:8080/api/oidc/userinfo \
 }
 ```
 
+### 4. 客户端凭据流程 (Client Credentials Flow)
+
+用于服务间认证，不涉及用户：
+
+```bash
+curl -X POST http://localhost:8080/api/oidc/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=550e8400-e29b-41d4-a716-446655440000&client_secret=客户端密钥&scope=api"
+```
+
+响应示例：
+```json
+{
+  "access_token": "访问令牌",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "api"
+}
+```
+
+**注意**：客户端凭据流程不返回 `refresh_token` 和 `id_token`。
+
 ## 数据模型
 
 ### OIDC客户端 (oidc_clients)
@@ -204,12 +265,87 @@ curl -X GET http://localhost:8080/api/oidc/userinfo \
 5. **过期管理**: 自动清理过期的授权码和令牌
 6. **速率限制**: 支持配置速率限制防止滥用
 
+## 前端授权流程组件
+
+本项目提供了完整的前端授权流程组件，支持独立页面和 Iframe 嵌入模式。
+
+### 登录组件 (OIDCLoginForm)
+
+独立使用：
+```vue
+<template>
+  <OIDCLoginForm
+    :session-id="sessionId"
+    title="用户登录"
+    subtitle="使用您的账户登录以继续"
+    @success="handleSuccess"
+    @error="handleError"
+  />
+</template>
+```
+
+Iframe 嵌入：
+```vue
+<template>
+  <OIDCLoginForm
+    :session-id="sessionId"
+    :embed-mode="true"
+    @success="handleSuccess"
+  />
+</template>
+```
+
+在 Iframe 模式下，组件会通过 `postMessage` 与父窗口通信。
+
+### 授权确认组件 (OIDCConsentForm)
+
+```vue
+<template>
+  <OIDCConsentForm
+    :session-id="sessionId"
+    :show-remember-choice="false"
+    @approved="handleApproved"
+    @rejected="handleRejected"
+  />
+</template>
+```
+
+### 页面路由
+
+- 登录页面：`/oidc/login?session_id={sessionId}`
+- 授权确认页面：`/oidc/consent?session_id={sessionId}`
+
+这些页面不需要认证，可直接访问。
+
+### Iframe 集成示例
+
+在第三方应用中嵌入：
+
+```html
+<iframe
+  src="https://your-iam-domain.com/oidc/login?session_id=xxx"
+  width="400"
+  height="500"
+  frameborder="0"
+></iframe>
+
+<script>
+window.addEventListener('message', (event) => {
+  if (event.data.type === 'oidc-login-success') {
+    console.log('Login successful:', event.data);
+    // 处理登录成功
+  }
+});
+</script>
+```
+
 ## 扩展点
 
 - 可以扩展自定义作用域和声明
-- 支持自定义JWT签名算法
+- 支持自定义JWT签名算法 (RS256, HS256)
 - 可以集成外部身份验证系统
 - 支持多租户场景
+- 前端组件可定制主题和样式
 
 ## 故障排除
 

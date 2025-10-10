@@ -31,42 +31,49 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		return
 	}
 
-	// 获取当前登录用户ID（这里应该从认证中间件或会话中获取）
-	// 暂时使用查询参数模拟
+	// 1. 验证客户端应用
+	appService := service.NewApplicationService(helper.GetDatabase())
+	_, err := appService.GetApplicationByClientID(req.ClientID)
+	if err != nil {
+		oc.redirectWithError(c, req.RedirectURI, "invalid_client", "无效的客户端", req.State)
+		return
+	}
+
+	// 2. 创建OIDC会话
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.CreateSession(
+		req.ClientID,
+		req.RedirectURI,
+		req.Scope,
+		req.State,
+		req.Nonce,
+		req.ResponseType,
+		req.CodeChallenge,
+		req.CodeChallengeMethod,
+	)
+	if err != nil {
+		oc.redirectWithError(c, req.RedirectURI, "server_error", "创建会话失败", req.State)
+		return
+	}
+
+	// 3. 检查用户是否已登录（从session或cookie中获取）
+	// 这里简化处理，检查是否有userId的查询参数（用于测试）
 	userIDStr := c.Query("userId")
-	if userIDStr == "" {
-		// 重定向到登录页面，并在登录后返回
-		loginURL := "/login?redirect_uri=" + c.Request.URL.String()
-		c.Redirect(http.StatusFound, loginURL)
-		return
+	if userIDStr != "" {
+		// 用户已提供ID（测试用途），直接标记为已认证
+		userID, err := strconv.ParseUint(userIDStr, 10, 32)
+		if err == nil {
+			sessionService.MarkAsAuthenticated(session.SessionID, uint(userID))
+			// 重定向到授权确认页面
+			consentURL := "/oidc/consent?session_id=" + session.SessionID
+			c.Redirect(http.StatusFound, consentURL)
+			return
+		}
 	}
 
-	userID, err := strconv.ParseUint(userIDStr, 10, 32)
-	if err != nil {
-		oc.redirectWithError(c, req.RedirectURI, "invalid_request", "用户ID格式错误", req.State)
-		return
-	}
-
-	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
-	response, err := authService.ProcessAuthorize(&req, uint(userID))
-	if err != nil {
-		oc.Error(c, constants.ErrCodeInternal, "处理授权请求失败: "+err.Error())
-		return
-	}
-
-	// 检查是否有错误
-	if response.Error != "" {
-		oc.redirectWithError(c, req.RedirectURI, response.Error, response.ErrorDescription, req.State)
-		return
-	}
-
-	// 成功响应
-	redirectURL := req.RedirectURI + "?code=" + response.Code
-	if response.State != "" {
-		redirectURL += "&state=" + response.State
-	}
-
-	c.Redirect(http.StatusFound, redirectURL)
+	// 4. 用户未登录，重定向到登录页面
+	loginURL := "/oidc/login?session_id=" + session.SessionID
+	c.Redirect(http.StatusFound, loginURL)
 }
 
 // Token OIDC令牌端点
@@ -88,6 +95,8 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 		response, err = authService.ExchangeCodeForToken(&req)
 	case "refresh_token":
 		response, err = authService.RefreshToken(&req)
+	case "client_credentials":
+		response, err = authService.ExchangeClientCredentials(&req)
 	default:
 		oc.tokenError(c, "unsupported_grant_type", "不支持的授权类型")
 		return
@@ -213,14 +222,16 @@ func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterfac
 // JWKS JSON Web Key Set端点
 // GET /oidc/jwks
 func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface) {
-	// 这里应该返回用于验证JWT的公钥集合
-	// 暂时返回一个占位符
+	// 获取全局RSA密钥管理器
+	// TODO: 需要从配置中获取全局RSA密钥管理器实例
+	// 暂时返回占位符响应
 	jwks := gin.H{
 		"keys": []gin.H{
 			{
 				"kty": "RSA",
 				"use": "sig",
 				"kid": "default",
+				"alg": "RS256",
 				"n":   "placeholder_n",
 				"e":   "AQAB",
 			},

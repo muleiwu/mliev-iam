@@ -128,7 +128,7 @@ func (j *JWTService) RefreshToken(tokenString string, expirationHours int) (stri
 	}
 
 	// 检查token是否在刷新时间窗口内（例如：过期后30天内仍可刷新）
-	if time.Now().Sub(claims.ExpiresAt.Time) > 30*24*time.Hour {
+	if time.Since(claims.ExpiresAt.Time) > 30*24*time.Hour {
 		return "", errors.New("token过期时间过长，无法刷新")
 	}
 

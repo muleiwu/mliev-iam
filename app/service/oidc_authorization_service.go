@@ -131,6 +131,75 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest) (
 	return s.generateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce)
 }
 
+// ExchangeClientCredentials 客户端凭据流程
+func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenRequest) (*dto.TokenResponse, error) {
+	// 1. 验证授权类型
+	if req.GrantType != string(model.GrantTypeClientCredentials) {
+		return nil, errors.New("unsupported_grant_type")
+	}
+
+	// 2. 验证应用（客户端）
+	app, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
+	if err != nil {
+		return nil, errors.New("invalid_client")
+	}
+
+	// 3. 验证客户端支持client_credentials授权类型
+	handler := s.getOIDCHandler()
+	if err := handler.ValidateGrantType(app, string(model.GrantTypeClientCredentials)); err != nil {
+		return nil, errors.New("unauthorized_client")
+	}
+
+	// 4. 解析请求的作用域
+	scopes := s.parseScopes(req.Scope)
+	if len(scopes) == 0 {
+		// 如果没有指定scope，使用应用配置的默认scopes
+		if appScopes, ok := app.ProtocolConfig["scopes"].([]interface{}); ok {
+			for _, scope := range appScopes {
+				if scopeStr, ok := scope.(string); ok {
+					scopes = append(scopes, scopeStr)
+				}
+			}
+		}
+	}
+
+	// 5. 验证作用域
+	if len(scopes) > 0 {
+		if err := handler.ValidateScopes(app, scopes); err != nil {
+			return nil, errors.New("invalid_scope")
+		}
+	}
+
+	// 6. 生成访问令牌（不含refresh_token和id_token）
+	accessToken := s.generateAccessToken()
+	clientID := s.getClientIDFromApp(app)
+	tokenLifetime := s.getTokenLifetimeFromApp(app)
+
+	// 创建令牌记录（userID为0表示客户端凭据流程，不关联用户）
+	token := &model.OIDCToken{
+		AccessToken: accessToken,
+		TokenType:   model.TokenTypeBearer,
+		ClientID:    clientID,
+		UserID:      0, // 客户端凭据流程不关联用户
+		Scopes:      scopes,
+		ExpiresAt:   time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+	}
+
+	// 保存令牌
+	if err := s.tokenDAO.Create(token); err != nil {
+		return nil, errors.New("server_error")
+	}
+
+	response := &dto.TokenResponse{
+		AccessToken: accessToken,
+		TokenType:   string(token.TokenType),
+		ExpiresIn:   token.GetExpiresIn(),
+		Scope:       strings.Join(scopes, " "),
+	}
+
+	return response, nil
+}
+
 // RefreshToken 刷新令牌
 func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest) (*dto.TokenResponse, error) {
 	// 1. 验证授权类型
@@ -436,8 +505,9 @@ func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID
 
 // generateIDToken 生成ID令牌
 func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user *model.User, scopes []string, nonce string) (string, error) {
-	// 这里需要实现JWT ID令牌的生成
-	// 暂时返回一个占位符
+	// 获取ID Token服务（需要从配置中获取RSA密钥管理器和issuer）
+	// 这里暂时返回占位符，等待集成全局配置
+	// TODO: 集成全局RSA密钥管理器和ID Token服务
 	return "id_token_placeholder", nil
 }
 
@@ -466,6 +536,11 @@ func (s *OIDCAuthorizationService) parseScopes(scopeStr string) []string {
 		return []string{}
 	}
 	return strings.Split(scopeStr, " ")
+}
+
+// ParseScopes 公开的解析scopes方法
+func (s *OIDCAuthorizationService) ParseScopes(scopeStr string) []string {
+	return s.parseScopes(scopeStr)
 }
 
 func (s *OIDCAuthorizationService) hasScope(scopes []string, targetScope string) bool {

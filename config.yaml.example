@@ -83,14 +83,18 @@ oidc:
   
   # 签名密钥配置
   signing:
-    # JWT签名算法，支持 RS256, HS256
-    algorithm: "HS256"
-    # HMAC密钥（用于HS256算法）
-    hmac_secret: "your-oidc-hmac-secret-key"
-    # RSA私钥路径（用于RS256算法）
-    # rsa_private_key_path: "/path/to/private.pem"
+    # JWT签名算法，支持 RS256 (推荐), HS256
+    algorithm: "RS256"
+    # 密钥标识符
+    key_id: "default"
+    # RSA私钥路径（用于RS256算法） - 推荐使用
+    rsa_private_key_path: "./keys/oidc_private_key.pem"
     # RSA公钥路径（用于RS256算法）
-    # rsa_public_key_path: "/path/to/public.pem"
+    rsa_public_key_path: "./keys/oidc_public_key.pem"
+    # 或者使用环境变量存储私钥内容
+    # rsa_private_key_env: "OIDC_RSA_PRIVATE_KEY"
+    # HMAC密钥（用于HS256算法，不推荐用于生产环境）
+    # hmac_secret: "your-oidc-hmac-secret-key"
   
   # 默认令牌生命周期（秒）
   token_lifetime:
@@ -124,6 +128,13 @@ oidc:
     response_types: ["code"]
     # 默认客户端类型
     client_type: "confidential"
+  
+  # 会话配置
+  session:
+    # Redis key前缀
+    redis_key_prefix: "oidc:session:"
+    # 会话过期时间（秒）
+    expiration: 600  # 10分钟
   
   # 安全配置
   security:

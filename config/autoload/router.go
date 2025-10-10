@@ -204,6 +204,11 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
 					oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
 					oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点
+
+					// OIDC 授权流程端点
+					oidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
+					oidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent))      // 授权确认接口
+					oidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
 				}
 			}
 
