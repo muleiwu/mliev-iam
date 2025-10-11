@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"cnb.cool/mliev/examples/go-web/app/dto"
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"gorm.io/gorm"
 )
 
@@ -337,63 +337,89 @@ func (dao *DepartmentDao) BatchUpdateStatus(ids []uint, status model.DepartmentS
 
 // MoveDepartment 移动部门
 func (dao *DepartmentDao) MoveDepartment(id uint, targetParentID *uint, sort int) error {
-	// 获取要移动的部门
-	department, err := dao.GetByID(id)
-	if err != nil {
-		return err
-	}
-
-	// 检查不能移动到自己或自己的子部门下
-	if targetParentID != nil {
-		targetParent, err := dao.GetByID(*targetParentID)
-		if err != nil {
-			return fmt.Errorf("目标父部门不存在")
+	// 开始事务
+	return dao.database.Transaction(func(tx *gorm.DB) error {
+		// 在事务内查询要移动的部门（不使用 Preload，避免关联数据干扰）
+		var department model.Department
+		if err := tx.First(&department, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("部门不存在")
+			}
+			return fmt.Errorf("查询部门失败: %w", err)
 		}
 
-		// 检查目标父部门是否是当前部门的后代
-		if targetParent.Path != "" && department.Path != "" {
-			if len(targetParent.Path) > len(department.Path) &&
-				targetParent.Path[:len(department.Path)] == department.Path {
-				return fmt.Errorf("不能移动到子部门下")
+		// 检查不能移动到自己或自己的子部门下
+		if targetParentID != nil {
+			var targetParent model.Department
+			if err := tx.First(&targetParent, *targetParentID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("目标父部门不存在")
+				}
+				return fmt.Errorf("查询目标父部门失败: %w", err)
+			}
+
+			// 检查目标父部门是否是当前部门的后代
+			if targetParent.Path != "" && department.Path != "" {
+				if len(targetParent.Path) > len(department.Path) &&
+					targetParent.Path[:len(department.Path)] == department.Path {
+					return fmt.Errorf("不能移动到子部门下")
+				}
+			}
+
+			// 检查名称是否冲突
+			var count int64
+			query := tx.Model(&model.Department{}).Where("name = ?", department.Name)
+			if targetParentID != nil {
+				query = query.Where("parent_id = ?", *targetParentID)
+			} else {
+				query = query.Where("parent_id IS NULL")
+			}
+			query = query.Where("id != ?", id)
+			if err := query.Count(&count).Error; err != nil {
+				return fmt.Errorf("检查部门名称失败: %w", err)
+			}
+			if count > 0 {
+				return fmt.Errorf("目标位置已存在同名部门")
 			}
 		}
 
-		// 检查名称是否冲突
-		exists, err := dao.ExistsName(department.Name, targetParentID, id)
-		if err != nil {
-			return err
-		}
-		if exists {
-			return fmt.Errorf("目标位置已存在同名部门")
-		}
-	}
-
-	// 开始事务
-	return dao.database.Transaction(func(tx *gorm.DB) error {
-		// 更新部门信息
+		// 保存原父部门ID
 		oldParentID := department.ParentID
-		department.ParentID = targetParentID
-		department.Sort = sort
 
 		// 重新计算层级和路径
+		var newLevel int
+		var newPath string
 		if targetParentID != nil {
 			var targetParent model.Department
 			if err := tx.First(&targetParent, *targetParentID).Error; err != nil {
 				return fmt.Errorf("获取目标父部门失败: %w", err)
 			}
-			department.Level = targetParent.Level + 1
-			department.Path = fmt.Sprintf("%s/%d", targetParent.Path, department.ID)
+			newLevel = targetParent.Level + 1
+			newPath = fmt.Sprintf("%s/%d", targetParent.Path, department.ID)
 		} else {
-			department.Level = 1
-			department.Path = fmt.Sprintf("/%d", department.ID)
+			newLevel = 1
+			newPath = fmt.Sprintf("/%d", department.ID)
 		}
 
-		if err := tx.Save(department).Error; err != nil {
+		// 使用 Updates 方法明确更新字段（避免 Save 方法的关联数据问题）
+		updates := map[string]interface{}{
+			"parent_id": targetParentID,
+			"sort":      sort,
+			"level":     newLevel,
+			"path":      newPath,
+		}
+
+		if err := tx.Model(&model.Department{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return fmt.Errorf("更新部门信息失败: %w", err)
 		}
 
+		// 重新查询更新后的部门（用于递归更新子部门）
+		if err := tx.First(&department, id).Error; err != nil {
+			return fmt.Errorf("重新查询部门失败: %w", err)
+		}
+
 		// 更新所有子部门的层级和路径
-		if err := dao.updateDescendantsPath(tx, department); err != nil {
+		if err := dao.updateDescendantsPath(tx, &department); err != nil {
 			return err
 		}
 

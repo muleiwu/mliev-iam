@@ -3,7 +3,7 @@ package helper
 import (
 	"sync"
 
-	"cnb.cool/mliev/examples/go-web/internal/interfaces"
+	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/muleiwu/gsr/config_interface"
 	"github.com/muleiwu/gsr/env_interface"
 	"github.com/muleiwu/gsr/logger_interface"

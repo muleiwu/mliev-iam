@@ -3,7 +3,8 @@ package dto
 import (
 	"time"
 
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"gorm.io/datatypes"
 )
 
 // CreateDepartmentRequest 创建部门请求
@@ -32,7 +33,7 @@ type CreateDepartmentRequest struct {
 	DataScope     int                    `json:"dataScope" binding:"omitempty"`
 	DataScopeDesc string                 `json:"dataScopeDesc" validate:"max=255" binding:"omitempty"`
 	EstablishedAt *time.Time             `json:"establishedAt" binding:"omitempty"`
-	Attributes    map[string]interface{} `json:"attributes" binding:"omitempty"`
+	Attributes    datatypes.JSON         `json:"attributes" binding:"omitempty"`
 	Remark        string                 `json:"remark" binding:"omitempty"`
 }
 
@@ -62,7 +63,7 @@ type UpdateDepartmentRequest struct {
 	DataScope     *int                    `json:"dataScope" binding:"omitempty"`
 	DataScopeDesc string                  `json:"dataScopeDesc" validate:"max=255" binding:"omitempty"`
 	EstablishedAt *time.Time              `json:"establishedAt" binding:"omitempty"`
-	Attributes    map[string]interface{}  `json:"attributes" binding:"omitempty"`
+	Attributes    datatypes.JSON          `json:"attributes" binding:"omitempty"`
 	Remark        string                  `json:"remark" binding:"omitempty"`
 }
 
@@ -113,7 +114,7 @@ type DepartmentResponse struct {
 	IsLeaf        bool                   `json:"isLeaf"`
 	HasChildren   bool                   `json:"hasChildren"`
 	EstablishedAt *time.Time             `json:"establishedAt"`
-	Attributes    map[string]interface{} `json:"attributes,omitempty"`
+	Attributes    datatypes.JSON         `json:"attributes,omitempty"`
 	Remark        string                 `json:"remark"`
 	CreatedAt     time.Time              `json:"createdAt"`
 	UpdatedAt     time.Time              `json:"updatedAt"`
@@ -150,8 +151,9 @@ type BatchDepartmentRequest struct {
 
 // MoveDepartmentRequest 移动部门请求
 type MoveDepartmentRequest struct {
-	TargetParentID *uint `json:"targetParentId" binding:"omitempty"`
-	Sort           int   `json:"sort" binding:"omitempty"`
+	TargetParentID *uint  `json:"targetParentId" binding:"omitempty"`
+	Sort           int    `json:"sort" binding:"omitempty"`
+	Remark         string `json:"remark" binding:"omitempty"`
 }
 
 // ConvertToDepartmentResponse 将部门模型转换为响应DTO

@@ -1,0 +1,366 @@
+package protocol
+
+import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// OIDCProtocolHandler OIDC协议处理器
+type OIDCProtocolHandler struct {
+	db *gorm.DB
+}
+
+// NewOIDCProtocolHandler 创建OIDC协议处理器
+func NewOIDCProtocolHandler(db *gorm.DB) *OIDCProtocolHandler {
+	return &OIDCProtocolHandler{db: db}
+}
+
+// ValidateConfig 验证OIDC配置
+func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) error {
+	// 验证重定向URI
+	redirectUris, ok := config["redirectUris"].([]interface{})
+	if !ok || len(redirectUris) == 0 {
+		return errors.New("至少需要一个重定向URI")
+	}
+
+	// 验证重定向URI格式
+	for _, uri := range redirectUris {
+		uriStr, ok := uri.(string)
+		if !ok {
+			return errors.New("重定向URI格式错误")
+		}
+		if err := h.validateRedirectURIFormat(uriStr); err != nil {
+			return fmt.Errorf("重定向URI格式错误 (%s): %w", uriStr, err)
+		}
+	}
+
+	// 验证授权类型
+	grantTypes, ok := config["grantTypes"].([]interface{})
+	if !ok || len(grantTypes) == 0 {
+		return errors.New("至少需要一个授权类型")
+	}
+
+	// 验证响应类型
+	responseTypes, ok := config["responseTypes"].([]interface{})
+	if !ok || len(responseTypes) == 0 {
+		return errors.New("至少需要一个响应类型")
+	}
+
+	// 验证作用域
+	scopes, ok := config["scopes"].([]interface{})
+	if !ok || len(scopes) == 0 {
+		return errors.New("至少需要一个作用域")
+	}
+
+	// 验证作用域必须包含openid
+	hasOpenID := false
+	for _, scope := range scopes {
+		scopeStr, ok := scope.(string)
+		if ok && scopeStr == "openid" {
+			hasOpenID = true
+			break
+		}
+	}
+	if !hasOpenID {
+		return errors.New("OIDC应用的作用域必须包含openid")
+	}
+
+	// 验证客户端类型
+	clientType, ok := config["clientType"].(string)
+	if !ok || (clientType != "confidential" && clientType != "public") {
+		return errors.New("客户端类型必须是 confidential 或 public")
+	}
+
+	return nil
+}
+
+// PrepareConfig 准备OIDC配置（生成ClientID和ClientSecret）
+func (h *OIDCProtocolHandler) PrepareConfig(config map[string]interface{}) (map[string]interface{}, error) {
+	// 生成ClientID
+	clientID := h.generateClientID()
+	config["clientId"] = clientID
+
+	// 生成ClientSecret（并进行哈希）
+	clientSecret := h.generateClientSecret()
+	config["clientSecret"] = h.hashClientSecret(clientSecret)
+
+	// 设置默认的Token有效期（如果未设置）
+	if _, ok := config["tokenLifetime"]; !ok {
+		config["tokenLifetime"] = 3600
+	}
+
+	// 返回包含明文ClientSecret的配置（用于响应）
+	responseConfig := make(map[string]interface{})
+	for k, v := range config {
+		responseConfig[k] = v
+	}
+	responseConfig["clientSecretPlain"] = clientSecret // 用于返回给用户，仅此一次
+
+	return responseConfig, nil
+}
+
+// CreateApplication 创建OIDC应用
+func (h *OIDCProtocolHandler) CreateApplication(app *model.Application) error {
+	// OIDC协议在创建时不需要额外处理
+	// 所有逻辑都在PrepareConfig中完成
+	return nil
+}
+
+// UpdateApplication 更新OIDC应用
+func (h *OIDCProtocolHandler) UpdateApplication(app *model.Application, updates map[string]interface{}) error {
+	// 如果更新了配置，需要验证
+	if protocolConfig, ok := updates["protocolConfig"].(map[string]interface{}); ok {
+		// 合并现有配置和更新
+		currentConfig := app.ProtocolConfig
+		for k, v := range protocolConfig {
+			currentConfig[k] = v
+		}
+
+		// 验证合并后的配置
+		if err := h.ValidateConfig(currentConfig); err != nil {
+			return err
+		}
+
+		app.ProtocolConfig = currentConfig
+	}
+
+	return nil
+}
+
+// DeleteApplication 删除OIDC应用
+func (h *OIDCProtocolHandler) DeleteApplication(id uint) error {
+	// TODO: 在删除应用前，需要撤销所有相关的令牌和授权码
+	// 这里可以添加清理逻辑
+	return nil
+}
+
+// GetProtocolDetails 获取OIDC协议详细信息
+func (h *OIDCProtocolHandler) GetProtocolDetails(app *model.Application) (interface{}, error) {
+	config := app.ProtocolConfig
+
+	// 构造OIDC配置响应（不包含ClientSecret）
+	details := map[string]interface{}{
+		"clientId":      config["clientId"],
+		"redirectUris":  config["redirectUris"],
+		"grantTypes":    config["grantTypes"],
+		"responseTypes": config["responseTypes"],
+		"scopes":        config["scopes"],
+		"clientType":    config["clientType"],
+		"requirePkce":   config["requirePkce"],
+		"tokenLifetime": config["tokenLifetime"],
+	}
+
+	return details, nil
+}
+
+// ValidateClient 验证OIDC客户端凭据
+func (h *OIDCProtocolHandler) ValidateClient(app *model.Application, clientSecret string) error {
+	if app.ProtocolType != string(model.ProtocolTypeOIDC) {
+		return errors.New("不是OIDC应用")
+	}
+
+	if !app.IsActive {
+		return errors.New("应用已被禁用")
+	}
+
+	config := app.ProtocolConfig
+
+	// 获取客户端类型
+	clientType, ok := config["clientType"].(string)
+	if !ok {
+		return errors.New("客户端类型配置错误")
+	}
+
+	// 对于公开客户端，不需要验证客户端密钥
+	if clientType == "public" {
+		return nil
+	}
+
+	// 对于机密客户端，需要验证客户端密钥
+	if clientSecret == "" {
+		return errors.New("机密客户端需要提供客户端密钥")
+	}
+
+	storedSecret, ok := config["clientSecret"].(string)
+	if !ok {
+		return errors.New("客户端密钥配置错误")
+	}
+
+	if !h.verifyClientSecret(clientSecret, storedSecret) {
+		return errors.New("客户端密钥错误")
+	}
+
+	return nil
+}
+
+// ValidateRedirectURI 验证重定向URI
+func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redirectURI string) error {
+	config := app.ProtocolConfig
+	redirectUris, ok := config["redirectUris"].([]interface{})
+	if !ok {
+		return errors.New("重定向URI配置错误")
+	}
+
+	for _, uri := range redirectUris {
+		uriStr, ok := uri.(string)
+		if ok && uriStr == redirectURI {
+			return nil
+		}
+	}
+
+	return errors.New("无效的重定向URI")
+}
+
+// ValidateGrantType 验证授权类型
+func (h *OIDCProtocolHandler) ValidateGrantType(app *model.Application, grantType string) error {
+	config := app.ProtocolConfig
+	grantTypes, ok := config["grantTypes"].([]interface{})
+	if !ok {
+		return errors.New("授权类型配置错误")
+	}
+
+	for _, gt := range grantTypes {
+		gtStr, ok := gt.(string)
+		if ok && gtStr == grantType {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("应用不支持授权类型: %s", grantType)
+}
+
+// ValidateResponseType 验证响应类型
+func (h *OIDCProtocolHandler) ValidateResponseType(app *model.Application, responseType string) error {
+	config := app.ProtocolConfig
+	responseTypes, ok := config["responseTypes"].([]interface{})
+	if !ok {
+		return errors.New("响应类型配置错误")
+	}
+
+	for _, rt := range responseTypes {
+		rtStr, ok := rt.(string)
+		if ok && rtStr == responseType {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("应用不支持响应类型: %s", responseType)
+}
+
+// ValidateScopes 验证作用域
+func (h *OIDCProtocolHandler) ValidateScopes(app *model.Application, requestedScopes []string) error {
+	config := app.ProtocolConfig
+	scopes, ok := config["scopes"].([]interface{})
+	if !ok {
+		return errors.New("作用域配置错误")
+	}
+
+	// 转换为字符串数组
+	availableScopes := make(map[string]bool)
+	for _, scope := range scopes {
+		scopeStr, ok := scope.(string)
+		if ok {
+			availableScopes[scopeStr] = true
+		}
+	}
+
+	// 验证请求的作用域
+	for _, requestedScope := range requestedScopes {
+		if !availableScopes[requestedScope] {
+			return fmt.Errorf("应用不支持作用域: %s", requestedScope)
+		}
+	}
+
+	return nil
+}
+
+// IsPublicClient 检查是否为公开客户端
+func (h *OIDCProtocolHandler) IsPublicClient(app *model.Application) bool {
+	config := app.ProtocolConfig
+	clientType, ok := config["clientType"].(string)
+	return ok && clientType == "public"
+}
+
+// RequiresPKCE 检查是否需要PKCE
+func (h *OIDCProtocolHandler) RequiresPKCE(app *model.Application) bool {
+	config := app.ProtocolConfig
+	requirePkce, ok := config["requirePkce"].(bool)
+	return ok && requirePkce
+}
+
+// 私有方法
+
+// generateClientID 生成客户端ID
+func (h *OIDCProtocolHandler) generateClientID() string {
+	return uuid.New().String()
+}
+
+// generateClientSecret 生成客户端密钥
+func (h *OIDCProtocolHandler) generateClientSecret() string {
+	bytes := make([]byte, 32)
+	rand.Read(bytes)
+	return base64.URLEncoding.EncodeToString(bytes)
+}
+
+// hashClientSecret 哈希客户端密钥
+func (h *OIDCProtocolHandler) hashClientSecret(secret string) string {
+	hash := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(hash[:])
+}
+
+// verifyClientSecret 验证客户端密钥
+func (h *OIDCProtocolHandler) verifyClientSecret(secret, hashedSecret string) bool {
+	hash := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(hash[:]) == hashedSecret
+}
+
+// validateRedirectURIFormat 验证重定向URI格式
+func (h *OIDCProtocolHandler) validateRedirectURIFormat(uri string) error {
+	if uri == "" {
+		return errors.New("URI不能为空")
+	}
+
+	// 简单的URL格式验证
+	if len(uri) < 7 {
+		return errors.New("URI格式无效")
+	}
+
+	// 检查是否包含scheme
+	hasValidScheme := false
+	validSchemes := []string{"http://", "https://"}
+	for _, scheme := range validSchemes {
+		if len(uri) >= len(scheme) && uri[:len(scheme)] == scheme {
+			hasValidScheme = true
+			break
+		}
+	}
+
+	// 也支持自定义scheme格式 (例如: myapp://)
+	if !hasValidScheme {
+		// 检查是否匹配自定义scheme格式 scheme://
+		schemeEndIdx := -1
+		for i := 0; i < len(uri) && i < 50; i++ { // 限制scheme长度
+			if i+3 < len(uri) && uri[i:i+3] == "://" {
+				schemeEndIdx = i
+				break
+			}
+		}
+		if schemeEndIdx > 0 {
+			hasValidScheme = true
+		}
+	}
+
+	if !hasValidScheme {
+		return errors.New("URI必须包含有效的scheme (http://, https://, 或自定义scheme://)")
+	}
+
+	return nil
+}

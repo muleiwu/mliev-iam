@@ -3,6 +3,7 @@ package model
 import (
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -61,6 +62,7 @@ type Role struct {
 	ParentID *uint  `gorm:"index" json:"parentId"`
 	Level    int    `gorm:"default:1;not null" json:"level"`
 	Path     string `gorm:"size:500" json:"path"` // 层级路径，如: /1/2/3/
+	Sort     int    `gorm:"default:0" json:"sort"`
 
 	// 权限范围
 	DataScope int    `gorm:"default:1;not null" json:"dataScope"` // 数据权限范围：1全部 2本部门 3本部门及下级 4仅本人
@@ -72,8 +74,8 @@ type Role struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 扩展属性
-	Attributes map[string]interface{} `gorm:"type:json" json:"attributes,omitempty"`
-	Remark     string                 `gorm:"type:text" json:"remark"`
+	Attributes datatypes.JSON `gorm:"type:json" json:"attributes,omitempty"`
+	Remark     string         `gorm:"type:text" json:"remark"`
 
 	// 关联关系
 	Children    []Role       `gorm:"foreignKey:ParentID" json:"children,omitempty"`

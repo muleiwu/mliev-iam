@@ -3,6 +3,7 @@ package model
 import (
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -101,8 +102,8 @@ type Department struct {
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 扩展属性
-	Attributes map[string]interface{} `gorm:"type:json" json:"attributes,omitempty"`
-	Remark     string                 `gorm:"type:text" json:"remark"`
+	Attributes datatypes.JSON `gorm:"type:json" json:"attributes,omitempty"`
+	Remark     string         `gorm:"type:text" json:"remark"`
 
 	// 关联关系
 	Children []Department `gorm:"foreignKey:ParentID" json:"children,omitempty"`

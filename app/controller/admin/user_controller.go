@@ -4,22 +4,21 @@ import (
 	"strconv"
 	"strings"
 
-	"cnb.cool/mliev/examples/go-web/app/constants"
-	"cnb.cool/mliev/examples/go-web/app/controller"
-	"cnb.cool/mliev/examples/go-web/app/dto"
-	"cnb.cool/mliev/examples/go-web/app/service"
-	"cnb.cool/mliev/examples/go-web/internal/interfaces"
+	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
-// AdminUserController 管理员用户控制器
-type AdminUserController struct {
-	controller.BaseResponse
+// UserController 管理员用户控制器
+type UserController struct {
+	BaseController
 }
 
 // CreateUser 创建用户（管理员操作）
 // POST /api/admin/users
-func (auc AdminUserController) CreateUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) CreateUser(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -50,7 +49,7 @@ func (auc AdminUserController) CreateUser(c *gin.Context, helper interfaces.Help
 
 // GetUser 获取用户详情（管理员操作）
 // GET /api/admin/users/:id
-func (auc AdminUserController) GetUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUser(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -74,7 +73,7 @@ func (auc AdminUserController) GetUser(c *gin.Context, helper interfaces.HelperI
 
 // UpdateUser 更新用户信息（管理员操作）
 // PUT /api/admin/users/:id
-func (auc AdminUserController) UpdateUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) UpdateUser(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -111,7 +110,7 @@ func (auc AdminUserController) UpdateUser(c *gin.Context, helper interfaces.Help
 
 // DeleteUser 删除用户（管理员操作）
 // DELETE /api/admin/users/:id
-func (auc AdminUserController) DeleteUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) DeleteUser(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -135,7 +134,7 @@ func (auc AdminUserController) DeleteUser(c *gin.Context, helper interfaces.Help
 
 // GetUserList 获取用户列表（管理员操作）
 // GET /api/admin/users
-func (auc AdminUserController) GetUserList(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserList(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.UserQueryRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
@@ -154,7 +153,7 @@ func (auc AdminUserController) GetUserList(c *gin.Context, helper interfaces.Hel
 
 // UpdateUserStatus 更新用户状态（管理员操作）
 // PUT /api/admin/users/:id/status
-func (auc AdminUserController) UpdateUserStatus(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) UpdateUserStatus(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -184,7 +183,7 @@ func (auc AdminUserController) UpdateUserStatus(c *gin.Context, helper interface
 
 // ResetPassword 重置用户密码（管理员操作）
 // PUT /api/admin/users/:id/reset-password
-func (auc AdminUserController) ResetPassword(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) ResetPassword(c *gin.Context, helper interfaces.HelperInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -216,7 +215,7 @@ func (auc AdminUserController) ResetPassword(c *gin.Context, helper interfaces.H
 
 // BatchOperation 批量操作用户（管理员操作）
 // POST /api/admin/users/batch
-func (auc AdminUserController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.BatchUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -235,8 +234,8 @@ func (auc AdminUserController) BatchOperation(c *gin.Context, helper interfaces.
 
 // GetUsersByDepartment 根据部门获取用户列表（管理员操作）
 // GET /api/admin/departments/:departmentId/users
-func (auc AdminUserController) GetUsersByDepartment(c *gin.Context, helper interfaces.HelperInterface) {
-	departmentIdStr := c.Param("departmentId")
+func (auc UserController) GetUsersByDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+	departmentIdStr := c.Param("id")
 	departmentId, err := strconv.ParseUint(departmentIdStr, 10, 32)
 	if err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "部门ID格式错误")
@@ -255,7 +254,7 @@ func (auc AdminUserController) GetUsersByDepartment(c *gin.Context, helper inter
 
 // GetActiveUsersCount 获取活跃用户数量统计（管理员操作）
 // GET /api/admin/users/stats/active-count
-func (auc AdminUserController) GetActiveUsersCount(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetActiveUsersCount(c *gin.Context, helper interfaces.HelperInterface) {
 	userService := service.NewUserService(helper.GetDatabase())
 	count, err := userService.GetActiveUsersCount()
 	if err != nil {
@@ -266,4 +265,265 @@ func (auc AdminUserController) GetActiveUsersCount(c *gin.Context, helper interf
 	auc.Success(c, gin.H{
 		"activeUsersCount": count,
 	})
+}
+
+// AssignUserRole 为用户分配角色
+// POST /api/admin/users/:id/roles
+func (auc UserController) AssignUserRole(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	roleIDStr := c.Param("roleId")
+	roleID, err := strconv.ParseUint(roleIDStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "角色ID格式错误")
+		return
+	}
+
+	var req dto.AssignUserRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 从JWT中获取当前管理员ID（假设已经在中间件中设置）
+	adminID := uint(1) // TODO: 从上下文中获取实际的管理员ID
+
+	userService := service.NewUserService(helper.GetDatabase())
+	err = userService.AssignUserRole(uint(userID), uint(roleID), adminID, &req)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		errMsg := err.Error()
+
+		if strings.Contains(errMsg, "用户不存在") {
+			errCode = constants.ErrCodeUserNotFound
+		} else if strings.Contains(errMsg, "角色不存在") {
+			errCode = constants.ErrCodeBadRequest
+		} else if strings.Contains(errMsg, "已分配该角色") {
+			errCode = constants.ErrCodeBadRequest
+		}
+
+		auc.Error(c, errCode, errMsg)
+		return
+	}
+
+	auc.SuccessWithMessage(c, "角色分配成功", nil)
+}
+
+// RemoveUserRole 移除用户角色
+// DELETE /api/admin/users/:id/roles/:roleId
+func (auc UserController) RemoveUserRole(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	roleIDStr := c.Param("roleId")
+	roleID, err := strconv.ParseUint(roleIDStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "角色ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	err = userService.RemoveUserRole(uint(userID), uint(roleID))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if strings.Contains(err.Error(), "不存在") {
+			errCode = constants.ErrCodeNotFound
+		}
+		auc.Error(c, errCode, err.Error())
+		return
+	}
+
+	auc.SuccessWithMessage(c, "角色移除成功", nil)
+}
+
+// GetUserRoles 获取用户的角色列表
+// GET /api/admin/users/:id/roles
+func (auc UserController) GetUserRoles(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	response, err := userService.GetUserRoles(uint(userID))
+	if err != nil {
+		auc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	auc.Success(c, response)
+}
+
+// GetUserWithRoles 获取用户及其角色信息
+// GET /api/admin/users/:id/with-roles
+func (auc UserController) GetUserWithRoles(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	response, err := userService.GetUserWithRoles(uint(userID))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if strings.Contains(err.Error(), "用户不存在") {
+			errCode = constants.ErrCodeUserNotFound
+		}
+		auc.Error(c, errCode, err.Error())
+		return
+	}
+
+	auc.Success(c, response)
+}
+
+// BatchAssignUserRoles 批量分配角色给用户
+// POST /api/admin/users/:id/roles/batch
+func (auc UserController) BatchAssignUserRoles(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	var req dto.BatchAssignUserRolesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 从JWT中获取当前管理员ID
+	adminID := uint(1) // TODO: 从上下文中获取实际的管理员ID
+
+	userService := service.NewUserService(helper.GetDatabase())
+	err = userService.BatchAssignUserRoles(uint(userID), req.RoleIDs, adminID)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		errMsg := err.Error()
+
+		if strings.Contains(errMsg, "用户不存在") {
+			errCode = constants.ErrCodeUserNotFound
+		} else if strings.Contains(errMsg, "角色") && strings.Contains(errMsg, "不存在") {
+			errCode = constants.ErrCodeBadRequest
+		}
+
+		auc.Error(c, errCode, errMsg)
+		return
+	}
+
+	auc.SuccessWithMessage(c, "批量角色分配成功", nil)
+}
+
+// BatchRemoveUserRoles 批量移除用户角色
+// DELETE /api/admin/users/:id/roles/batch
+func (auc UserController) BatchRemoveUserRoles(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	var req dto.BatchRemoveUserRolesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	err = userService.BatchRemoveUserRoles(uint(userID), req.RoleIDs)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if strings.Contains(err.Error(), "用户不存在") {
+			errCode = constants.ErrCodeUserNotFound
+		}
+		auc.Error(c, errCode, err.Error())
+		return
+	}
+
+	auc.SuccessWithMessage(c, "批量角色移除成功", nil)
+}
+
+// SetUserPrimaryRole 设置用户主要角色
+// PUT /api/admin/users/:id/roles/:roleId/primary
+func (auc UserController) SetUserPrimaryRole(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	roleIDStr := c.Param("roleId")
+	roleID, err := strconv.ParseUint(roleIDStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "角色ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	err = userService.SetUserPrimaryRole(uint(userID), uint(roleID))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if strings.Contains(err.Error(), "不存在") {
+			errCode = constants.ErrCodeNotFound
+		}
+		auc.Error(c, errCode, err.Error())
+		return
+	}
+
+	auc.SuccessWithMessage(c, "主要角色设置成功", nil)
+}
+
+// GetUserPermissions 获取用户的权限列表
+// GET /api/admin/users/:id/permissions
+func (auc UserController) GetUserPermissions(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	response, err := userService.GetUserPermissions(uint(userID))
+	if err != nil {
+		auc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	auc.Success(c, response)
+}
+
+// GetUserMenuTree 获取用户菜单树
+// GET /api/admin/users/:id/menu-tree
+func (auc UserController) GetUserMenuTree(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	response, err := userService.GetUserMenuTree(uint(userID))
+	if err != nil {
+		auc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	auc.Success(c, response)
 }

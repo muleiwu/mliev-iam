@@ -3,9 +3,9 @@ package service
 import (
 	"fmt"
 
-	"cnb.cool/mliev/examples/go-web/app/dao"
-	"cnb.cool/mliev/examples/go-web/app/dto"
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"gorm.io/gorm"
 )
 
@@ -373,7 +373,22 @@ func (s *DepartmentService) MoveDepartment(id uint, req *dto.MoveDepartmentReque
 		}
 	}
 
-	return s.departmentDao.MoveDepartment(id, req.TargetParentID, req.Sort)
+	// 调用DAO层移动部门
+	if err := s.departmentDao.MoveDepartment(id, req.TargetParentID, req.Sort); err != nil {
+		return err
+	}
+
+	// 如果有备注，更新备注
+	if req.Remark != "" {
+		updates := map[string]interface{}{
+			"remark": req.Remark,
+		}
+		if err := s.departmentDao.UpdateById(id, updates); err != nil {
+			return fmt.Errorf("更新移动备注失败: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // GetChildrenDepartments 获取子部门列表

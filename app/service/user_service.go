@@ -7,23 +7,27 @@ import (
 	"fmt"
 	"time"
 
-	"cnb.cool/mliev/examples/go-web/app/dao"
-	"cnb.cool/mliev/examples/go-web/app/dto"
-	"cnb.cool/mliev/examples/go-web/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"gorm.io/gorm"
 )
 
 // UserService 用户业务逻辑层
 type UserService struct {
-	userDao  *dao.UserDao
-	database *gorm.DB
+	userDao     *dao.UserDao
+	userRoleDao *dao.UserRoleDao
+	roleDao     *dao.RoleDao
+	database    *gorm.DB
 }
 
 // NewUserService 创建用户服务实例
 func NewUserService(database *gorm.DB) *UserService {
 	return &UserService{
-		userDao:  dao.NewUserDao(database),
-		database: database,
+		userDao:     dao.NewUserDao(database),
+		userRoleDao: dao.NewUserRoleDao(database),
+		roleDao:     dao.NewRoleDao(database),
+		database:    database,
 	}
 }
 
@@ -106,6 +110,16 @@ func (s *UserService) GetUserByID(id uint) (*dto.UserResponse, error) {
 
 	response := dto.ConvertToUserResponse(user)
 	return &response, nil
+}
+
+// GetUserModelByID 根据ID获取用户模型（返回Model，供OIDC使用）
+func (s *UserService) GetUserModelByID(id uint) (*model.User, error) {
+	user, err := s.userDao.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }
 
 // UpdateUser 更新用户信息
@@ -377,13 +391,205 @@ func (s *UserService) ValidateUserForLogin(username, password string) (*dto.User
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 
-	// 更新登录信息
-	user.UpdateLastLogin("") // IP地址在controller层获取
-	if err := s.userDao.Update(user); err != nil {
-		// 登录信息更新失败不影响登录
-		fmt.Printf("更新登录信息失败: %v\n", err)
-	}
-
 	response := dto.ConvertToUserResponse(user)
 	return &response, nil
+}
+
+// ============= RBAC权限相关方法 =============
+
+// CheckUserURLPermission 检查用户是否有URL访问权限
+func (s *UserService) CheckUserURLPermission(userID uint, path, method string) (bool, error) {
+	// 获取用户角色
+	userRoles, err := s.userRoleDao.GetByUserID(userID)
+	if err != nil {
+		return false, err
+	}
+
+	if len(userRoles) == 0 {
+		return false, nil
+	}
+
+	// 获取角色ID列表
+	roleIDs := make([]uint, len(userRoles))
+	for i, ur := range userRoles {
+		if !ur.IsActive {
+			continue
+		}
+		roleIDs[i] = ur.RoleID
+	}
+
+	// 检查角色是否有相应的URL权限
+	permissionDao := dao.NewPermissionDao(s.database)
+	hasPermission, err := permissionDao.CheckRoleURLPermission(roleIDs, path, method)
+	if err != nil {
+		return false, err
+	}
+
+	return hasPermission, nil
+}
+
+// CheckUserPermission 检查用户是否有特定权限
+func (s *UserService) CheckUserPermission(userID uint, permissionCode string) (bool, error) {
+	// 获取用户角色
+	userRoles, err := s.userRoleDao.GetByUserID(userID)
+	if err != nil {
+		return false, err
+	}
+
+	if len(userRoles) == 0 {
+		return false, nil
+	}
+
+	// 获取活跃角色ID列表
+	roleIDs := make([]uint, 0, len(userRoles))
+	for _, ur := range userRoles {
+		if ur.IsActive {
+			roleIDs = append(roleIDs, ur.RoleID)
+		}
+	}
+
+	if len(roleIDs) == 0 {
+		return false, nil
+	}
+
+	// 检查角色是否有相应的权限
+	permissionDao := dao.NewPermissionDao(s.database)
+	hasPermission, err := permissionDao.CheckRolePermission(roleIDs, permissionCode)
+	if err != nil {
+		return false, err
+	}
+
+	return hasPermission, nil
+}
+
+// GetUserRoles 获取用户角色列表
+func (s *UserService) GetUserRoles(userID uint) ([]model.Role, error) {
+	// 获取用户角色关联
+	userRoles, err := s.userRoleDao.GetByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(userRoles) == 0 {
+		return []model.Role{}, nil
+	}
+
+	// 获取活跃角色ID列表
+	roleIDs := make([]uint, 0, len(userRoles))
+	for _, ur := range userRoles {
+		if ur.IsActive {
+			roleIDs = append(roleIDs, ur.RoleID)
+		}
+	}
+
+	if len(roleIDs) == 0 {
+		return []model.Role{}, nil
+	}
+
+	// 获取角色详情
+	roles, err := s.roleDao.GetByIDs(roleIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	return roles, nil
+}
+
+// ============= 用户角色管理方法 =============
+
+// AssignUserRole 为用户分配角色
+func (s *UserService) AssignUserRole(userID, roleID, assignedBy uint, req *dto.AssignUserRoleRequest) error {
+	return s.userRoleDao.AssignRole(userID, roleID, assignedBy, req)
+}
+
+// RemoveUserRole 移除用户角色
+func (s *UserService) RemoveUserRole(userID, roleID uint) error {
+	return s.userRoleDao.RemoveRole(userID, roleID)
+}
+
+// GetUserWithRoles 获取用户及其角色信息
+func (s *UserService) GetUserWithRoles(userID uint) (*dto.UserResponse, error) {
+	// 获取用户信息
+	user, err := s.userDao.GetByID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 构建响应
+	response := dto.ConvertToUserResponse(user)
+
+	// 这里可以添加角色信息到响应中
+	// 获取用户角色信息如果需要的话
+	// userRoles, _ := s.userRoleDao.GetByUserID(userID)
+	// response.Roles = userRoles // 需要在DTO中添加Roles字段
+
+	return &response, nil
+}
+
+// BatchAssignUserRoles 批量分配角色给用户
+func (s *UserService) BatchAssignUserRoles(userID uint, roleIDs []uint, assignedBy uint) error {
+	return s.userRoleDao.BatchAssignRoles(userID, roleIDs, assignedBy)
+}
+
+// BatchRemoveUserRoles 批量移除用户角色
+func (s *UserService) BatchRemoveUserRoles(userID uint, roleIDs []uint) error {
+	return s.userRoleDao.BatchRemoveRoles(userID, roleIDs)
+}
+
+// SetUserPrimaryRole 设置用户主要角色
+func (s *UserService) SetUserPrimaryRole(userID, roleID uint) error {
+	return s.userRoleDao.SetPrimaryRole(userID, roleID)
+}
+
+// GetUserPermissions 获取用户权限列表
+func (s *UserService) GetUserPermissions(userID uint) ([]*model.Permission, error) {
+	// 获取用户角色
+	userRoles, err := s.userRoleDao.GetByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(userRoles) == 0 {
+		return []*model.Permission{}, nil
+	}
+
+	// 获取活跃角色ID列表
+	roleIDs := make([]uint, 0, len(userRoles))
+	for _, ur := range userRoles {
+		if ur.IsActive {
+			roleIDs = append(roleIDs, ur.RoleID)
+		}
+	}
+
+	if len(roleIDs) == 0 {
+		return []*model.Permission{}, nil
+	}
+
+	// 获取角色权限
+	permissionDao := dao.NewPermissionDao(s.database)
+	permissions, err := permissionDao.GetByRoleIDs(roleIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	return permissions, nil
+}
+
+// GetUserMenuTree 获取用户菜单树
+func (s *UserService) GetUserMenuTree(userID uint) ([]*model.Permission, error) {
+	// 获取用户所有权限
+	permissions, err := s.GetUserPermissions(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 过滤出菜单权限并返回树形结构
+	menuPermissions := make([]*model.Permission, 0)
+	for _, perm := range permissions {
+		if perm.Type == model.PermissionTypeMenu && perm.ShowInMenu {
+			menuPermissions = append(menuPermissions, perm)
+		}
+	}
+
+	return menuPermissions, nil
 }
