@@ -78,7 +78,6 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		Nickname:     req.Nickname,
 		RealName:     req.RealName,
 		Avatar:       req.Avatar,
-		Password:     req.Password, // 这里存储的是明文密码，实际应该清除
 		Salt:         salt,
 		PasswordHash: passwordHash,
 		Status:       model.UserStatusInactive,
@@ -92,9 +91,6 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 	if err := s.userDao.Create(user); err != nil {
 		return nil, err
 	}
-
-	// 清除明文密码
-	user.Password = ""
 
 	// 转换为响应DTO
 	response := dto.ConvertToUserResponse(user)

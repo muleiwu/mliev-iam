@@ -44,8 +44,6 @@ type User struct {
 	RealName string `gorm:"size:50" json:"realName" validate:"max=50"`
 	Avatar   string `gorm:"size:255" json:"avatar" validate:"max=255"`
 
-	// 认证信息
-	Password     string `gorm:"size:100;not null" json:"-" validate:"required,min=6"`
 	Salt         string `gorm:"size:32" json:"-"`
 	PasswordHash string `gorm:"size:100" json:"-"`
 
