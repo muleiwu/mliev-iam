@@ -288,7 +288,6 @@ func (receiver *Migration) createDefaultAdmin(db any) error {
 		Status:       model.UserStatusActive,
 		IsActivated:  true,
 		IsVerified:   true,
-		DepartmentID: &adminDept.ID,
 		LoginCount:   0,
 		FailureCount: 0,
 		Remark:       "系统默认管理员账户",
@@ -296,6 +295,24 @@ func (receiver *Migration) createDefaultAdmin(db any) error {
 
 	if err := gormDB.Create(admin).Error; err != nil {
 		return fmt.Errorf("创建默认管理员账户失败: %w", err)
+	}
+
+	// 建立用户和部门的关联关系（通过 user_departments 表）
+	now := time.Now()
+	userDepartment := &model.UserDepartment{
+		UserID:       admin.ID,
+		DepartmentID: adminDept.ID,
+		Position:     "系统管理员",
+		Type:         model.UserDepartmentTypeLeader,
+		IsActive:     true,
+		IsPrimary:    true,
+		Sort:         0,
+		JoinedAt:     &now,
+		Remark:       "系统默认管理员部门关联",
+	}
+
+	if err := gormDB.Create(userDepartment).Error; err != nil {
+		return fmt.Errorf("建立管理员部门关联失败: %w", err)
 	}
 
 	// 为管理员分配超级管理员角色

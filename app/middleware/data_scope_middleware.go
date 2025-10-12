@@ -101,7 +101,11 @@ func ApplyDataScope(db *gorm.DB, c *gin.Context, tableName string) *gorm.DB {
 		userDepartmentID := getUserDepartmentID(userID, db)
 		if userDepartmentID > 0 {
 			if tableName == "users" {
-				return db.Where("department_id = ?", userDepartmentID)
+				// 通过 user_departments 表关联查询
+				return db.Where("users.id IN (?)",
+					db.Table("user_departments").
+						Select("user_id").
+						Where("department_id = ? AND is_active = ?", userDepartmentID, true))
 			} else {
 				return db.Where(tableName+".department_id = ?", userDepartmentID)
 			}
@@ -116,7 +120,11 @@ func ApplyDataScope(db *gorm.DB, c *gin.Context, tableName string) *gorm.DB {
 			departmentIDs := getDepartmentAndSubIDs(userDepartmentID, db)
 			if len(departmentIDs) > 0 {
 				if tableName == "users" {
-					return db.Where("department_id IN ?", departmentIDs)
+					// 通过 user_departments 表关联查询
+					return db.Where("users.id IN (?)",
+						db.Table("user_departments").
+							Select("user_id").
+							Where("department_id IN ? AND is_active = ?", departmentIDs, true))
 				} else {
 					return db.Where(tableName+".department_id IN ?", departmentIDs)
 				}
@@ -154,7 +162,8 @@ func getMaxDataScope(userID uint, db *gorm.DB) int {
 	}
 
 	// 找到最大的数据权限范围（数值越小，权限越大）
-	for _, userRole := range userRoles {
+	for i := range userRoles {
+		userRole := &userRoles[i]
 		if userRole.Role.ID != 0 && userRole.Role.IsEnabled() {
 			// 优先使用用户角色关联中的数据权限范围
 			roleDataScope := userRole.DataScope
@@ -172,18 +181,21 @@ func getMaxDataScope(userID uint, db *gorm.DB) int {
 	return maxDataScope
 }
 
-// getUserDepartmentID 获取用户的部门ID
+// getUserDepartmentID 获取用户的主部门ID（通过 user_departments 关联表）
 func getUserDepartmentID(userID uint, db *gorm.DB) uint {
-	var user model.User
-	if err := db.Select("department_id").First(&user, userID).Error; err != nil {
-		return 0
+	var userDept model.UserDepartment
+	// 查询用户的主部门
+	if err := db.Where("user_id = ? AND is_primary = ? AND is_active = ?", userID, true, true).
+		First(&userDept).Error; err != nil {
+		// 如果没有主部门，查询第一个活跃的部门
+		if err := db.Where("user_id = ? AND is_active = ?", userID, true).
+			Order("sort ASC").
+			First(&userDept).Error; err != nil {
+			return 0
+		}
 	}
 
-	if user.DepartmentID == nil {
-		return 0
-	}
-
-	return *user.DepartmentID
+	return userDept.DepartmentID
 }
 
 // getDepartmentAndSubIDs 获取部门及其所有下级部门ID
@@ -278,7 +290,9 @@ func GetDataScopeCondition(userID uint, db *gorm.DB, tableName string) (string, 
 		userDepartmentID := getUserDepartmentID(userID, db)
 		if userDepartmentID > 0 {
 			if tableName == "users" {
-				return "department_id = ?", []interface{}{userDepartmentID}
+				// 通过 user_departments 表关联查询
+				return "users.id IN (SELECT user_id FROM user_departments WHERE department_id = ? AND is_active = ?)",
+					[]interface{}{userDepartmentID, true}
 			} else {
 				return tableName + ".department_id = ?", []interface{}{userDepartmentID}
 			}
@@ -292,7 +306,9 @@ func GetDataScopeCondition(userID uint, db *gorm.DB, tableName string) (string, 
 			departmentIDs := getDepartmentAndSubIDs(userDepartmentID, db)
 			if len(departmentIDs) > 0 {
 				if tableName == "users" {
-					return "department_id IN ?", []interface{}{departmentIDs}
+					// 通过 user_departments 表关联查询
+					return "users.id IN (SELECT user_id FROM user_departments WHERE department_id IN ? AND is_active = ?)",
+						[]interface{}{departmentIDs, true}
 				} else {
 					return tableName + ".department_id IN ?", []interface{}{departmentIDs}
 				}

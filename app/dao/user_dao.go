@@ -136,9 +136,6 @@ func (dao *UserDao) List(req *dto.UserQueryRequest) ([]model.User, int64, error)
 	if req.Status != nil {
 		query = query.Where("status = ?", *req.Status)
 	}
-	if req.DepartmentID != nil {
-		query = query.Where("department_id = ?", *req.DepartmentID)
-	}
 	if req.Keyword != "" {
 		keyword := "%" + req.Keyword + "%"
 		query = query.Where(
@@ -269,9 +266,14 @@ func (dao *UserDao) BatchUpdateStatus(ids []uint, status model.UserStatus) error
 }
 
 // GetUsersByDepartment 根据部门ID获取用户列表
+// 现在通过 user_departments 关联表查询
 func (dao *UserDao) GetUsersByDepartment(departmentID uint) ([]model.User, error) {
 	var users []model.User
-	if err := dao.database.Where("department_id = ?", departmentID).Find(&users).Error; err != nil {
+	// 通过 user_departments 表关联查询
+	if err := dao.database.
+		Joins("JOIN user_departments ON users.id = user_departments.user_id").
+		Where("user_departments.department_id = ? AND user_departments.is_active = ?", departmentID, true).
+		Find(&users).Error; err != nil {
 		return nil, fmt.Errorf("查询部门用户失败: %w", err)
 	}
 	return users, nil

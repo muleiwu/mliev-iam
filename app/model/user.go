@@ -66,10 +66,9 @@ type User struct {
 	Attributes JSONObject `gorm:"type:json" json:"attributes,omitempty"`
 	Remark     string     `gorm:"type:text" json:"remark"`
 
-	// 部门和角色关联（外键关联）
-	DepartmentID *uint `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"departmentId"`
-	// Department   *Department `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
-	// Roles        []Role      `gorm:"many2many:user_roles;" json:"roles,omitempty"`
+	// 关联关系（通过独立关联表）
+	// Departments  []Department     `gorm:"many2many:user_departments;" json:"departments,omitempty"`
+	// Roles        []Role           `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 }
 
 // TableName returns the table name for User model.

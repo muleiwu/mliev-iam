@@ -83,7 +83,6 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		Status:       model.UserStatusInactive,
 		IsActivated:  false,
 		IsVerified:   false,
-		DepartmentID: req.DepartmentID,
 		Remark:       req.Remark,
 	}
 
@@ -159,9 +158,6 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	}
 	if req.Avatar != "" {
 		user.Avatar = req.Avatar
-	}
-	if req.DepartmentID != nil {
-		user.DepartmentID = req.DepartmentID
 	}
 	if req.Remark != "" {
 		user.Remark = req.Remark
