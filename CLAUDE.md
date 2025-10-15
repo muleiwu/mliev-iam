@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MLiev IAM 是一个基于 Go 语言开发的企业级身份认证与访问管理（IAM）系统，支持单点登录（SSO）功能。项目采用分层架构设计，使用 Gin 框架、GORM ORM 和自研的轻量级依赖注入框架。
 
+### 技术栈
+- **Go 版本**: 1.25.0 (现代 Go 特性)
+- **Web 框架**: Gin v1.10.1
+- **ORM**: GORM v1.31.0
+- **数据库**: MySQL/PostgreSQL/SQLite
+- **缓存**: Redis v9.14.0
+- **日志**: Zap v1.27.0
+- **配置**: Viper v1.21.0
+- **静态资源**: Go embed.FS (内嵌)
+- **OIDC**: 完整的 OAuth2/OIDC 支持
+
 ## 开发命令
 
 ### 基本命令
@@ -25,11 +36,14 @@ go mod tidy
 # 生成RSA密钥对（用于OIDC）
 openssl genrsa -out keys/oidc_private_key.pem 2048
 openssl rsa -in keys/oidc_private_key.pem -pubout -out keys/oidc_public_key.pem
+
+# 测试命令
+go test ./...
 ```
 
 ### Docker 命令
 ```bash
-# 构建镜像
+# 构建镜像（注意：当前Dockerfile配置可能与SQLite不兼容）
 docker build -t mliev-iam .
 
 # 运行容器
@@ -166,3 +180,5 @@ mliev-iam/
 4. 权限验证统一使用中间件处理
 5. 配置文件中的敏感信息建议使用环境变量
 6. OIDC 功能需要正确配置RSA密钥对（使用RS256时）
+7. 项目使用 Go 1.25.0，启用了现代 Go 特性和 embed 功能
+8. 静态资源通过 embed.FS 内嵌到二进制文件中
