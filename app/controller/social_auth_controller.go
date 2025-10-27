@@ -1,0 +1,166 @@
+package controller
+
+import (
+	"strconv"
+
+	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	"github.com/gin-gonic/gin"
+)
+
+// SocialAuthController 社会化登录控制器（用户端）
+type SocialAuthController struct {
+	BaseResponse
+}
+
+// GetEnabledProviders 获取启用的提供商列表（公开接口）
+// GET /api/social/providers
+func (sc SocialAuthController) GetEnabledProviders(c *gin.Context, helper interfaces.HelperInterface) {
+	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providers, err := providerService.GetEnabledProviders()
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	sc.Success(c, providers)
+}
+
+// InitiateAuth 发起OAuth授权
+// GET /api/social/auth/:provider
+func (sc SocialAuthController) InitiateAuth(c *gin.Context, helper interfaces.HelperInterface) {
+	providerIdentifier := c.Param("provider")
+	if providerIdentifier == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase())
+	response, err := authService.GetAuthURL(providerIdentifier)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	// 重定向到OAuth授权页面
+	c.Redirect(302, response.AuthURL)
+}
+
+// HandleCallback 处理OAuth回调
+// GET /api/social/callback/:provider
+func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.HelperInterface) {
+	providerIdentifier := c.Param("provider")
+	code := c.Query("code")
+	state := c.Query("state")
+
+	if providerIdentifier == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
+		return
+	}
+	if code == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "授权码不能为空")
+		return
+	}
+	if state == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "state参数不能为空")
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase())
+	response, err := authService.HandleCallback(providerIdentifier, code, state)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	if response.IsNewUser {
+		sc.SuccessWithMessage(c, "注册并登录成功", response)
+	} else {
+		sc.SuccessWithMessage(c, "登录成功", response)
+	}
+}
+
+// BindAccount 绑定社交账号（需要认证）
+// POST /api/social/bind/:provider
+func (sc SocialAuthController) BindAccount(c *gin.Context, helper interfaces.HelperInterface) {
+	// 从上下文获取当前用户ID（由认证中间件设置）
+	userID, exists := c.Get("userID")
+	if !exists {
+		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
+		return
+	}
+
+	providerIdentifier := c.Param("provider")
+	code := c.Query("code")
+	state := c.Query("state")
+
+	if providerIdentifier == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
+		return
+	}
+	if code == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "授权码不能为空")
+		return
+	}
+	if state == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "state参数不能为空")
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase())
+	err := authService.BindSocialAccount(userID.(uint), providerIdentifier, code, state)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	sc.SuccessWithMessage(c, "绑定成功", nil)
+}
+
+// UnbindAccount 解绑社交账号（需要认证）
+// DELETE /api/social/unbind/:accountId
+func (sc SocialAuthController) UnbindAccount(c *gin.Context, helper interfaces.HelperInterface) {
+	// 从上下文获取当前用户ID
+	userID, exists := c.Get("userID")
+	if !exists {
+		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
+		return
+	}
+
+	accountIDStr := c.Param("accountId")
+	accountID, err := strconv.ParseUint(accountIDStr, 10, 32)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeBadRequest, "无效的账号ID")
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase())
+	err = authService.UnbindSocialAccount(userID.(uint), uint(accountID))
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	sc.SuccessWithMessage(c, "解绑成功", nil)
+}
+
+// GetUserSocialAccounts 获取当前用户的社交账号列表（需要认证）
+// GET /api/user/social-accounts
+func (sc SocialAuthController) GetUserSocialAccounts(c *gin.Context, helper interfaces.HelperInterface) {
+	// 从上下文获取当前用户ID
+	userID, exists := c.Get("userID")
+	if !exists {
+		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
+		return
+	}
+
+	accountService := service.NewUserSocialAccountService(helper.GetDatabase())
+	accounts, err := accountService.GetUserSocialAccounts(userID.(uint))
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	sc.Success(c, accounts)
+}

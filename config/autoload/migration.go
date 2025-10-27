@@ -30,6 +30,10 @@ func (receiver Migration) Get() []any {
 		&model.AuthorizationCode{},
 		&model.OIDCToken{},
 
+		// 社会化登录相关模型
+		&model.SocialProvider{},    // 社会化登录提供商配置表
+		&model.UserSocialAccount{}, // 用户社交账号绑定表
+
 		// 测试模型（可选）
 		//&model.TestDemo{},
 	}

@@ -181,6 +181,23 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 统计信息（管理员）
 						adminApps.GET("/stats", deps.WrapHandler(AdminController.ApplicationController{}.GetStats)) // 获取应用统计信息
 					}
+
+					// 社会化登录提供商管理路由（管理员）
+					adminSocialProviders := admin.Group("/social-providers", middleware.AdminAuthMiddleware(helper))
+					{
+						// 提供商基础CRUD操作（管理员）
+						adminSocialProviders.POST("", deps.WrapHandler(AdminController.SocialProviderController{}.CreateProvider))       // 创建提供商
+						adminSocialProviders.GET("", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderList))       // 获取提供商列表
+						adminSocialProviders.GET("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.GetProvider))       // 获取提供商详情
+						adminSocialProviders.PUT("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.UpdateProvider))    // 更新提供商
+						adminSocialProviders.DELETE("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.DeleteProvider)) // 删除提供商
+
+						// 批量操作（管理员）
+						adminSocialProviders.POST("/batch", deps.WrapHandler(AdminController.SocialProviderController{}.BatchOperation)) // 批量操作提供商
+
+						// 统计信息（管理员）
+						adminSocialProviders.GET("/stats", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderStats)) // 获取提供商统计信息
+					}
 				}
 
 				// 普通用户路由组
@@ -195,6 +212,23 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 
 					// 用户密码管理
 					user.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
+
+					// 用户社交账号管理（需要认证）
+					user.GET("/social-accounts", deps.WrapHandler(controller.SocialAuthController{}.GetUserSocialAccounts)) // 获取已绑定社交账号
+				}
+
+				// 社会化登录路由组
+				social := api.Group("/social")
+				{
+					// 公开端点
+					social.GET("/providers", deps.WrapHandler(controller.SocialAuthController{}.GetEnabledProviders))     // 获取可用提供商列表
+					social.GET("/auth/:provider", deps.WrapHandler(controller.SocialAuthController{}.InitiateAuth))       // 发起OAuth授权
+					social.GET("/callback/:provider", deps.WrapHandler(controller.SocialAuthController{}.HandleCallback)) // OAuth回调处理
+
+					// 需要认证的端点
+					// 注意：绑定和解绑需要添加认证中间件
+					social.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
+					social.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
 				}
 
 				// OIDC 路由组（公开端点）

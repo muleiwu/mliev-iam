@@ -1,0 +1,405 @@
+package service
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"time"
+
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"golang.org/x/oauth2"
+	"gorm.io/gorm"
+)
+
+// SocialAuthService 社会化登录认证服务
+type SocialAuthService struct {
+	db              *gorm.DB
+	providerDAO     *dao.SocialProviderDAO
+	accountDAO      *dao.UserSocialAccountDAO
+	userDAO         *dao.UserDao
+	providerService *SocialProviderService
+	userService     *UserService
+	jwtAuthService  *JWTAuthService
+	stateStore      map[string]time.Time // 简单的state存储（生产环境应使用Redis）
+}
+
+// NewSocialAuthService 创建服务实例
+func NewSocialAuthService(db *gorm.DB) *SocialAuthService {
+	return &SocialAuthService{
+		db:              db,
+		providerDAO:     dao.NewSocialProviderDAO(db),
+		accountDAO:      dao.NewUserSocialAccountDAO(db),
+		userDAO:         dao.NewUserDao(db),
+		providerService: NewSocialProviderService(db),
+		userService:     NewUserService(db),
+		jwtAuthService:  NewJWTAuthService(),
+		stateStore:      make(map[string]time.Time),
+	}
+}
+
+// GetAuthURL 获取OAuth授权URL
+func (s *SocialAuthService) GetAuthURL(providerIdentifier string) (*dto.SocialAuthURLResponse, error) {
+	// 获取提供商配置
+	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
+	if err != nil {
+		return nil, err
+	}
+
+	// 检查提供商是否启用
+	if !provider.IsEnabled() {
+		return nil, fmt.Errorf("提供商未启用")
+	}
+
+	// 创建适配器
+	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	if err != nil {
+		return nil, fmt.Errorf("创建适配器失败: %w", err)
+	}
+
+	// 生成state参数（防CSRF）
+	state, err := s.generateState()
+	if err != nil {
+		return nil, fmt.Errorf("生成state失败: %w", err)
+	}
+
+	// 存储state（5分钟有效期）
+	s.storeState(state, 5*time.Minute)
+
+	// 获取授权URL
+	authURL := adapter.GetAuthURL(state)
+
+	return &dto.SocialAuthURLResponse{
+		AuthURL: authURL,
+		State:   state,
+	}, nil
+}
+
+// HandleCallback 处理OAuth回调
+func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state string) (*dto.SocialAuthCallbackResponse, error) {
+	// 验证state
+	if !s.validateState(state) {
+		return nil, fmt.Errorf("无效的state参数")
+	}
+
+	// 获取提供商配置
+	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
+	if err != nil {
+		return nil, err
+	}
+
+	// 创建适配器
+	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	if err != nil {
+		return nil, fmt.Errorf("创建适配器失败: %w", err)
+	}
+
+	// 交换授权码获取令牌
+	ctx := context.Background()
+	token, err := adapter.ExchangeToken(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("交换令牌失败: %w", err)
+	}
+
+	// 获取用户信息
+	socialUser, err := adapter.GetUserInfo(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	// 查找是否已绑定账号
+	account, err := s.accountDAO.GetByProviderAndOpenID(provider.ID, socialUser.OpenID)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("查询绑定账号失败: %w", err)
+	}
+
+	if account != nil {
+		// 已绑定，直接登录
+		return s.loginWithSocialAccount(account, socialUser, token)
+	}
+
+	// 未绑定，自动注册新用户
+	return s.registerWithSocialAccount(provider, socialUser, token)
+}
+
+// BindSocialAccount 绑定社交账号（已登录用户）
+func (s *SocialAuthService) BindSocialAccount(userID uint, providerIdentifier, code, state string) error {
+	// 验证state
+	if !s.validateState(state) {
+		return fmt.Errorf("无效的state参数")
+	}
+
+	// 获取提供商配置
+	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
+	if err != nil {
+		return err
+	}
+
+	// 创建适配器
+	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	if err != nil {
+		return fmt.Errorf("创建适配器失败: %w", err)
+	}
+
+	// 交换授权码获取令牌
+	ctx := context.Background()
+	token, err := adapter.ExchangeToken(ctx, code)
+	if err != nil {
+		return fmt.Errorf("交换令牌失败: %w", err)
+	}
+
+	// 获取用户信息
+	socialUser, err := adapter.GetUserInfo(ctx, token)
+	if err != nil {
+		return fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	// 检查该社交账号是否已被其他用户绑定
+	exists, err := s.accountDAO.ExistsByProviderAndOpenID(provider.ID, socialUser.OpenID, userID)
+	if err != nil {
+		return fmt.Errorf("检查绑定状态失败: %w", err)
+	}
+	if exists {
+		return fmt.Errorf("该社交账号已被其他用户绑定")
+	}
+
+	// 检查用户是否已绑定该提供商
+	existingAccount, err := s.accountDAO.GetByUserAndProvider(userID, provider.ID)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("查询已有绑定失败: %w", err)
+	}
+	if existingAccount != nil {
+		return fmt.Errorf("您已绑定该平台的其他账号")
+	}
+
+	// 创建绑定
+	account := &model.UserSocialAccount{
+		UserID:     userID,
+		ProviderID: provider.ID,
+		OpenID:     socialUser.OpenID,
+		UnionID:    socialUser.UnionID,
+		UserInfo:   model.JSONObject(socialUser.RawUserInfo),
+	}
+	account.SetTokenInfo(
+		token.AccessToken,
+		token.RefreshToken,
+		token.TokenType,
+		int64(token.Expiry.Sub(time.Now()).Seconds()),
+	)
+
+	if err := s.accountDAO.Create(account); err != nil {
+		return fmt.Errorf("创建绑定失败: %w", err)
+	}
+
+	return nil
+}
+
+// UnbindSocialAccount 解绑社交账号
+func (s *SocialAuthService) UnbindSocialAccount(userID, accountID uint) error {
+	// 获取社交账号
+	account, err := s.accountDAO.GetByID(accountID)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("社交账号不存在")
+		}
+		return fmt.Errorf("获取社交账号失败: %w", err)
+	}
+
+	// 验证所有权
+	if account.UserID != userID {
+		return fmt.Errorf("无权解绑此账号")
+	}
+
+	// 检查是否为最后一个登录方式
+	// 如果用户没有设置密码且只有一个社交账号，不允许解绑
+	user, err := s.userDAO.GetByID(userID)
+	if err != nil {
+		return fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	accountCount, err := s.accountDAO.CountByUser(userID)
+	if err != nil {
+		return fmt.Errorf("统计账号数失败: %w", err)
+	}
+
+	if user.PasswordHash == "" && accountCount <= 1 {
+		return fmt.Errorf("这是您唯一的登录方式，无法解绑。请先设置密码或绑定其他账号")
+	}
+
+	// 删除绑定
+	if err := s.accountDAO.Delete(accountID); err != nil {
+		return fmt.Errorf("解绑失败: %w", err)
+	}
+
+	return nil
+}
+
+// loginWithSocialAccount 使用社交账号登录
+func (s *SocialAuthService) loginWithSocialAccount(account *model.UserSocialAccount, socialUser *protocol.SocialUser, token interface{}) (*dto.SocialAuthCallbackResponse, error) {
+	// 更新最后使用时间
+	if err := s.accountDAO.UpdateLastUsed(account.ID); err != nil {
+		// 记录日志，但不影响登录
+		fmt.Printf("更新最后使用时间失败: %v\n", err)
+	}
+
+	// 获取用户信息
+	userResponse, err := s.userService.GetUserByID(account.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	// 生成JWT令牌
+	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	if err != nil {
+		return nil, fmt.Errorf("生成令牌失败: %w", err)
+	}
+
+	return &dto.SocialAuthCallbackResponse{
+		Token:     jwtToken,
+		User:      userResponse,
+		IsNewUser: false,
+		NeedsBind: false,
+	}, nil
+}
+
+// registerWithSocialAccount 使用社交账号注册
+func (s *SocialAuthService) registerWithSocialAccount(provider *model.SocialProvider, socialUser *protocol.SocialUser, token interface{}) (*dto.SocialAuthCallbackResponse, error) {
+	// 开启事务
+	tx := s.db.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 创建新用户
+	user := &model.User{
+		Username:    s.generateUsername(socialUser),
+		Nickname:    socialUser.Nickname,
+		Avatar:      socialUser.Avatar,
+		Email:       socialUser.Email,
+		Status:      model.UserStatusActive,
+		IsActivated: true,
+	}
+
+	userDAO := dao.NewUserDao(tx)
+	if err := userDAO.Create(user); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("创建用户失败: %w", err)
+	}
+
+	// 创建社交账号绑定
+	// 从 token 中提取信息
+	var accessToken, refreshToken, tokenType string
+	var expiresIn int64
+
+	// 类型断言获取 OAuth token
+	type tokenWithFields interface {
+		AccessToken() string
+		RefreshToken() string
+		TokenType() string
+		Expiry() time.Time
+	}
+
+	// 尝试使用 *oauth2.Token
+	if oauthToken, ok := token.(*oauth2.Token); ok {
+		accessToken = oauthToken.AccessToken
+		refreshToken = oauthToken.RefreshToken
+		tokenType = oauthToken.TokenType
+		expiresIn = int64(oauthToken.Expiry.Sub(time.Now()).Seconds())
+	}
+
+	account := &model.UserSocialAccount{
+		UserID:     user.ID,
+		ProviderID: provider.ID,
+		OpenID:     socialUser.OpenID,
+		UnionID:    socialUser.UnionID,
+		UserInfo:   model.JSONObject(socialUser.RawUserInfo),
+	}
+	account.SetTokenInfo(accessToken, refreshToken, tokenType, expiresIn)
+
+	accountDAO := dao.NewUserSocialAccountDAO(tx)
+	if err := accountDAO.Create(account); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("创建社交账号绑定失败: %w", err)
+	}
+
+	// 提交事务
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("提交事务失败: %w", err)
+	}
+
+	// 生成用户响应
+	userResponse, err := s.userService.GetUserByID(user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	// 生成JWT令牌
+	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	if err != nil {
+		return nil, fmt.Errorf("生成令牌失败: %w", err)
+	}
+
+	return &dto.SocialAuthCallbackResponse{
+		Token:     jwtToken,
+		User:      userResponse,
+		IsNewUser: true,
+		NeedsBind: false,
+	}, nil
+}
+
+// generateState 生成随机state
+func (s *SocialAuthService) generateState() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+// storeState 存储state
+func (s *SocialAuthService) storeState(state string, duration time.Duration) {
+	s.stateStore[state] = time.Now().Add(duration)
+	// TODO: 生产环境应使用Redis存储，并设置过期时间
+}
+
+// validateState 验证state
+func (s *SocialAuthService) validateState(state string) bool {
+	expiry, exists := s.stateStore[state]
+	if !exists {
+		return false
+	}
+
+	// 检查是否过期
+	if time.Now().After(expiry) {
+		delete(s.stateStore, state)
+		return false
+	}
+
+	// 验证成功后删除state（一次性使用）
+	delete(s.stateStore, state)
+	return true
+}
+
+// generateUsername 生成用户名
+func (s *SocialAuthService) generateUsername(socialUser *protocol.SocialUser) string {
+	// 基于OpenID生成唯一用户名
+	baseUsername := "user_" + socialUser.OpenID
+	if len(baseUsername) > 50 {
+		baseUsername = baseUsername[:50]
+	}
+
+	// 检查用户名是否已存在
+	_, err := s.userDAO.GetByUsername(baseUsername)
+	if err == gorm.ErrRecordNotFound {
+		return baseUsername
+	}
+
+	// 如果已存在，添加时间戳
+	timestamp := time.Now().Unix()
+	return fmt.Sprintf("%s_%d", baseUsername[:40], timestamp)
+}
