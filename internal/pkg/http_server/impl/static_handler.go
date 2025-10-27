@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
@@ -26,8 +27,6 @@ func NewStaticHandler(helper interfaces.HelperInterface, engine *gin.Engine) *St
 // setupStaticFileServers 为嵌入的静态文件设置HTTP服务
 func (receiver *StaticHandler) setupStaticFileServers() {
 
-	staticFs := receiver.helper.GetConfig().Get("static.fs", map[string]embed.FS{}).(map[string]embed.FS)
-
 	if !receiver.helper.GetConfig().GetBool("http.load_static", false) {
 		return
 	}
@@ -39,11 +38,24 @@ func (receiver *StaticHandler) setupStaticFileServers() {
 		return
 	}
 
-	webStaticFs, ok := staticFs["web.static"]
+	// 检查是否为 debug 模式
+	serverMode := receiver.helper.GetConfig().GetString("server.mode", "release")
+	var webStaticFs fs.FS
 
-	if !ok {
-		receiver.helper.GetLogger().Debug("不存在需要对Web暴露的静态资源")
-		return
+	if serverMode == "debug" {
+		// debug 模式下从文件系统读取，支持热更新
+		webStaticFs = os.DirFS("./static")
+		receiver.helper.GetLogger().Info("Debug 模式：使用文件系统加载静态文件，支持热更新")
+	} else {
+		// 生产模式下从 embed.FS 读取
+		staticFs := receiver.helper.GetConfig().Get("static.fs", map[string]embed.FS{}).(map[string]embed.FS)
+		embeddedFs, ok := staticFs["web.static"]
+		if !ok {
+			receiver.helper.GetLogger().Debug("不存在需要对Web暴露的静态资源")
+			return
+		}
+		webStaticFs = embeddedFs
+		receiver.helper.GetLogger().Debug("Release 模式：使用 embed.FS 加载静态文件")
 	}
 
 	for i, dir := range staticDirSlice {
@@ -53,10 +65,22 @@ func (receiver *StaticHandler) setupStaticFileServers() {
 
 }
 
-func (receiver *StaticHandler) loadStatic(webStaticFs embed.FS, dir string) {
+func (receiver *StaticHandler) loadStatic(webStaticFs fs.FS, dir string) {
 
 	relativePath := fmt.Sprintf("/%s", dir)
-	subFS, err := fs.Sub(webStaticFs, fmt.Sprintf("static/%s", dir))
+
+	// 判断是否为 debug 模式
+	serverMode := receiver.helper.GetConfig().GetString("server.mode", "release")
+	var subPath string
+	if serverMode == "debug" {
+		// debug 模式下，os.DirFS 已经在 static 目录，直接使用子目录名
+		subPath = dir
+	} else {
+		// 生产模式下，embed.FS 需要完整路径
+		subPath = fmt.Sprintf("static/%s", dir)
+	}
+
+	subFS, err := fs.Sub(webStaticFs, subPath)
 	if err == nil {
 		// 将Vue前端文件映射到根路径
 		receiver.engine.StaticFS(relativePath, http.FS(subFS))
