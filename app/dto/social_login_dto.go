@@ -141,6 +141,20 @@ type SocialAuthCallbackResponse struct {
 	BindToken string        `json:"bindToken,omitempty"` // 绑定令牌（用于后续绑定操作）
 }
 
+// SocialBindWithLoginRequest 用社交账号绑定已有账户
+type SocialBindWithLoginRequest struct {
+	BindToken string `json:"bindToken" binding:"required"`
+	Username  string `json:"username" binding:"required"`
+	Password  string `json:"password" binding:"required"`
+	SessionID string `json:"sessionId,omitempty"` // OIDC会话ID
+}
+
+// SocialRegisterRequest 用社交账号注册新账户
+type SocialRegisterRequest struct {
+	BindToken string `json:"bindToken" binding:"required"`
+	SessionID string `json:"sessionId,omitempty"` // OIDC会话ID
+}
+
 // SocialBindAccountRequest 绑定社交账号请求（已登录用户）
 type SocialBindAccountRequest struct {
 	ProviderIdentifier string `json:"providerIdentifier" binding:"required"`

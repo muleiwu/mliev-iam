@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"fmt"
 	"strconv"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
@@ -53,6 +55,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 	providerIdentifier := c.Param("provider")
 	code := c.Query("code")
 	state := c.Query("state")
+	sessionID := c.Query("session_id") // OIDC会话ID
 
 	if providerIdentifier == "" {
 		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
@@ -80,6 +83,65 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 		return
 	}
 
+	// 如果需要绑定，返回HTML页面，通过postMessage通知父窗口
+	if response.NeedsBind {
+		html := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>账号绑定</title>
+</head>
+<body>
+    <script>
+        window.opener.postMessage({
+            type: 'oidc-social-callback',
+            needsBind: true,
+            bindToken: '%s',
+            sessionId: '%s'
+        }, '*');
+        window.close();
+    </script>
+    <p>正在跳转...</p>
+</body>
+</html>
+`, response.BindToken, sessionID)
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(200, html)
+		return
+	}
+
+	// 已绑定，直接登录成功
+	// 如果有 sessionId，标记 OIDC 会话为已认证
+	if sessionID != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		if err := sessionService.MarkAsAuthenticated(sessionID, response.User.ID); err != nil {
+			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
+			return
+		}
+
+		// 返回HTML页面，跳转到授权确认页面
+		html := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>登录成功</title>
+</head>
+<body>
+    <script>
+        window.location.href = '/oidc/consent?session_id=%s';
+    </script>
+    <p>登录成功，正在跳转...</p>
+</body>
+</html>
+`, sessionID)
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(200, html)
+		return
+	}
+
+	// 非OIDC流程，返回JSON响应
 	if response.IsNewUser {
 		sc.SuccessWithMessage(c, "注册并登录成功", response)
 	} else {
@@ -169,4 +231,64 @@ func (sc SocialAuthController) GetUserSocialAccounts(c *gin.Context, helper inte
 	}
 
 	sc.Success(c, accounts)
+}
+
+// BindWithLogin 用社交账号绑定到已有账户
+// POST /api/social/bind-with-login
+func (sc SocialAuthController) BindWithLogin(c *gin.Context, helper interfaces.HelperInterface) {
+	var req dto.SocialBindWithLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
+	response, err := authService.BindWithExistingUser(req.BindToken, req.Username, req.Password)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	// 如果有 sessionId，标记 OIDC 会话为已认证
+	if req.SessionID != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		if err := sessionService.MarkAsAuthenticated(req.SessionID, response.User.ID); err != nil {
+			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
+			return
+		}
+		// 添加下一步跳转URL
+		response.Token = "" // OIDC流程不需要返回JWT token
+	}
+
+	sc.SuccessWithMessage(c, "绑定成功", response)
+}
+
+// RegisterWithSocial 用社交账号注册新账户
+// POST /api/social/register-with-social
+func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfaces.HelperInterface) {
+	var req dto.SocialRegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
+	response, err := authService.RegisterWithSocial(req.BindToken)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	// 如果有 sessionId，标记 OIDC 会话为已认证
+	if req.SessionID != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		if err := sessionService.MarkAsAuthenticated(req.SessionID, response.User.ID); err != nil {
+			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
+			return
+		}
+		// OIDC流程不需要返回JWT token
+		response.Token = ""
+	}
+
+	sc.SuccessWithMessage(c, "注册成功", response)
 }

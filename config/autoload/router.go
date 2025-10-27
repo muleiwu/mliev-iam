@@ -225,6 +225,10 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					social.GET("/auth/:provider", deps.WrapHandler(controller.SocialAuthController{}.InitiateAuth))       // 发起OAuth授权
 					social.GET("/callback/:provider", deps.WrapHandler(controller.SocialAuthController{}.HandleCallback)) // OAuth回调处理
 
+					// 绑定/注册端点（公开，用于OIDC流程）
+					social.POST("/bind-with-login", deps.WrapHandler(controller.SocialAuthController{}.BindWithLogin))           // 用社交账号绑定已有账户
+					social.POST("/register-with-social", deps.WrapHandler(controller.SocialAuthController{}.RegisterWithSocial)) // 用社交账号注册新账户
+
 					// 需要认证的端点
 					// 注意：绑定和解绑需要添加认证中间件
 					social.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
