@@ -63,6 +63,9 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 统计信息（管理员）
 						adminUsers.GET("/stats/active-count", deps.WrapHandler(AdminController.UserController{}.GetActiveUsersCount)) // 活跃用户统计
 
+						// 用户部门管理（管理员）
+						adminUsers.GET("/:id/departments", deps.WrapHandler(AdminController.UserController{}.GetUserDepartments)) // 获取用户部门
+
 						// 用户角色管理（管理员）
 						adminUsers.POST("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.AssignUserRole))            // 分配角色
 						adminUsers.DELETE("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.RemoveUserRole))          // 移除角色

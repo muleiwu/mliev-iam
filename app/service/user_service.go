@@ -326,6 +326,18 @@ func (s *UserService) GetUsersByDepartment(departmentID uint) ([]dto.UserRespons
 	return dto.ConvertToUserResponses(users), nil
 }
 
+// GetUserDepartments 获取用户的部门列表
+func (s *UserService) GetUserDepartments(userID uint) ([]*dto.UserDepartmentResponseDto, error) {
+	// 使用 UserDepartmentDao 获取用户的部门关系
+	userDeptDao := dao.NewUserDepartmentDao(s.database)
+	userDepts, err := userDeptDao.FindByUserWithDepartment(userID)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户部门失败: %w", err)
+	}
+
+	return dto.ToUserDepartmentResponseDtoList(userDepts), nil
+}
+
 // GetActiveUsersCount 获取活跃用户数量
 func (s *UserService) GetActiveUsersCount() (int64, error) {
 	return s.userDao.GetActiveUsersCount()

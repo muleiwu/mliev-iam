@@ -47,6 +47,7 @@ func (receiver *HttpServer) RunHttp() {
 	// 配置Gin引擎
 	// 配置Gin引擎并替换默认logger
 	engine := gin.New()
+	engine.RedirectTrailingSlash = false
 	engine.Use(receiver.traceIdMiddleware())
 	engine.Use(gin.Recovery())
 
