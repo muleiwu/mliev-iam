@@ -65,14 +65,14 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		if err == nil {
 			sessionService.MarkAsAuthenticated(session.SessionID, uint(userID))
 			// 重定向到授权确认页面
-			consentURL := "/oidc/consent?session_id=" + session.SessionID
+			consentURL := "/auth/#/oidc/consent?session_id=" + session.SessionID
 			c.Redirect(http.StatusFound, consentURL)
 			return
 		}
 	}
 
 	// 4. 用户未登录，重定向到登录页面
-	loginURL := "/oidc/login?session_id=" + session.SessionID
+	loginURL := "/auth/#/oidc/login?session_id=" + session.SessionID
 	c.Redirect(http.StatusFound, loginURL)
 }
 

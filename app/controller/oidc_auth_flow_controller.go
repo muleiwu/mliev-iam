@@ -105,7 +105,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 	response := LoginResponse{
 		Success: true,
 		Message: "登录成功",
-		NextURL: "/oidc/consent?session_id=" + req.SessionID,
+		NextURL: "/auth/#/oidc/consent?session_id=" + req.SessionID,
 		UserInfo: &struct {
 			ID       uint   `json:"id"`
 			Username string `json:"username"`

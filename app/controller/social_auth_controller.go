@@ -154,7 +154,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 </head>
 <body>
     <script>
-        window.location.href = '/oidc/consent?session_id=%s';
+        window.location.href = '/auth/#/oidc/consent?session_id=%s';
     </script>
     <p>登录成功，正在跳转...</p>
 </body>
