@@ -68,7 +68,12 @@ build-go:
 	@echo "==> Go 后端编译完成！二进制文件：mliev-iam"
 
 # 编译前端并运行 Go 后端
-run: build-frontend
+run: build-frontend run-go
+	@echo "==> 启动 Go 后端..."
+	@go run .
+
+# 编译前端并运行 Go 后端
+run-go:
 	@echo "==> 启动 Go 后端..."
 	@go run .
 
