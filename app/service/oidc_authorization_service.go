@@ -346,7 +346,7 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 	}
 
 	if err := s.authCodeDAO.Create(authCode); err != nil {
-		return s.errorResponse("server_error", "服务器错误", req.State), nil
+		return s.errorResponse("server_error", "创建授权码失败: "+err.Error(), req.State), nil
 	}
 
 	return &dto.AuthorizeResponse{

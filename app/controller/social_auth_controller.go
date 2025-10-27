@@ -144,7 +144,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 			return
 		}
 
-		// 返回HTML页面，跳转到授权确认页面
+		// 返回HTML页面，通过postMessage通知父窗口
 		html := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
@@ -154,9 +154,14 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 </head>
 <body>
     <script>
-        window.location.href = '/auth/#/oidc/consent?session_id=%s';
+        window.opener.postMessage({
+            type: 'oidc-social-callback',
+            needsBind: false,
+            sessionId: '%s'
+        }, '*');
+        window.close();
     </script>
-    <p>登录成功，正在跳转...</p>
+    <p>登录成功，正在关闭...</p>
 </body>
 </html>
 `, sessionID)

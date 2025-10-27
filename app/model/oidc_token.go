@@ -28,7 +28,7 @@ type OIDCToken struct {
 	// User     *User       `gorm:"foreignKey:UserID" json:"user,omitempty"`
 
 	// 令牌信息
-	Scopes       []string `gorm:"type:json" json:"scopes"`
+	Scopes       []string `gorm:"type:json;serializer:json" json:"scopes"`
 	RefreshToken string   `gorm:"uniqueIndex;size:255" json:"refreshToken"`
 	IDToken      string   `gorm:"type:text" json:"idToken"`
 
