@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -85,6 +86,24 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 
 	// 如果需要绑定，返回HTML页面，通过postMessage通知父窗口
 	if response.NeedsBind {
+		// 从 BindToken 获取社交账号信息用于预填
+		authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
+		tempUserInfo, err := authService.GetSocialUserTempInfo(response.BindToken)
+
+		// 准备社交账号信息（用于前端预填）
+		socialInfo := ""
+		if err == nil && tempUserInfo != nil {
+			socialInfo = fmt.Sprintf(`
+            socialInfo: {
+                nickname: '%s',
+                avatar: '%s',
+                email: '%s'
+            },`,
+				escapeJS(tempUserInfo.Nickname),
+				escapeJS(tempUserInfo.Avatar),
+				escapeJS(tempUserInfo.Email))
+		}
+
 		html := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
@@ -98,14 +117,14 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
             type: 'oidc-social-callback',
             needsBind: true,
             bindToken: '%s',
-            sessionId: '%s'
+            sessionId: '%s',%s
         }, '*');
         window.close();
     </script>
     <p>正在跳转...</p>
 </body>
 </html>
-`, response.BindToken, sessionID)
+`, response.BindToken, sessionID, socialInfo)
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(200, html)
 		return
@@ -272,10 +291,28 @@ func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfa
 		return
 	}
 
+	// 验证隐私政策同意
+	if !req.AgreePolicy {
+		sc.Error(c, constants.ErrCodeBadRequest, "请同意隐私政策和服务条款")
+		return
+	}
+
 	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
-	response, err := authService.RegisterWithSocial(req.BindToken)
+	response, err := authService.RegisterWithSocial(&req)
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	// 防御性检查：确保响应不为空
+	if response == nil {
+		sc.Error(c, constants.ErrCodeInternal, "注册失败：响应为空")
+		return
+	}
+
+	// 防御性检查：确保用户信息不为空
+	if response.User == nil {
+		sc.Error(c, constants.ErrCodeInternal, "注册失败：用户信息为空")
 		return
 	}
 
@@ -291,4 +328,14 @@ func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfa
 	}
 
 	sc.SuccessWithMessage(c, "注册成功", response)
+}
+
+// escapeJS 转义 JavaScript 字符串中的特殊字符
+func escapeJS(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	return s
 }

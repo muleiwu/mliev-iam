@@ -360,6 +360,11 @@ func (s *UserService) generatePasswordHash(password string) (salt, hash string, 
 	return salt, hash, nil
 }
 
+// GeneratePasswordHash 生成密码哈希（公开方法）
+func (s *UserService) GeneratePasswordHash(password string) (salt, hash string, err error) {
+	return s.generatePasswordHash(password)
+}
+
 // verifyPassword 验证密码
 func (s *UserService) verifyPassword(password, salt, hash string) bool {
 	h := sha256.New()

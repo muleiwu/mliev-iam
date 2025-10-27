@@ -553,6 +553,11 @@ func (s *SocialAuthService) deleteSocialUserTemp(bindToken string) error {
 	return s.redis.Del(ctx, key).Err()
 }
 
+// GetSocialUserTempInfo 获取临时社交用户信息（公开方法，用于控制器）
+func (s *SocialAuthService) GetSocialUserTempInfo(bindToken string) (*TempSocialUserInfo, error) {
+	return s.getSocialUserTemp(bindToken)
+}
+
 // ==================== 绑定和注册新方法 ====================
 
 // BindWithExistingUser 用社交账号绑定到已有账户
@@ -625,11 +630,23 @@ func (s *SocialAuthService) BindWithExistingUser(bindToken, username, password s
 }
 
 // RegisterWithSocial 用社交账号注册新用户
-func (s *SocialAuthService) RegisterWithSocial(bindToken string) (*dto.SocialAuthCallbackResponse, error) {
+func (s *SocialAuthService) RegisterWithSocial(req *dto.SocialRegisterRequest) (*dto.SocialAuthCallbackResponse, error) {
 	// 获取临时社交用户信息
-	tempUserInfo, err := s.getSocialUserTemp(bindToken)
+	tempUserInfo, err := s.getSocialUserTemp(req.BindToken)
 	if err != nil {
 		return nil, err
+	}
+
+	// 验证用户名是否已存在
+	existingUser, err := s.userDAO.GetByUsername(req.Username)
+	if err == nil && existingUser != nil {
+		return nil, fmt.Errorf("用户名已存在")
+	}
+
+	// 验证邮箱是否已存在
+	existingUserByEmail, err := s.userDAO.GetByEmail(req.Email)
+	if err == nil && existingUserByEmail != nil {
+		return nil, fmt.Errorf("邮箱已被注册")
 	}
 
 	// 获取提供商信息
@@ -638,14 +655,10 @@ func (s *SocialAuthService) RegisterWithSocial(bindToken string) (*dto.SocialAut
 		return nil, fmt.Errorf("获取提供商信息失败: %w", err)
 	}
 
-	// 构造 SocialUser 对象
-	socialUser := &protocol.SocialUser{
-		OpenID:      tempUserInfo.OpenID,
-		UnionID:     tempUserInfo.UnionID,
-		Nickname:    tempUserInfo.Nickname,
-		Avatar:      tempUserInfo.Avatar,
-		Email:       tempUserInfo.Email,
-		RawUserInfo: tempUserInfo.RawUserInfo,
+	// 生成密码哈希
+	salt, passwordHash, err := s.userService.GeneratePasswordHash(req.Password)
+	if err != nil {
+		return nil, fmt.Errorf("密码加密失败: %w", err)
 	}
 
 	// 开启事务
@@ -656,89 +669,69 @@ func (s *SocialAuthService) RegisterWithSocial(bindToken string) (*dto.SocialAut
 		}
 	}()
 
-	// 创建新用户
-	username := s.generateUsername(socialUser)
-	fmt.Printf("DEBUG: 生成用户名: %s\n", username)
-
+	// 创建新用户（使用用户提供的信息）
 	user := &model.User{
-		Username:    username,
-		Nickname:    socialUser.Nickname,
-		Avatar:      socialUser.Avatar,
-		Email:       socialUser.Email,
-		Status:      model.UserStatusActive,
-		IsActivated: true,
+		Username:     req.Username,
+		Email:        req.Email,
+		RealName:     req.RealName,
+		Nickname:     tempUserInfo.Nickname, // 使用社交账号昵称
+		Avatar:       tempUserInfo.Avatar,   // 使用社交账号头像
+		Salt:         salt,
+		PasswordHash: passwordHash,
+		Status:       model.UserStatusActive,
+		IsActivated:  true,
 	}
 
 	userDAO := dao.NewUserDao(tx)
 	if err := userDAO.Create(user); err != nil {
 		tx.Rollback()
-		fmt.Printf("DEBUG: 创建用户失败: %v\n", err)
 		return nil, fmt.Errorf("创建用户失败: %w", err)
 	}
-
-	fmt.Printf("DEBUG: 用户创建成功，ID: %d\n", user.ID)
 
 	// 创建社交账号绑定
 	account := &model.UserSocialAccount{
 		UserID:     user.ID,
 		ProviderID: provider.ID,
-		OpenID:     socialUser.OpenID,
-		UnionID:    socialUser.UnionID,
-		UserInfo:   model.JSONObject(socialUser.RawUserInfo),
+		OpenID:     tempUserInfo.OpenID,
+		UnionID:    tempUserInfo.UnionID,
+		UserInfo:   model.JSONObject(tempUserInfo.RawUserInfo),
 	}
 	account.SetTokenInfo(tempUserInfo.AccessToken, "", tempUserInfo.TokenType, tempUserInfo.ExpiresIn)
 
 	accountDAO := dao.NewUserSocialAccountDAO(tx)
 	if err := accountDAO.Create(account); err != nil {
 		tx.Rollback()
-		fmt.Printf("DEBUG: 创建社交账号绑定失败: %v\n", err)
 		return nil, fmt.Errorf("创建社交账号绑定失败: %w", err)
 	}
 
-	fmt.Printf("DEBUG: 社交账号绑定创建成功，ID: %d\n", account.ID)
-
 	// 提交事务
 	if err := tx.Commit().Error; err != nil {
-		fmt.Printf("DEBUG: 提交事务失败: %v\n", err)
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
 
-	fmt.Printf("DEBUG: 事务提交成功\n")
-
 	// 删除临时信息
-	s.deleteSocialUserTemp(bindToken)
+	s.deleteSocialUserTemp(req.BindToken)
 
 	// 生成用户响应
-	fmt.Printf("DEBUG: 准备获取用户信息，用户ID: %d\n", user.ID)
 	userResponse, err := s.userService.GetUserByID(user.ID)
 	if err != nil {
-		fmt.Printf("DEBUG: 获取用户信息失败: %v\n", err)
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
 
 	if userResponse == nil {
-		fmt.Printf("DEBUG: GetUserByID 返回了 nil 响应但没有错误\n")
 		return nil, fmt.Errorf("获取用户信息失败：响应为空")
 	}
-
-	fmt.Printf("DEBUG: 用户信息获取成功，用户ID: %d, 用户名: %s\n", userResponse.ID, userResponse.Username)
 
 	// 生成JWT令牌
 	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
-		fmt.Printf("DEBUG: 生成令牌失败: %v\n", err)
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
 
-	fmt.Printf("DEBUG: JWT令牌生成成功\n")
-
-	response := &dto.SocialAuthCallbackResponse{
+	return &dto.SocialAuthCallbackResponse{
 		Token:     jwtToken,
 		User:      userResponse,
 		IsNewUser: true,
 		NeedsBind: false,
-	}
-
-	fmt.Printf("DEBUG: 准备返回注册响应，响应对象地址: %p\n", response)
-	return response, nil
+	}, nil
 }

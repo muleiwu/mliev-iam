@@ -151,8 +151,13 @@ type SocialBindWithLoginRequest struct {
 
 // SocialRegisterRequest 用社交账号注册新账户
 type SocialRegisterRequest struct {
-	BindToken string `json:"bindToken" binding:"required"`
-	SessionID string `json:"sessionId,omitempty"` // OIDC会话ID
+	BindToken   string `json:"bindToken" binding:"required"`
+	Username    string `json:"username" binding:"required,min=3,max=20"`
+	Email       string `json:"email" binding:"required,email"`
+	Password    string `json:"password" binding:"required,min=6"`
+	RealName    string `json:"realName" binding:"required,min=2,max=20"`
+	AgreePolicy bool   `json:"agreePolicy" binding:"required"`
+	SessionID   string `json:"sessionId,omitempty"` // OIDC会话ID
 }
 
 // SocialBindAccountRequest 绑定社交账号请求（已登录用户）
