@@ -203,18 +203,22 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				// 普通用户路由组
 				user := api.Group("/user")
 				{
-					// 用户认证相关
+					// 公开端点：用户认证相关
 					user.POST("/login", deps.WrapHandler(controller.UserController{}.ValidateLogin)) // 用户登录验证
 
-					// 用户个人信息管理
-					user.GET("/profile", deps.WrapHandler(controller.UserController{}.GetUserProfile))    // 获取当前用户信息
-					user.PUT("/profile", deps.WrapHandler(controller.UserController{}.UpdateUserProfile)) // 更新当前用户信息
+					// 需要用户认证的端点（使用JWT认证中间件）
+					userAuth := user.Group("", middleware.AuthMiddleware(helper))
+					{
+						// 用户个人信息管理
+						userAuth.GET("/profile", deps.WrapHandler(controller.UserController{}.GetUserProfile))    // 获取当前用户信息
+						userAuth.PUT("/profile", deps.WrapHandler(controller.UserController{}.UpdateUserProfile)) // 更新当前用户信息
 
-					// 用户密码管理
-					user.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
+						// 用户密码管理
+						userAuth.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
 
-					// 用户社交账号管理（需要认证）
-					user.GET("/social-accounts", deps.WrapHandler(controller.SocialAuthController{}.GetUserSocialAccounts)) // 获取已绑定社交账号
+						// 用户社交账号管理
+						userAuth.GET("/social-accounts", deps.WrapHandler(controller.SocialAuthController{}.GetUserSocialAccounts)) // 获取已绑定社交账号
+					}
 				}
 
 				// 社会化登录路由组
@@ -229,10 +233,12 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					social.POST("/bind-with-login", deps.WrapHandler(controller.SocialAuthController{}.BindWithLogin))           // 用社交账号绑定已有账户
 					social.POST("/register-with-social", deps.WrapHandler(controller.SocialAuthController{}.RegisterWithSocial)) // 用社交账号注册新账户
 
-					// 需要认证的端点
-					// 注意：绑定和解绑需要添加认证中间件
-					social.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
-					social.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
+					// 需要用户认证的端点（使用JWT认证中间件）
+					socialAuth := social.Group("", middleware.AuthMiddleware(helper))
+					{
+						socialAuth.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
+						socialAuth.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
+					}
 				}
 
 				// OIDC 路由组（公开端点）

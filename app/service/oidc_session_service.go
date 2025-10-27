@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -87,7 +88,7 @@ func (s *OIDCSessionService) GetSession(sessionID string) (*OIDCSession, error) 
 	key := s.keyPrefix + sessionID
 
 	data, err := s.redis.Get(ctx, key).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("会话不存在或已过期")
 	}
 	if err != nil {

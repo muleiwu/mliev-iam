@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -144,7 +145,7 @@ func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state strin
 
 	// 查找是否已绑定账号
 	account, err := s.accountDAO.GetByProviderAndOpenID(provider.ID, socialUser.OpenID)
-	if err != nil && err != gorm.ErrRecordNotFound {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("查询绑定账号失败: %w", err)
 	}
 
@@ -509,7 +510,7 @@ func (s *SocialAuthService) validateAndGetSessionID(state string) (string, bool)
 
 	// 尝试从Redis获取state
 	data, err := s.redis.Get(ctx, key).Result()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		// state不存在或已过期
 		return "", false
 	}

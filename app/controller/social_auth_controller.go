@@ -177,7 +177,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 // POST /api/social/bind/:provider
 func (sc SocialAuthController) BindAccount(c *gin.Context, helper interfaces.HelperInterface) {
 	// 从上下文获取当前用户ID（由认证中间件设置）
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
@@ -214,7 +214,7 @@ func (sc SocialAuthController) BindAccount(c *gin.Context, helper interfaces.Hel
 // DELETE /api/social/unbind/:accountId
 func (sc SocialAuthController) UnbindAccount(c *gin.Context, helper interfaces.HelperInterface) {
 	// 从上下文获取当前用户ID
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
@@ -241,7 +241,7 @@ func (sc SocialAuthController) UnbindAccount(c *gin.Context, helper interfaces.H
 // GET /api/user/social-accounts
 func (sc SocialAuthController) GetUserSocialAccounts(c *gin.Context, helper interfaces.HelperInterface) {
 	// 从上下文获取当前用户ID
-	userID, exists := c.Get("userID")
+	userID, exists := c.Get("user_id")
 	if !exists {
 		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
@@ -273,15 +273,25 @@ func (sc SocialAuthController) BindWithLogin(c *gin.Context, helper interfaces.H
 		return
 	}
 
+	// 防御性检查：确保响应不为空
+	if response == nil || response.User == nil {
+		sc.Error(c, constants.ErrCodeInternal, "绑定失败：响应为空")
+		return
+	}
+
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
 		if err := sessionService.MarkAsAuthenticated(req.SessionID, response.User.ID); err != nil {
-			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
-			return
+			// 记录日志但不阻断流程，因为可能是非OIDC流程或session已过期
+			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
+			// 对于非OIDC流程，继续返回成功，因为绑定本身已经成功
+			// sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
+			// return
+		} else {
+			// OIDC流程不需要返回JWT token
+			response.Token = ""
 		}
-		// 添加下一步跳转URL
-		response.Token = "" // OIDC流程不需要返回JWT token
 	}
 
 	sc.SuccessWithMessage(c, "绑定成功", response)
@@ -325,11 +335,15 @@ func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfa
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
 		if err := sessionService.MarkAsAuthenticated(req.SessionID, response.User.ID); err != nil {
-			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
-			return
+			// 记录日志但不阻断流程，因为可能是非OIDC流程或session已过期
+			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
+			// 对于非OIDC流程，继续返回成功，因为注册本身已经成功
+			// sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
+			// return
+		} else {
+			// OIDC流程不需要返回JWT token
+			response.Token = ""
 		}
-		// OIDC流程不需要返回JWT token
-		response.Token = ""
 	}
 
 	sc.SuccessWithMessage(c, "注册成功", response)
