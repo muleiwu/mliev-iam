@@ -11,6 +11,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/oauth2"
 	"gorm.io/gorm"
 )
@@ -18,26 +19,28 @@ import (
 // SocialAuthService 社会化登录认证服务
 type SocialAuthService struct {
 	db              *gorm.DB
+	redis           *redis.Client
 	providerDAO     *dao.SocialProviderDAO
 	accountDAO      *dao.UserSocialAccountDAO
 	userDAO         *dao.UserDao
 	providerService *SocialProviderService
 	userService     *UserService
 	jwtAuthService  *JWTAuthService
-	stateStore      map[string]time.Time // 简单的state存储（生产环境应使用Redis）
+	stateKeyPrefix  string
 }
 
 // NewSocialAuthService 创建服务实例
-func NewSocialAuthService(db *gorm.DB) *SocialAuthService {
+func NewSocialAuthService(db *gorm.DB, redisClient *redis.Client) *SocialAuthService {
 	return &SocialAuthService{
 		db:              db,
+		redis:           redisClient,
 		providerDAO:     dao.NewSocialProviderDAO(db),
 		accountDAO:      dao.NewUserSocialAccountDAO(db),
 		userDAO:         dao.NewUserDao(db),
 		providerService: NewSocialProviderService(db),
 		userService:     NewUserService(db),
 		jwtAuthService:  NewJWTAuthService(),
-		stateStore:      make(map[string]time.Time),
+		stateKeyPrefix:  "social:state:",
 	}
 }
 
@@ -67,7 +70,9 @@ func (s *SocialAuthService) GetAuthURL(providerIdentifier string) (*dto.SocialAu
 	}
 
 	// 存储state（5分钟有效期）
-	s.storeState(state, 5*time.Minute)
+	if err := s.storeState(state, 5*time.Minute); err != nil {
+		return nil, fmt.Errorf("存储state失败: %w", err)
+	}
 
 	// 获取授权URL
 	authURL := adapter.GetAuthURL(state)
@@ -361,27 +366,39 @@ func (s *SocialAuthService) generateState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-// storeState 存储state
-func (s *SocialAuthService) storeState(state string, duration time.Duration) {
-	s.stateStore[state] = time.Now().Add(duration)
-	// TODO: 生产环境应使用Redis存储，并设置过期时间
+// storeState 存储state到Redis
+func (s *SocialAuthService) storeState(state string, duration time.Duration) error {
+	ctx := context.Background()
+	key := s.stateKeyPrefix + state
+
+	// 存储state到Redis，使用过期时间作为TTL
+	// value存储当前时间戳，主要用于验证
+	return s.redis.Set(ctx, key, time.Now().Unix(), duration).Err()
 }
 
 // validateState 验证state
 func (s *SocialAuthService) validateState(state string) bool {
-	expiry, exists := s.stateStore[state]
-	if !exists {
+	ctx := context.Background()
+	key := s.stateKeyPrefix + state
+
+	// 尝试从Redis获取state
+	_, err := s.redis.Get(ctx, key).Result()
+	if err == redis.Nil {
+		// state不存在或已过期
 		return false
 	}
-
-	// 检查是否过期
-	if time.Now().After(expiry) {
-		delete(s.stateStore, state)
+	if err != nil {
+		// Redis错误，为安全起见返回false
+		fmt.Printf("验证state时Redis错误: %v\n", err)
 		return false
 	}
 
 	// 验证成功后删除state（一次性使用）
-	delete(s.stateStore, state)
+	if err := s.redis.Del(ctx, key).Err(); err != nil {
+		fmt.Printf("删除state时Redis错误: %v\n", err)
+		// 即使删除失败，也认为验证成功，因为state存在
+	}
+
 	return true
 }
 

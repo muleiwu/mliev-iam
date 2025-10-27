@@ -36,7 +36,7 @@ func (sc SocialAuthController) InitiateAuth(c *gin.Context, helper interfaces.He
 		return
 	}
 
-	authService := service.NewSocialAuthService(helper.GetDatabase())
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
 	response, err := authService.GetAuthURL(providerIdentifier)
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -67,10 +67,16 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 		return
 	}
 
-	authService := service.NewSocialAuthService(helper.GetDatabase())
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
 	response, err := authService.HandleCallback(providerIdentifier, code, state)
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	// 防御性检查：确保响应不为空
+	if response == nil {
+		sc.Error(c, constants.ErrCodeInternal, "回调处理失败：响应为空")
 		return
 	}
 
@@ -108,7 +114,7 @@ func (sc SocialAuthController) BindAccount(c *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	authService := service.NewSocialAuthService(helper.GetDatabase())
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
 	err := authService.BindSocialAccount(userID.(uint), providerIdentifier, code, state)
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -135,7 +141,7 @@ func (sc SocialAuthController) UnbindAccount(c *gin.Context, helper interfaces.H
 		return
 	}
 
-	authService := service.NewSocialAuthService(helper.GetDatabase())
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
 	err = authService.UnbindSocialAccount(userID.(uint), uint(accountID))
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())

@@ -121,9 +121,24 @@ func (a *GenericOAuth2Adapter) GetUserInfo(ctx context.Context, token *oauth2.To
 
 	// 尝试提取常见字段
 	if id, ok := rawUserInfo["id"]; ok {
-		socialUser.OpenID = fmt.Sprintf("%v", id)
+		// 使用 %.0f 格式化数字类型，避免科学记数法
+		switch v := id.(type) {
+		case float64:
+			socialUser.OpenID = fmt.Sprintf("%.0f", v)
+		case int, int64:
+			socialUser.OpenID = fmt.Sprintf("%d", v)
+		default:
+			socialUser.OpenID = fmt.Sprintf("%v", v)
+		}
 	} else if sub, ok := rawUserInfo["sub"]; ok {
-		socialUser.OpenID = fmt.Sprintf("%v", sub)
+		switch v := sub.(type) {
+		case float64:
+			socialUser.OpenID = fmt.Sprintf("%.0f", v)
+		case int, int64:
+			socialUser.OpenID = fmt.Sprintf("%d", v)
+		default:
+			socialUser.OpenID = fmt.Sprintf("%v", v)
+		}
 	}
 
 	if name, ok := rawUserInfo["name"]; ok {
