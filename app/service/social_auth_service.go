@@ -64,6 +64,11 @@ func NewSocialAuthService(db *gorm.DB, redisClient *redis.Client) *SocialAuthSer
 
 // GetAuthURL 获取OAuth授权URL
 func (s *SocialAuthService) GetAuthURL(providerIdentifier string) (*dto.SocialAuthURLResponse, error) {
+	return s.GetAuthURLWithSessionID(providerIdentifier, "")
+}
+
+// GetAuthURLWithSessionID 获取OAuth授权URL（带OIDC session_id）
+func (s *SocialAuthService) GetAuthURLWithSessionID(providerIdentifier string, sessionID string) (*dto.SocialAuthURLResponse, error) {
 	// 获取提供商配置
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
@@ -87,8 +92,8 @@ func (s *SocialAuthService) GetAuthURL(providerIdentifier string) (*dto.SocialAu
 		return nil, fmt.Errorf("生成state失败: %w", err)
 	}
 
-	// 存储state（5分钟有效期）
-	if err := s.storeState(state, 5*time.Minute); err != nil {
+	// 存储state（5分钟有效期），如果有sessionID则一并存储
+	if err := s.storeStateWithSessionID(state, sessionID, 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("存储state失败: %w", err)
 	}
 
@@ -103,8 +108,9 @@ func (s *SocialAuthService) GetAuthURL(providerIdentifier string) (*dto.SocialAu
 
 // HandleCallback 处理OAuth回调
 func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state string) (*dto.SocialAuthCallbackResponse, error) {
-	// 验证state
-	if !s.validateState(state) {
+	// 验证state并获取关联的sessionID（如果有）
+	sessionID, valid := s.validateAndGetSessionID(state)
+	if !valid {
 		return nil, fmt.Errorf("无效的state参数")
 	}
 
@@ -145,7 +151,13 @@ func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state strin
 	if account != nil {
 		// 已绑定，直接登录
 		fmt.Printf("DEBUG: 已有账号，执行登录流程\n")
-		return s.loginWithSocialAccount(account, socialUser, token)
+		response, err := s.loginWithSocialAccount(account, socialUser, token)
+		if err != nil {
+			return nil, err
+		}
+		// 将sessionID附加到响应中（用于OIDC流程）
+		response.SessionID = sessionID
+		return response, nil
 	}
 
 	// 未绑定，返回需要绑定的响应
@@ -185,6 +197,7 @@ func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state strin
 	return &dto.SocialAuthCallbackResponse{
 		NeedsBind: true,
 		BindToken: bindToken,
+		SessionID: sessionID, // 附加sessionID用于OIDC流程
 	}, nil
 }
 
@@ -451,40 +464,76 @@ func (s *SocialAuthService) generateState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-// storeState 存储state到Redis
+// StateData state关联的数据
+type StateData struct {
+	SessionID string `json:"sessionId,omitempty"` // OIDC会话ID
+	Timestamp int64  `json:"timestamp"`           // 创建时间戳
+}
+
+// storeState 存储state到Redis（兼容旧方法）
 func (s *SocialAuthService) storeState(state string, duration time.Duration) error {
+	return s.storeStateWithSessionID(state, "", duration)
+}
+
+// storeStateWithSessionID 存储state到Redis（带session_id）
+func (s *SocialAuthService) storeStateWithSessionID(state string, sessionID string, duration time.Duration) error {
 	ctx := context.Background()
 	key := s.stateKeyPrefix + state
 
-	// 存储state到Redis，使用过期时间作为TTL
-	// value存储当前时间戳，主要用于验证
-	return s.redis.Set(ctx, key, time.Now().Unix(), duration).Err()
+	// 构建state数据
+	stateData := StateData{
+		SessionID: sessionID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	// 序列化为JSON
+	data, err := json.Marshal(stateData)
+	if err != nil {
+		return fmt.Errorf("序列化state数据失败: %w", err)
+	}
+
+	// 存储到Redis，使用过期时间作为TTL
+	return s.redis.Set(ctx, key, string(data), duration).Err()
 }
 
-// validateState 验证state
+// validateState 验证state（兼容旧方法）
 func (s *SocialAuthService) validateState(state string) bool {
+	_, valid := s.validateAndGetSessionID(state)
+	return valid
+}
+
+// validateAndGetSessionID 验证state并返回关联的sessionID
+func (s *SocialAuthService) validateAndGetSessionID(state string) (string, bool) {
 	ctx := context.Background()
 	key := s.stateKeyPrefix + state
 
 	// 尝试从Redis获取state
-	_, err := s.redis.Get(ctx, key).Result()
+	data, err := s.redis.Get(ctx, key).Result()
 	if err == redis.Nil {
 		// state不存在或已过期
-		return false
+		return "", false
 	}
 	if err != nil {
 		// Redis错误，为安全起见返回false
 		fmt.Printf("验证state时Redis错误: %v\n", err)
-		return false
+		return "", false
 	}
 
 	// 验证成功后删除state（一次性使用）
 	if err := s.redis.Del(ctx, key).Err(); err != nil {
 		fmt.Printf("删除state时Redis错误: %v\n", err)
-		// 即使删除失败，也认为验证成功，因为state存在
+		// 即使删除失败，也继续处理
 	}
 
-	return true
+	// 尝试解析state数据
+	var stateData StateData
+	if err := json.Unmarshal([]byte(data), &stateData); err != nil {
+		// 可能是旧格式（时间戳），兼容处理
+		fmt.Printf("解析state数据失败，使用兼容模式: %v\n", err)
+		return "", true
+	}
+
+	return stateData.SessionID, true
 }
 
 // generateUsername 生成用户名

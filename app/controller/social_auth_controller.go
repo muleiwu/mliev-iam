@@ -31,7 +31,7 @@ func (sc SocialAuthController) GetEnabledProviders(c *gin.Context, helper interf
 }
 
 // InitiateAuth 发起OAuth授权
-// GET /api/social/auth/:provider
+// GET /api/social/auth/:provider?session_id=xxx
 func (sc SocialAuthController) InitiateAuth(c *gin.Context, helper interfaces.HelperInterface) {
 	providerIdentifier := c.Param("provider")
 	if providerIdentifier == "" {
@@ -39,8 +39,11 @@ func (sc SocialAuthController) InitiateAuth(c *gin.Context, helper interfaces.He
 		return
 	}
 
+	// 获取可选的session_id参数（用于OIDC流程）
+	sessionID := c.Query("session_id")
+
 	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
-	response, err := authService.GetAuthURL(providerIdentifier)
+	response, err := authService.GetAuthURLWithSessionID(providerIdentifier, sessionID)
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
 		return
@@ -56,7 +59,6 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 	providerIdentifier := c.Param("provider")
 	code := c.Query("code")
 	state := c.Query("state")
-	sessionID := c.Query("session_id") // OIDC会话ID
 
 	if providerIdentifier == "" {
 		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
@@ -83,6 +85,9 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 		sc.Error(c, constants.ErrCodeInternal, "回调处理失败：响应为空")
 		return
 	}
+
+	// 从response中获取sessionID（已从state中恢复）
+	sessionID := response.SessionID
 
 	// 如果需要绑定，返回HTML页面，通过postMessage通知父窗口
 	if response.NeedsBind {

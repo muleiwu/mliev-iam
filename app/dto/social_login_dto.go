@@ -139,6 +139,7 @@ type SocialAuthCallbackResponse struct {
 	IsNewUser bool          `json:"isNewUser"`           // 是否为新注册用户
 	NeedsBind bool          `json:"needsBind"`           // 是否需要绑定已有账号
 	BindToken string        `json:"bindToken,omitempty"` // 绑定令牌（用于后续绑定操作）
+	SessionID string        `json:"sessionId,omitempty"` // OIDC会话ID（用于OIDC流程）
 }
 
 // SocialBindWithLoginRequest 用社交账号绑定已有账户
