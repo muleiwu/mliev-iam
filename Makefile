@@ -1,4 +1,4 @@
-.PHONY: all build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go run clean clean-oidc clean-antd clean-go clean-packages help
+.PHONY: all build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go dev run clean clean-oidc clean-antd clean-go clean-packages help
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -12,6 +12,7 @@ help:
 	@echo "  make build-oidc     - 编译 web-oidc 前端"
 	@echo "  make build-antd     - 编译 web-antd 前端"
 	@echo "  make build-go       - 编译 Go 后端"
+	@echo "  make dev            - 开发模式（前端 watch + Go 后端）"
 	@echo "  make run            - 编译前端并运行 Go 后端"
 	@echo "  make clean          - 清理所有编译产物"
 	@echo "  make clean-oidc     - 清理 web-oidc 编译产物"
@@ -66,6 +67,17 @@ build-go:
 	@echo "==> 开始编译 Go 后端..."
 	@go build -o mliev-iam .
 	@echo "==> Go 后端编译完成！二进制文件：mliev-iam"
+
+# 开发模式：启动前端 watch 模式和 Go 后端
+dev:
+	@echo "==> 启动开发模式..."
+	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
+	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
+	@cd admin-web/apps/web-antd && pnpm dev:static &
+	@sleep 3
+	@echo "==> 启动 Go 后端 (mode=debug)..."
+	@mode=debug go run .
 
 # 编译前端并运行 Go 后端
 run: build-frontend run-go
