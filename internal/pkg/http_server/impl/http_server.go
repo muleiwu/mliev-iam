@@ -96,6 +96,7 @@ func (receiver *HttpServer) RunHttp() {
 		receiver.Helper.GetLogger().Info(fmt.Sprintf("服务器启动于 %s", addr))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			receiver.Helper.GetLogger().Error(fmt.Sprintf("启动服务器失败: %v", err))
+			panic(err)
 		}
 	}()
 
