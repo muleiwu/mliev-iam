@@ -1,4 +1,4 @@
-.PHONY: all build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go dev run clean clean-oidc clean-antd clean-go clean-packages help
+.PHONY: all install-frontend build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go dev run clean clean-oidc clean-antd clean-go clean-packages help
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -7,6 +7,7 @@ all: build-frontend build-go
 help:
 	@echo "可用的 Make 目标："
 	@echo "  make all            - 编译前端和后端（默认）"
+	@echo "  make install-frontend - 安装前端依赖（pnpm install）"
 	@echo "  make build-frontend - 编译所有前端应用（包含核心包）"
 	@echo "  make build-packages - 仅编译 @vben-core 核心包"
 	@echo "  make build-oidc     - 编译 web-oidc 前端"
@@ -20,6 +21,15 @@ help:
 	@echo "  make clean-packages - 清理核心包编译产物"
 	@echo "  make clean-go       - 清理 Go 二进制文件"
 	@echo "  make help           - 显示此帮助信息"
+
+# 安装前端依赖
+install-frontend:
+	@echo "==> 开始安装前端依赖..."
+	@echo "==> 安装 web-oidc 前端依赖..."
+	@cd admin-web/apps/web-oidc && pnpm install
+	@echo "==> 安装 web-antd 前端依赖..."
+	@cd admin-web/apps/web-antd && pnpm install
+	@echo "==> 前端依赖安装完成！"
 
 # 编译 @vben-core 核心包（前端应用的依赖）
 build-packages:
