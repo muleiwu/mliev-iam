@@ -39,8 +39,10 @@ func (receiver *StaticHandler) setupStaticFileServers() {
 	}
 
 	// 检查是否为 debug 模式
-	serverMode := receiver.helper.GetConfig().GetString("server.mode", "release")
+	serverMode := receiver.helper.GetConfig().GetString("mode", "release")
 	var webStaticFs fs.FS
+
+	receiver.helper.GetLogger().Debug(fmt.Sprintf("当前文件模式：%s", serverMode))
 
 	if serverMode == "debug" {
 		// debug 模式下从文件系统读取，支持热更新
@@ -70,7 +72,7 @@ func (receiver *StaticHandler) loadStatic(webStaticFs fs.FS, dir string) {
 	relativePath := fmt.Sprintf("/%s", dir)
 
 	// 判断是否为 debug 模式
-	serverMode := receiver.helper.GetConfig().GetString("server.mode", "release")
+	serverMode := receiver.helper.GetConfig().GetString("mode", "release")
 
 	if serverMode == "debug" {
 		// debug 模式下，直接使用磁盘路径，支持热更新
