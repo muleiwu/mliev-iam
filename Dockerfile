@@ -18,7 +18,7 @@ RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
 
 
 # 构建阶段
-FROM golang:1.25.0-alpine AS builder-go
+FROM golang:1.25-alpine AS builder-go
 
 # 设置工作目录
 WORKDIR /app
@@ -47,7 +47,7 @@ COPY . .
 COPY --from=builder-web /app/static /app/static
 
 # 构建应用
-RUN go build -ldflags="-s -w" -omliev-iam main.go
+RUN go build -ldflags="-s -w" -o mliev-iam main.go
 
 # 运行阶段
 FROM alpine:latest
@@ -63,7 +63,7 @@ RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
 WORKDIR /app
 
 # 从构建阶段复制二进制文件
-COPY --from=builder-go /app/mliev-ima .
+COPY --from=builder-go /app/mliev-iam .
 
 # 创建日志目录
 RUN mkdir -p logs && \
@@ -78,4 +78,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health/simple || exit 1
 
 # 启动应用
-CMD ["./mliev-ima"]
+CMD ["./mliev-iam"]
