@@ -1,4 +1,4 @@
-.PHONY: all install-frontend build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go dev run clean clean-oidc clean-antd clean-go clean-packages help
+.PHONY: all install-frontend build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go release dev run clean clean-oidc clean-antd clean-go clean-packages help
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -13,6 +13,7 @@ help:
 	@echo "  make build-oidc     - 编译 web-oidc 前端"
 	@echo "  make build-antd     - 编译 web-antd 前端"
 	@echo "  make build-go       - 编译 Go 后端"
+	@echo "  make release        - 交叉编译发布（goreleaser）"
 	@echo "  make dev            - 开发模式（前端 watch + Go 后端）"
 	@echo "  make run            - 编译前端并运行 Go 后端"
 	@echo "  make clean          - 清理所有编译产物"
@@ -77,6 +78,12 @@ build-go:
 	@echo "==> 开始编译 Go 后端..."
 	@go build -o mliev-iam .
 	@echo "==> Go 后端编译完成！二进制文件：mliev-iam"
+
+# 交叉编译发布（使用 goreleaser）
+release:
+	@echo "==> 开始交叉编译发布..."
+	@goreleaser release --snapshot --clean
+	@echo "==> 交叉编译完成！产物位于 dist/ 目录"
 
 # 开发模式：启动前端 watch 模式和 Go 后端
 dev:
