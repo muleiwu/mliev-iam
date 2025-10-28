@@ -221,42 +221,43 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					}
 				}
 
-				// 社会化登录路由组
-				social := api.Group("/social")
+			}
+
+			// 社会化登录路由组
+			social := router.Group("/social")
+			{
+				// 公开端点
+				social.GET("/providers", deps.WrapHandler(controller.SocialAuthController{}.GetEnabledProviders))     // 获取可用提供商列表
+				social.GET("/auth/:provider", deps.WrapHandler(controller.SocialAuthController{}.InitiateAuth))       // 发起OAuth授权
+				social.GET("/callback/:provider", deps.WrapHandler(controller.SocialAuthController{}.HandleCallback)) // OAuth回调处理
+
+				// 绑定/注册端点（公开，用于OIDC流程）
+				social.POST("/bind-with-login", deps.WrapHandler(controller.SocialAuthController{}.BindWithLogin))           // 用社交账号绑定已有账户
+				social.POST("/register-with-social", deps.WrapHandler(controller.SocialAuthController{}.RegisterWithSocial)) // 用社交账号注册新账户
+
+				// 需要用户认证的端点（使用JWT认证中间件）
+				socialAuth := social.Group("", middleware.AuthMiddleware(helper))
 				{
-					// 公开端点
-					social.GET("/providers", deps.WrapHandler(controller.SocialAuthController{}.GetEnabledProviders))     // 获取可用提供商列表
-					social.GET("/auth/:provider", deps.WrapHandler(controller.SocialAuthController{}.InitiateAuth))       // 发起OAuth授权
-					social.GET("/callback/:provider", deps.WrapHandler(controller.SocialAuthController{}.HandleCallback)) // OAuth回调处理
-
-					// 绑定/注册端点（公开，用于OIDC流程）
-					social.POST("/bind-with-login", deps.WrapHandler(controller.SocialAuthController{}.BindWithLogin))           // 用社交账号绑定已有账户
-					social.POST("/register-with-social", deps.WrapHandler(controller.SocialAuthController{}.RegisterWithSocial)) // 用社交账号注册新账户
-
-					// 需要用户认证的端点（使用JWT认证中间件）
-					socialAuth := social.Group("", middleware.AuthMiddleware(helper))
-					{
-						socialAuth.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
-						socialAuth.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
-					}
+					socialAuth.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
+					socialAuth.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
 				}
+			}
 
-				// OIDC 路由组（公开端点）
-				oidc := api.Group("/oidc")
-				{
-					// OIDC 核心端点
-					oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))    // 授权端点
-					oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token))           // 令牌端点
-					oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))      // 用户信息端点
-					oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
-					oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
-					oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点
+			// OIDC 路由组（公开端点）
+			oidc := router.Group("/oidc")
+			{
+				// OIDC 核心端点
+				oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))    // 授权端点
+				oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token))           // 令牌端点
+				oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))      // 用户信息端点
+				oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
+				oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
+				oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点
 
-					// OIDC 授权流程端点
-					oidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
-					oidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent))      // 授权确认接口
-					oidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
-				}
+				// OIDC 授权流程端点
+				oidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
+				oidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent))      // 授权确认接口
+				oidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
 			}
 
 			// OIDC 发现文档端点（标准位置）
