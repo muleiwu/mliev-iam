@@ -44,8 +44,7 @@ RUN go mod download
 # 复制源代码
 COPY . .
 # 复制构建产物到 nginx 的默认静态文件目录
-COPY --from=builder-web /app/apps/web-antd/dist /app/static/admin
-COPY --from=builder-web /app/apps/web-oidc/dist /app/static/auth
+COPY --from=builder-web /app/static /app/static
 
 # 构建应用
 RUN go build -ldflags="-s -w" -o mliev-ima main.go
