@@ -71,28 +71,37 @@ func (receiver *StaticHandler) loadStatic(webStaticFs fs.FS, dir string) {
 
 	// 判断是否为 debug 模式
 	serverMode := receiver.helper.GetConfig().GetString("server.mode", "release")
-	var subPath string
-	if serverMode == "debug" {
-		// debug 模式下，os.DirFS 已经在 static 目录，直接使用子目录名
-		subPath = dir
-	} else {
-		// 生产模式下，embed.FS 需要完整路径
-		subPath = fmt.Sprintf("static/%s", dir)
-	}
 
-	subFS, err := fs.Sub(webStaticFs, subPath)
-	if err == nil {
-		// 将Vue前端文件映射到根路径
-		receiver.engine.StaticFS(relativePath, http.FS(subFS))
-		receiver.helper.GetLogger().Info(fmt.Sprintf("已启用 %s 静态文件服务", relativePath))
-		// 处理Vue的单页面应用请求
+	if serverMode == "debug" {
+		// debug 模式下，直接使用磁盘路径，支持热更新
+		diskPath := fmt.Sprintf("./static/%s", dir)
+		receiver.engine.Static(relativePath, diskPath)
+		receiver.helper.GetLogger().Info(fmt.Sprintf("已启用 %s 静态文件服务 (Debug模式-热更新)", relativePath))
+
+		// 处理Vue的单页面应用请求 - debug 模式下从磁盘实时读取
+		indexPath := fmt.Sprintf("./static/%s/index.html", dir)
 		receiver.engine.NoRoute(func(c *gin.Context) {
 			if c.Request.Method == "GET" && !receiver.excludeStaticPath(c.Request.URL.Path) {
-				c.FileFromFS("/index.html", http.FS(subFS))
+				c.File(indexPath)
 			}
 		})
 	} else {
-		receiver.helper.GetLogger().Error(fmt.Sprintf("设置%s静态文件失败: %v", relativePath, err))
+		// 生产模式下，使用 embed.FS
+		subPath := fmt.Sprintf("static/%s", dir)
+		subFS, err := fs.Sub(webStaticFs, subPath)
+		if err == nil {
+			// 将Vue前端文件映射到根路径
+			receiver.engine.StaticFS(relativePath, http.FS(subFS))
+			receiver.helper.GetLogger().Info(fmt.Sprintf("已启用 %s 静态文件服务 (Release模式)", relativePath))
+			// 处理Vue的单页面应用请求
+			receiver.engine.NoRoute(func(c *gin.Context) {
+				if c.Request.Method == "GET" && !receiver.excludeStaticPath(c.Request.URL.Path) {
+					c.FileFromFS("/index.html", http.FS(subFS))
+				}
+			})
+		} else {
+			receiver.helper.GetLogger().Error(fmt.Sprintf("设置%s静态文件失败: %v", relativePath, err))
+		}
 	}
 }
 
