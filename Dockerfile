@@ -9,12 +9,12 @@ WORKDIR /app
 # copy package.json and pnpm-lock.yaml to workspace
 COPY . /app
 
-# 安装 pnpm
+# 安装 pnpm 并构建前端项目
 RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
-    cd /app/admin-web/apps/web-oidc && \
+    cd /app/admin-web && \
     pnpm install && \
     pnpm build:antd --filter=\!./docs && \
-    pnpm build:oidc --filter=\!./docs \
+    pnpm build:oidc --filter=\!./docs
 
 
 # 构建阶段
