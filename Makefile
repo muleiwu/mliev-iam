@@ -53,7 +53,7 @@ build-oidc-only:
 	@rm -rf static/auth
 	@mkdir -p static/auth
 	@echo "==> 切换到 admin-web/apps/web-oidc 目录并编译..."
-	@cd admin-web/apps/web-oidc && pnpm build
+	@cd admin-web/apps && pnpm build:oidc --filter=\!./docs
 	@echo "==> 复制编译产物到 static/auth..."
 	@cp -r admin-web/apps/web-oidc/dist/* static/auth/
 	@echo "==> web-oidc 前端编译完成！"
@@ -68,7 +68,7 @@ build-antd-only:
 	@rm -rf static/admin
 	@mkdir -p static/admin
 	@echo "==> 切换到 admin-web/apps/web-antd 目录并编译..."
-	@cd admin-web/apps/web-antd && pnpm build
+	@cd admin-web/apps && pnpm build:antd --filter=\!./docs
 	@echo "==> 复制编译产物到 static/admin..."
 	@cp -r admin-web/apps/web-antd/dist/* static/admin/
 	@echo "==> web-antd 前端编译完成！"

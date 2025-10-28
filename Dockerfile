@@ -46,6 +46,9 @@ COPY . .
 # 复制构建产物到 nginx 的默认静态文件目录
 COPY --from=builder-web /app/static /app/static
 
+# 下载依赖
+RUN ls /app && ls /app/static
+
 # 构建应用
 RUN go build -ldflags="-s -w" -o mliev-iam main.go
 
