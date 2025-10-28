@@ -47,7 +47,7 @@ COPY . .
 COPY --from=builder-web /app/static /app/static
 
 # 构建应用
-RUN go build -ldflags="-s -w" -o mliev-ima main.go
+RUN go build -ldflags="-s -w" -omliev-iam main.go
 
 # 运行阶段
 FROM alpine:latest
