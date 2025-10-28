@@ -128,7 +128,7 @@
 develop:
   push:
     - <<: *git-clone
-    - <<: *build-loong64
+#    - <<: *build-loong64
     - <<: *build-arm
     - <<: *build-amd64
 
@@ -146,10 +146,10 @@ develop:
           type: cnb:await
           options:
             key: build-arm64
-        - name: await the loong64
-          type: cnb:await
-          options:
-            key: build-loong64
+#        - name: await the loong64
+#          type: cnb:await
+#          options:
+#            key: build-loong64
         - name: manifest
           image: cnbcool/manifest
           settings:
@@ -174,8 +174,8 @@ $:
     - <<: *git-clone
     - <<: *build-amd64
     - <<: *build-arm
-    - <<: *build-loong64
-    - <<: *build-bin
+#    - <<: *build-loong64
+#    - <<: *build-bin
     - services:
         - docker
       name: "push"
@@ -190,14 +190,14 @@ $:
           type: cnb:await
           options:
             key: build-arm64
-        - name: await the loong64
-          type: cnb:await
-          options:
-            key: build-loong64
-        - name: await the build-bin
-          type: cnb:await
-          options:
-            key: build-bin
+#        - name: await the loong64
+#          type: cnb:await
+#          options:
+#            key: build-loong64
+#        - name: await the build-bin
+#          type: cnb:await
+#          options:
+#            key: build-bin
         - name: manifest latest
           image: cnbcool/manifest
           settings:
