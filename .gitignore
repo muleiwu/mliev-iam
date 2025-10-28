@@ -3,3 +3,4 @@ config.yaml
 /static/admin/
 /static/auth/
 /keys/
+/dist/
