@@ -2,14 +2,13 @@ package protocol
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -317,15 +316,18 @@ func (h *OIDCProtocolHandler) generateClientSecret() string {
 
 // hashClientSecret 哈希客户端密钥
 func (h *OIDCProtocolHandler) hashClientSecret(secret string) string {
-	hash := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(hash[:])
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		// bcrypt 失败的概率极低，这里简单处理
+		panic(fmt.Sprintf("bcrypt hash failed: %v", err))
+	}
+	return string(hash)
 }
 
 // verifyClientSecret 验证客户端密钥
-
 func (h *OIDCProtocolHandler) verifyClientSecret(secret, hashedSecret string) bool {
-	hash := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(hash[:]) == hashedSecret
+	err := bcrypt.CompareHashAndPassword([]byte(hashedSecret), []byte(secret))
+	return err == nil
 }
 
 // validateRedirectURIFormat 验证重定向URI格式
