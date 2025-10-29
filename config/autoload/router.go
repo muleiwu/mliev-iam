@@ -248,6 +248,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			{
 				// OIDC 核心端点
 				oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))    // 授权端点
+				oidc.POST("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))   // 授权端点
 				oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token))           // 令牌端点
 				oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))      // 用户信息端点
 				oidc.POST("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))     // 用户信息端点

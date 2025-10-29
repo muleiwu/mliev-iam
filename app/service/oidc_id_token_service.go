@@ -53,30 +53,52 @@ type IDTokenClaims struct {
 
 // OIDCIDTokenService ID Token生成服务
 type OIDCIDTokenService struct {
-	rsaKeyManager *jwt.RSAKeyManager
+	algorithm     string             // 签名算法: "RS256" 或 "HS256"
+	rsaKeyManager *jwt.RSAKeyManager // RS256 使用
+	hmacSecret    []byte             // HS256 使用
+	keyID         string             // 密钥ID
 	issuer        string
 	tokenLifetime int // 秒
 }
 
-// NewOIDCIDTokenService 创建ID Token服务
-func NewOIDCIDTokenService(rsaKeyManager *jwt.RSAKeyManager, issuer string, tokenLifetime int) *OIDCIDTokenService {
+// NewOIDCIDTokenServiceWithRSA 创建使用RSA签名的ID Token服务
+func NewOIDCIDTokenServiceWithRSA(rsaKeyManager *jwt.RSAKeyManager, issuer string, tokenLifetime int) *OIDCIDTokenService {
 	if tokenLifetime <= 0 {
 		tokenLifetime = 3600 // 默认1小时
 	}
 
 	return &OIDCIDTokenService{
+		algorithm:     "RS256",
 		rsaKeyManager: rsaKeyManager,
+		keyID:         rsaKeyManager.GetKeyID(),
 		issuer:        issuer,
 		tokenLifetime: tokenLifetime,
 	}
 }
 
-// GenerateIDToken 生成ID Token
-func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, scopes []string, nonce string, authTime *time.Time) (string, error) {
-	if !s.rsaKeyManager.IsInitialized() {
-		return "", fmt.Errorf("RSA密钥未初始化")
+// NewOIDCIDTokenServiceWithHMAC 创建使用HMAC签名的ID Token服务
+func NewOIDCIDTokenServiceWithHMAC(hmacSecret []byte, keyID, issuer string, tokenLifetime int) *OIDCIDTokenService {
+	if tokenLifetime <= 0 {
+		tokenLifetime = 3600 // 默认1小时
 	}
 
+	return &OIDCIDTokenService{
+		algorithm:     "HS256",
+		hmacSecret:    hmacSecret,
+		keyID:         keyID,
+		issuer:        issuer,
+		tokenLifetime: tokenLifetime,
+	}
+}
+
+// NewOIDCIDTokenService 创建ID Token服务（向后兼容，默认使用RSA）
+// 已弃用: 请使用 NewOIDCIDTokenServiceWithRSA 或 NewOIDCIDTokenServiceWithHMAC
+func NewOIDCIDTokenService(rsaKeyManager *jwt.RSAKeyManager, issuer string, tokenLifetime int) *OIDCIDTokenService {
+	return NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, tokenLifetime)
+}
+
+// GenerateIDToken 生成ID Token
+func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, scopes []string, nonce string, authTime *time.Time) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
 
@@ -114,13 +136,37 @@ func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, 
 		s.addPhoneClaims(claims, user)
 	}
 
-	// 使用RSA密钥管理器签名token
-	token, err := s.rsaKeyManager.SignToken(claims)
-	if err != nil {
-		return "", fmt.Errorf("签名ID Token失败: %w", err)
+	// 根据算法类型签名token
+	var tokenString string
+	var err error
+
+	switch s.algorithm {
+	case "RS256":
+		if s.rsaKeyManager == nil || !s.rsaKeyManager.IsInitialized() {
+			return "", fmt.Errorf("RS256算法需要初始化RSA密钥管理器")
+		}
+		tokenString, err = s.rsaKeyManager.SignToken(claims)
+		if err != nil {
+			return "", fmt.Errorf("使用RSA签名ID Token失败: %w", err)
+		}
+
+	case "HS256":
+		if len(s.hmacSecret) == 0 {
+			return "", fmt.Errorf("HS256算法需要HMAC密钥")
+		}
+		// 使用HMAC签名
+		token := jwtLib.NewWithClaims(jwtLib.SigningMethodHS256, claims)
+		token.Header["kid"] = s.keyID
+		tokenString, err = token.SignedString(s.hmacSecret)
+		if err != nil {
+			return "", fmt.Errorf("使用HMAC签名ID Token失败: %w", err)
+		}
+
+	default:
+		return "", fmt.Errorf("不支持的签名算法: %s", s.algorithm)
 	}
 
-	return token, nil
+	return tokenString, nil
 }
 
 // addProfileClaims 添加profile scope的claims
