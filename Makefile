@@ -1,4 +1,4 @@
-.PHONY: all install-frontend build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go release dev run clean clean-oidc clean-antd clean-go clean-packages help
+.PHONY: all install-frontend build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -6,22 +6,24 @@ all: build-frontend build-go
 # 帮助信息
 help:
 	@echo "可用的 Make 目标："
-	@echo "  make all            - 编译前端和后端（默认）"
-	@echo "  make install-frontend - 安装前端依赖（pnpm install）"
-	@echo "  make build-frontend - 编译所有前端应用（包含核心包）"
-	@echo "  make build-packages - 仅编译 @vben-core 核心包"
-	@echo "  make build-oidc     - 编译 web-oidc 前端"
-	@echo "  make build-antd     - 编译 web-antd 前端"
-	@echo "  make build-go       - 编译 Go 后端"
-	@echo "  make release        - 交叉编译发布（goreleaser）"
-	@echo "  make dev            - 开发模式（前端 watch + Go 后端）"
-	@echo "  make run            - 编译前端并运行 Go 后端"
-	@echo "  make clean          - 清理所有编译产物"
-	@echo "  make clean-oidc     - 清理 web-oidc 编译产物"
-	@echo "  make clean-antd     - 清理 web-antd 编译产物"
-	@echo "  make clean-packages - 清理核心包编译产物"
-	@echo "  make clean-go       - 清理 Go 二进制文件"
-	@echo "  make help           - 显示此帮助信息"
+	@echo "  make all                - 编译前端和后端（默认）"
+	@echo "  make install-frontend   - 安装前端依赖（pnpm install）"
+	@echo "  make build-frontend     - 编译所有前端应用（包含核心包）"
+	@echo "  make build-packages     - 仅编译 @vben-core 核心包"
+	@echo "  make build-oidc         - 编译 web-oidc 前端"
+	@echo "  make build-antd         - 编译 web-antd 前端"
+	@echo "  make build-go           - 编译 Go 后端"
+	@echo "  make release            - 交叉编译发布（goreleaser）"
+	@echo "  make dev-build-frontend - 开发模式（前端 watch）"
+	@echo "  make dev-go             - 开发模式（Go 后端）"
+	@echo "  make dev                - 开发模式（前端 watch + Go 后端）"
+	@echo "  make run                - 编译前端并运行 Go 后端"
+	@echo "  make clean              - 清理所有编译产物"
+	@echo "  make clean-oidc         - 清理 web-oidc 编译产物"
+	@echo "  make clean-antd         - 清理 web-antd 编译产物"
+	@echo "  make clean-packages     - 清理核心包编译产物"
+	@echo "  make clean-go           - 清理 Go 二进制文件"
+	@echo "  make help               - 显示此帮助信息"
 
 # 安装前端依赖
 install-frontend:
@@ -84,6 +86,17 @@ release:
 	@echo "==> 开始交叉编译发布..."
 	@goreleaser release --snapshot --clean
 	@echo "==> 交叉编译完成！产物位于 dist/ 目录"
+
+dev-build-frontend:
+	@echo "==> 启动开发模式..."
+	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
+	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
+	@cd admin-web/apps/web-antd && pnpm dev:static
+
+dev-go:
+	@echo "==> 启动 Go 后端 (mode=debug)..."
+	@mode=debug go run .
 
 # 开发模式：启动前端 watch 模式和 Go 后端
 dev:
