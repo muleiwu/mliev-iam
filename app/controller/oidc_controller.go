@@ -81,7 +81,23 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
-		oc.tokenError(c, "invalid_request", "请求参数错误: "+err.Error())
+		oc.tokenError(c, "invalid_request", "请求参数错误: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 支持HTTP Basic认证
+	// 根据 RFC 6749 Section 2.3.1，客户端可以通过HTTP Basic认证或请求体传递凭据
+	if req.ClientID == "" || req.ClientSecret == "" {
+		clientID, clientSecret, hasAuth := c.Request.BasicAuth()
+		if hasAuth {
+			req.ClientID = clientID
+			req.ClientSecret = clientSecret
+		}
+	}
+
+	// 验证必需的客户端凭据（除了public客户端的某些流程）
+	if req.ClientID == "" {
+		oc.tokenErrorWithAuth(c, "invalid_client", "缺少客户端凭据")
 		return
 	}
 
@@ -98,15 +114,21 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 	case "client_credentials":
 		response, err = authService.ExchangeClientCredentials(&req)
 	default:
-		oc.tokenError(c, "unsupported_grant_type", "不支持的授权类型")
+		oc.tokenError(c, "unsupported_grant_type", "不支持的授权类型", http.StatusBadRequest)
 		return
 	}
 
 	if err != nil {
-		// 解析错误类型
+		// 解析错误类型并返回适当的状态码
 		errorCode := err.Error()
+		statusCode := oc.getStatusCodeForError(errorCode)
 		errorDescription := oc.getTokenErrorDescription(errorCode)
-		oc.tokenError(c, errorCode, errorDescription)
+
+		if statusCode == http.StatusUnauthorized {
+			oc.tokenErrorWithAuth(c, errorCode, errorDescription)
+		} else {
+			oc.tokenError(c, errorCode, errorDescription, statusCode)
+		}
 		return
 	}
 
@@ -253,11 +275,33 @@ func (oc OIDCController) redirectWithError(c *gin.Context, redirectURI, error, e
 }
 
 // tokenError 返回令牌错误响应
-func (oc OIDCController) tokenError(c *gin.Context, error, errorDescription string) {
-	c.JSON(http.StatusBadRequest, dto.TokenErrorResponse{
+func (oc OIDCController) tokenError(c *gin.Context, error, errorDescription string, statusCode int) {
+	c.JSON(statusCode, dto.TokenErrorResponse{
 		Error:            error,
 		ErrorDescription: errorDescription,
 	})
+}
+
+// tokenErrorWithAuth 返回带WWW-Authenticate头的401错误
+// 根据 RFC 6750 Section 3，当客户端认证失败时必须包含此头
+func (oc OIDCController) tokenErrorWithAuth(c *gin.Context, error, errorDescription string) {
+	c.Header("WWW-Authenticate", `Bearer realm="token"`)
+	c.JSON(http.StatusUnauthorized, dto.TokenErrorResponse{
+		Error:            error,
+		ErrorDescription: errorDescription,
+	})
+}
+
+// getStatusCodeForError 根据错误代码返回HTTP状态码
+func (oc OIDCController) getStatusCodeForError(errorCode string) int {
+	switch errorCode {
+	case "invalid_client":
+		return http.StatusUnauthorized
+	case "server_error":
+		return http.StatusInternalServerError
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 // getTokenErrorDescription 获取令牌错误描述
