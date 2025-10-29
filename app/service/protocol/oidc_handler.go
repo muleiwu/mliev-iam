@@ -83,28 +83,33 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 }
 
 // PrepareConfig 准备OIDC配置（生成ClientID和ClientSecret）
+// 注意：此方法返回的配置包含明文的ClientSecret，仅用于创建时返回给前端
 func (h *OIDCProtocolHandler) PrepareConfig(config map[string]interface{}) (map[string]interface{}, error) {
 	// 生成ClientID
 	clientID := h.generateClientID()
 	config["clientId"] = clientID
 
-	// 生成ClientSecret（并进行哈希）
+	// 生成ClientSecret（明文）
 	clientSecret := h.generateClientSecret()
-	config["clientSecret"] = h.hashClientSecret(clientSecret)
+	config["clientSecret"] = clientSecret
 
 	// 设置默认的Token有效期（如果未设置）
 	if _, ok := config["tokenLifetime"]; !ok {
 		config["tokenLifetime"] = 3600
 	}
 
-	// 返回包含明文ClientSecret的配置（用于响应）
-	responseConfig := make(map[string]interface{})
-	for k, v := range config {
-		responseConfig[k] = v
-	}
-	responseConfig["clientSecretPlain"] = clientSecret // 用于返回给用户，仅此一次
+	return config, nil
+}
 
-	return responseConfig, nil
+// EncryptSensitiveFields 加密/哈希配置中的敏感字段（用于存储）
+// 此方法会直接修改传入的配置对象
+func (h *OIDCProtocolHandler) EncryptSensitiveFields(config map[string]interface{}) error {
+	// 对ClientSecret进行哈希处理
+	if clientSecret, ok := config["clientSecret"].(string); ok && clientSecret != "" {
+		config["clientSecret"] = h.hashClientSecret(clientSecret)
+	}
+
+	return nil
 }
 
 // CreateApplication 创建OIDC应用

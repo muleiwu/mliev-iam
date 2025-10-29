@@ -58,7 +58,18 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 		return nil, err
 	}
 
-	// 5. 创建应用模型
+	// 5. 创建配置副本（用于返回明文敏感信息）
+	plainConfig := make(map[string]interface{})
+	for k, v := range preparedConfig {
+		plainConfig[k] = v
+	}
+
+	// 6. 加密/哈希敏感字段（用于存储）
+	if err := handler.EncryptSensitiveFields(preparedConfig); err != nil {
+		return nil, fmt.Errorf("加密敏感字段失败: %w", err)
+	}
+
+	// 7. 创建应用模型（使用加密后的配置）
 	app := &model.Application{
 		Name:            req.Name,
 		Description:     req.Description,
@@ -69,18 +80,18 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 		IsVerified:      false,
 	}
 
-	// 6. 执行协议特定的创建逻辑
+	// 8. 执行协议特定的创建逻辑
 	if err := handler.CreateApplication(app); err != nil {
 		return nil, fmt.Errorf("创建应用失败: %w", err)
 	}
 
-	// 7. 保存到数据库
+	// 9. 保存到数据库
 	if err := s.appDAO.Create(app); err != nil {
 		return nil, fmt.Errorf("保存应用失败: %w", err)
 	}
 
-	// 8. 转换为响应
-	return s.modelToResponse(app, preparedConfig), nil
+	// 10. 转换为响应（使用明文配置副本）
+	return s.modelToResponse(app, plainConfig), nil
 }
 
 // GetApplication 获取应用
@@ -255,31 +266,21 @@ func (s *ApplicationService) ValidateApplication(clientID, clientSecret string) 
 // 私有方法
 
 // modelToResponse 将模型转换为响应
-func (s *ApplicationService) modelToResponse(app *model.Application, preparedConfig map[string]interface{}) *dto.ApplicationResponse {
+func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig map[string]interface{}) *dto.ApplicationResponse {
 	response := &dto.ApplicationResponse{
-		ID:             app.ID,
-		Name:           app.Name,
-		Description:    app.Description,
-		ProtocolType:   app.ProtocolType,
-		ProtocolConfig: app.ProtocolConfig,
-		IsActive:       app.IsActive,
-		IsVerified:     app.IsVerified,
-		CreatedAt:      app.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:      app.UpdatedAt.Format(time.RFC3339),
+		ID:           app.ID,
+		Name:         app.Name,
+		Description:  app.Description,
+		ProtocolType: app.ProtocolType,
+		IsActive:     app.IsActive,
+		IsVerified:   app.IsVerified,
+		CreatedAt:    app.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    app.UpdatedAt.Format(time.RFC3339),
 	}
 
-	// 如果是创建操作，需要返回明文的ClientSecret（仅OIDC）
-	if preparedConfig != nil && app.ProtocolType == string(model.ProtocolTypeOIDC) {
-		if clientSecretPlain, ok := preparedConfig["clientSecretPlain"].(string); ok {
-			// 创建一个新的配置副本，包含明文密钥
-			configCopy := make(map[string]interface{})
-			for k, v := range app.ProtocolConfig {
-				configCopy[k] = v
-			}
-			// 替换哈希后的密钥为明文密钥（仅用于响应）
-			configCopy["clientSecret"] = clientSecretPlain
-			response.ProtocolConfig = configCopy
-		}
+	// 如果提供了明文配置（创建操作），使用明文配置
+	if plainConfig != nil {
+		response.ProtocolConfig = plainConfig
 	} else {
 		// 对于非创建操作，移除敏感信息
 		configCopy := make(map[string]interface{})

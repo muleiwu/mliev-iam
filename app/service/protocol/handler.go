@@ -11,6 +11,9 @@ type ProtocolHandler interface {
 	// PrepareConfig 准备配置（例如生成ClientID/Secret）
 	PrepareConfig(config map[string]interface{}) (map[string]interface{}, error)
 
+	// EncryptSensitiveFields 加密/哈希配置中的敏感字段（用于存储）
+	EncryptSensitiveFields(config map[string]interface{}) error
+
 	// CreateApplication 创建应用时的协议特定处理
 	CreateApplication(app *model.Application) error
 
