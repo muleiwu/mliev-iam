@@ -48,7 +48,7 @@ type OIDCToken struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// 扩展属性
-	Attributes map[string]interface{} `gorm:"type:json" json:"attributes,omitempty"`
+	Attributes map[string]interface{} `gorm:"type:json;serializer:json" json:"attributes,omitempty"`
 }
 
 // TableName returns the table name for OIDCToken model

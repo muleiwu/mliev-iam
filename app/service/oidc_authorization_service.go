@@ -184,6 +184,7 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		UserID:      0, // 客户端凭据流程不关联用户
 		Scopes:      scopes,
 		ExpiresAt:   time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		Attributes:  make(map[string]interface{}),
 	}
 
 	// 保存令牌
@@ -474,6 +475,7 @@ func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID
 		Scopes:       scopes,
 		RefreshToken: refreshToken,
 		ExpiresAt:    time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		Attributes:   make(map[string]interface{}),
 	}
 
 	// 生成ID令牌（如果作用域包含openid）

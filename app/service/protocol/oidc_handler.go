@@ -317,6 +317,7 @@ func (h *OIDCProtocolHandler) hashClientSecret(secret string) string {
 }
 
 // verifyClientSecret 验证客户端密钥
+
 func (h *OIDCProtocolHandler) verifyClientSecret(secret, hashedSecret string) bool {
 	hash := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(hash[:]) == hashedSecret
