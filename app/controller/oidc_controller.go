@@ -136,36 +136,92 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 }
 
 // UserInfo OIDC用户信息端点
-// GET /oidc/userinfo
+// GET/POST /oidc/userinfo
+// 支持 GET (token 在 Authorization 头) 和 POST (token 在请求体或头)
 func (oc OIDCController) UserInfo(c *gin.Context, helper interfaces.HelperInterface) {
-	// 从Authorization头获取访问令牌
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
+	// 1. 获取访问令牌
+	accessToken := oc.extractAccessToken(c)
+	if accessToken == "" {
+		oc.userInfoError(c, "invalid_token", "缺少或无效的访问令牌")
 		return
 	}
 
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
-		return
-	}
-
-	accessToken := parts[1]
-
+	// 2. 获取用户信息
 	userInfoService := service.NewOIDCUserInfoService(helper.GetDatabase())
 	response, err := userInfoService.GetUserInfo(accessToken)
 	if err != nil {
 		errorCode := err.Error()
-		statusCode := http.StatusUnauthorized
+		errorDescription := oc.getUserInfoErrorDescription(errorCode)
+
+		// 根据错误类型返回不同状态码
 		if errorCode == "insufficient_scope" {
-			statusCode = http.StatusForbidden
+			// RFC 6750: scope 不足返回 403 + WWW-Authenticate 头
+			c.Header("WWW-Authenticate", `Bearer realm="userinfo", error="insufficient_scope", error_description="需要 openid scope"`)
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":             errorCode,
+				"error_description": errorDescription,
+			})
+		} else {
+			// 其他错误返回 401
+			oc.userInfoError(c, errorCode, errorDescription)
 		}
-		c.JSON(statusCode, gin.H{"error": errorCode})
 		return
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// extractAccessToken 从请求中提取访问令牌
+// 支持 Authorization 头 (Bearer token) 和请求体 (POST)
+func (oc OIDCController) extractAccessToken(c *gin.Context) string {
+	// 1. 优先从 Authorization 头获取
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+
+	// 2. 如果是 POST 请求，尝试从请求体获取
+	if c.Request.Method == "POST" {
+		token := c.PostForm("access_token")
+		if token != "" {
+			return strings.TrimSpace(token)
+		}
+	}
+
+	return ""
+}
+
+// userInfoError 返回 UserInfo 端点的错误响应
+// 根据 RFC 6750 Section 3，必须包含 WWW-Authenticate 头
+func (oc OIDCController) userInfoError(c *gin.Context, error, errorDescription string) {
+	// 构建 WWW-Authenticate 头
+	wwwAuth := `Bearer realm="userinfo", error="` + error + `"`
+	if errorDescription != "" {
+		wwwAuth += `, error_description="` + errorDescription + `"`
+	}
+	c.Header("WWW-Authenticate", wwwAuth)
+
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"error":             error,
+		"error_description": errorDescription,
+	})
+}
+
+// getUserInfoErrorDescription 获取 UserInfo 错误描述
+func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
+	switch errorCode {
+	case "invalid_token":
+		return "访问令牌无效或已过期"
+	case "insufficient_scope":
+		return "权限不足，需要 openid scope"
+	case "user_not_found":
+		return "用户不存在"
+	default:
+		return "未知错误"
+	}
 }
 
 // Discovery OIDC发现文档端点
