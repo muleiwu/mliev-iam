@@ -1,8 +1,6 @@
 package protocol
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 
@@ -309,9 +307,11 @@ func (h *OIDCProtocolHandler) generateClientID() string {
 
 // generateClientSecret 生成客户端密钥
 func (h *OIDCProtocolHandler) generateClientSecret() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 // hashClientSecret 哈希客户端密钥
