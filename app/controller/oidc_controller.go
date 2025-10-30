@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	"github.com/gin-gonic/gin"
@@ -105,14 +106,17 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 
+	// 获取issuer，确保与Discovery端点一致
+	issuer := utils.GetBaseURL(c, helper)
+
 	var response *dto.TokenResponse
 	var err error
 
 	switch req.GrantType {
 	case "authorization_code":
-		response, err = authService.ExchangeCodeForToken(&req)
+		response, err = authService.ExchangeCodeForToken(&req, issuer)
 	case "refresh_token":
-		response, err = authService.RefreshToken(&req)
+		response, err = authService.RefreshToken(&req, issuer)
 	case "client_credentials":
 		response, err = authService.ExchangeClientCredentials(&req)
 	default:
@@ -229,12 +233,8 @@ func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
 // Discovery OIDC发现文档端点
 // GET /.well-known/openid-configuration
 func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInterface) {
-	// 构建基础URL
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	baseURL := scheme + "://" + c.Request.Host
+	// 构建基础URL，支持反向代理场景
+	baseURL := utils.GetBaseURL(c, helper)
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
 	response := discoveryService.GetDiscoveryDocument()

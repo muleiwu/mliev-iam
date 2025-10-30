@@ -247,11 +247,14 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			oidc := router.Group("/oidc")
 			{
 				// OIDC 核心端点
-				oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))    // 授权端点
-				oidc.POST("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))   // 授权端点
-				oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token))           // 令牌端点
-				oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))      // 用户信息端点
-				oidc.POST("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))     // 用户信息端点
+				oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))  // 授权端点
+				oidc.POST("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize)) // 授权端点
+
+				oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token)) // 令牌端点
+
+				oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))  // 用户信息端点
+				oidc.POST("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo)) // 用户信息端点
+
 				oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
 				oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
 				oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点

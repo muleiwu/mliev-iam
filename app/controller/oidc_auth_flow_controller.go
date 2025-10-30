@@ -6,6 +6,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
 )
@@ -183,7 +184,10 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 		CodeChallengeMethod: session.CodeChallengeMethod,
 	}
 
-	authResponse, err := authService.ProcessAuthorize(authReq, *session.UserID)
+	// 获取issuer，确保与Discovery端点一致
+	issuer := utils.GetBaseURL(ctx, helper)
+
+	authResponse, err := authService.ProcessAuthorize(authReq, *session.UserID, issuer)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "处理授权请求失败: "+err.Error())
 		return

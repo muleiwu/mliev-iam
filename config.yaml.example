@@ -79,6 +79,12 @@ cors:
 # OIDC 配置
 oidc:
   # 颁发者标识符（通常是服务的基础URL）
+  # 注意：在反向代理（如Nginx）环境下，建议配置实际的外部访问地址
+  # 系统会优先使用 X-Forwarded-Proto 和 X-Forwarded-Host 头部，
+  # 如果没有这些头部，则使用此配置项
+  # 示例：
+  # - 开发环境: "http://localhost:8080"
+  # - 生产环境: "https://auth.example.com"
   issuer: "http://localhost:8080"
   
   # 签名密钥配置
