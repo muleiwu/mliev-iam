@@ -16,12 +16,12 @@ func GetBaseURL(c *gin.Context, helper interfaces.HelperInterface) string {
 	forwardedHost := c.GetHeader("X-Forwarded-Host")
 
 	if forwardedProto != "" && forwardedHost != "" {
-		return strings.TrimSuffix(forwardedProto+"://"+forwardedHost, "/")
+		return strings.TrimSuffix(fmt.Sprintf("%s://%s/oidc", forwardedProto, forwardedHost), "/")
 	}
 
 	// 2. 从配置文件获取 issuer
 	configuredIssuer := helper.GetEnv().GetString("oidc.issuer", "")
-	if configuredIssuer != "" && configuredIssuer != "http://localhost:8080" {
+	if configuredIssuer != "" && configuredIssuer != "http://localhost:8080/oidc" {
 		return strings.TrimSuffix(configuredIssuer, "/")
 	}
 
