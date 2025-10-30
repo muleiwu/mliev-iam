@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -161,8 +162,8 @@ func (oc OIDCController) UserInfo(c *gin.Context, helper interfaces.HelperInterf
 
 		// 根据错误类型返回不同状态码
 		if errorCode == "insufficient_scope" {
-			// RFC 6750: scope 不足返回 403 + WWW-Authenticate 头
-			c.Header("WWW-Authenticate", `Bearer realm="userinfo", error="insufficient_scope", error_description="需要 openid scope"`)
+			// RFC 6750 Section 3: scope 不足返回 403 + WWW-Authenticate 头，必须包含 scope 参数
+			c.Header("WWW-Authenticate", fmt.Sprintf(`Bearer realm="userinfo", error="insufficient_scope", error_description="%s", scope="openid"`, errorDescription))
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":             errorCode,
 				"error_description": errorDescription,
