@@ -2,13 +2,12 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -193,11 +192,11 @@ func (s *OIDCSessionService) CleanupExpiredSessions() error {
 
 // generateSessionID 生成唯一的会话ID
 func (s *OIDCSessionService) generateSessionID() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
 	}
-	return hex.EncodeToString(bytes), nil
+	return v7.String(), nil
 }
 
 // saveSession 保存会话到Redis

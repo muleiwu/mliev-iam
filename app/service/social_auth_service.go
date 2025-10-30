@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -458,11 +456,11 @@ func (s *SocialAuthService) registerWithSocialAccount(provider *model.SocialProv
 
 // generateState 生成随机state
 func (s *SocialAuthService) generateState() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	v7, err := uuid.NewV7()
+	if err != nil {
 		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b), nil
+	return v7.String(), nil
 }
 
 // StateData state关联的数据

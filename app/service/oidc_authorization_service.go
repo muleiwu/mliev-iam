@@ -1,10 +1,8 @@
 package service
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -18,6 +16,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
 	"cnb.cool/mliev/iam/mliev-iam/internal/helper"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -596,21 +595,27 @@ func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user 
 // 辅助方法
 
 func (s *OIDCAuthorizationService) generateAuthorizationCode() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 func (s *OIDCAuthorizationService) generateAccessToken() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 func (s *OIDCAuthorizationService) generateRefreshToken() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 func (s *OIDCAuthorizationService) parseScopes(scopeStr string) []string {
