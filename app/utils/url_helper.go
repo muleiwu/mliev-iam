@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
@@ -40,5 +41,5 @@ func GetBaseURL(c *gin.Context, helper interfaces.HelperInterface) string {
 		host = forwardedHost
 	}
 
-	return scheme + "://" + host
+	return fmt.Sprintf("%s://%s/oidc", scheme, host)
 }

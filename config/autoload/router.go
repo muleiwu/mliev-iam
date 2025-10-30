@@ -263,10 +263,10 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				oidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
 				oidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent))      // 授权确认接口
 				oidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
-			}
 
-			// OIDC 发现文档端点（标准位置）
-			router.GET("/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+				// OIDC 发现文档端点（标准位置）
+				oidc.GET("/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+			}
 
 		},
 	}
