@@ -237,7 +237,7 @@ func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
 func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInterface) {
 	appUuid := c.Param("uuid")
 	// 构建基础URL，支持反向代理场景
-	baseURL := utils.GetBaseURL(c, helper, appUuid)
+	baseURL := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", appUuid))
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
 	response := discoveryService.GetDiscoveryDocument()

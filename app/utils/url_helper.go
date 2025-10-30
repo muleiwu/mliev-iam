@@ -16,7 +16,7 @@ func GetBaseURL(c *gin.Context, helper interfaces.HelperInterface, path string) 
 	forwardedHost := c.GetHeader("X-Forwarded-Host")
 
 	if forwardedProto != "" && forwardedHost != "" {
-		return strings.TrimSuffix(fmt.Sprintf("%s://%s/%s", forwardedProto, forwardedHost, path), "/")
+		return strings.TrimSuffix(fmt.Sprintf("%s://%s%s", forwardedProto, forwardedHost, path), "/")
 	}
 
 	// 2. 回退到请求信息
@@ -35,5 +35,5 @@ func GetBaseURL(c *gin.Context, helper interfaces.HelperInterface, path string) 
 		host = forwardedHost
 	}
 
-	return fmt.Sprintf("%s://%s/%s", scheme, host, path)
+	return fmt.Sprintf("%s://%s%s", scheme, host, path)
 }
