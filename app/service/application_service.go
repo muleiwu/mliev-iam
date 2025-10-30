@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -52,25 +53,33 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 		return nil, err
 	}
 
-	// 4. 准备协议配置（生成必要的凭据等）
-	preparedConfig, err := handler.PrepareConfig(req.ProtocolConfig)
+	// 4. 生成 UUID v7 作为应用的唯一标识符
+	appUUID, err := uuid.NewV7()
+	if err != nil {
+		// 如果 UUID v7 生成失败，回退到 v4
+		appUUID = uuid.New()
+	}
+
+	// 5. 准备协议配置（生成必要的凭据等）
+	preparedConfig, err := handler.PrepareConfig(appUUID.String(), req.ProtocolConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	// 5. 创建配置副本（用于返回明文敏感信息）
+	// 6. 创建配置副本（用于返回明文敏感信息）
 	plainConfig := make(map[string]interface{})
 	for k, v := range preparedConfig {
 		plainConfig[k] = v
 	}
 
-	// 6. 加密/哈希敏感字段（用于存储）
+	// 7. 加密/哈希敏感字段（用于存储）
 	if err := handler.EncryptSensitiveFields(preparedConfig); err != nil {
 		return nil, fmt.Errorf("加密敏感字段失败: %w", err)
 	}
 
-	// 7. 创建应用模型（使用加密后的配置）
+	// 8. 创建应用模型（使用加密后的配置）
 	app := &model.Application{
+		UUID:            appUUID.String(),
 		Name:            req.Name,
 		Description:     req.Description,
 		ProtocolType:    req.ProtocolType,
@@ -80,17 +89,17 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 		IsVerified:      false,
 	}
 
-	// 8. 执行协议特定的创建逻辑
+	// 9. 执行协议特定的创建逻辑
 	if err := handler.CreateApplication(app); err != nil {
 		return nil, fmt.Errorf("创建应用失败: %w", err)
 	}
 
-	// 9. 保存到数据库
+	// 10. 保存到数据库
 	if err := s.appDAO.Create(app); err != nil {
 		return nil, fmt.Errorf("保存应用失败: %w", err)
 	}
 
-	// 10. 转换为响应（使用明文配置副本）
+	// 11. 转换为响应（使用明文配置副本）
 	return s.modelToResponse(app, plainConfig), nil
 }
 
@@ -269,6 +278,7 @@ func (s *ApplicationService) ValidateApplication(clientID, clientSecret string) 
 func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig map[string]interface{}) *dto.ApplicationResponse {
 	response := &dto.ApplicationResponse{
 		ID:           app.ID,
+		UUID:         app.UUID,
 		Name:         app.Name,
 		Description:  app.Description,
 		ProtocolType: app.ProtocolType,

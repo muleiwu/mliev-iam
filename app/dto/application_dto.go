@@ -21,6 +21,7 @@ type UpdateApplicationRequest struct {
 // ApplicationResponse 应用响应
 type ApplicationResponse struct {
 	ID             uint                   `json:"id"`
+	UUID           string                 `json:"uuid"`
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description"`
 	ProtocolType   string                 `json:"protocolType"`

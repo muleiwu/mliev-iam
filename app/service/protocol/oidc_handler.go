@@ -81,10 +81,9 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 
 // PrepareConfig 准备OIDC配置（生成ClientID和ClientSecret）
 // 注意：此方法返回的配置包含明文的ClientSecret，仅用于创建时返回给前端
-func (h *OIDCProtocolHandler) PrepareConfig(config map[string]interface{}) (map[string]interface{}, error) {
-	// 生成ClientID
-	clientID := h.generateClientID()
-	config["clientId"] = clientID
+func (h *OIDCProtocolHandler) PrepareConfig(uuid string, config map[string]interface{}) (map[string]interface{}, error) {
+	// 使用传入的UUID作为ClientID
+	config["clientId"] = uuid
 
 	// 生成ClientSecret（明文）
 	clientSecret := h.generateClientSecret()

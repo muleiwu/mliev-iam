@@ -22,14 +22,11 @@ func (f *ProtocolHandlerFactory) GetHandler(protocolType string) (ProtocolHandle
 	case "oidc":
 		return NewOIDCProtocolHandler(f.db), nil
 	case "saml":
-		// TODO: 实现SAML协议处理器
-		return nil, fmt.Errorf("SAML协议处理器尚未实现")
+		return NewSAMLProtocolHandler(f.db), nil
 	case "cas":
-		// TODO: 实现CAS协议处理器
-		return nil, fmt.Errorf("CAS协议处理器尚未实现")
+		return NewCASProtocolHandler(f.db), nil
 	case "oauth2":
-		// TODO: 实现OAuth2协议处理器
-		return nil, fmt.Errorf("OAuth2协议处理器尚未实现")
+		return NewOAuth2ProtocolHandler(f.db), nil
 	default:
 		return nil, fmt.Errorf("不支持的协议类型: %s", protocolType)
 	}
@@ -37,7 +34,7 @@ func (f *ProtocolHandlerFactory) GetHandler(protocolType string) (ProtocolHandle
 
 // GetSupportedProtocols 获取支持的协议列表
 func (f *ProtocolHandlerFactory) GetSupportedProtocols() []string {
-	return []string{"oidc"} // 目前只支持OIDC
+	return []string{"oidc", "saml", "cas", "oauth2"}
 }
 
 // IsProtocolSupported 检查协议是否支持

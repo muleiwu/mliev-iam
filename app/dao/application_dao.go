@@ -30,10 +30,22 @@ func (dao *ApplicationDAO) GetByID(id uint) (*model.Application, error) {
 	return &app, nil
 }
 
-// GetByClientID 根据ClientID获取应用（用于OIDC协议）
+// GetByUUID 根据UUID获取应用
+func (dao *ApplicationDAO) GetByUUID(uuid string) (*model.Application, error) {
+	var app model.Application
+	err := dao.db.Where("uuid = ?", uuid).First(&app).Error
+	if err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+// GetByClientID 根据ClientID获取应用（用于OIDC和OAuth2协议）
+// 优化：直接使用uuid字段查询，而非JSON提取
 func (dao *ApplicationDAO) GetByClientID(clientID string) (*model.Application, error) {
 	var app model.Application
-	err := dao.db.Where("protocol_type = ? AND JSON_EXTRACT(protocol_config, '$.clientId') = ?", "oidc", clientID).First(&app).Error
+	// 使用uuid字段进行高效查询（uuid即为clientId）
+	err := dao.db.Where("uuid = ? AND protocol_type IN (?)", clientID, []string{"oidc", "oauth2"}).First(&app).Error
 	if err != nil {
 		return nil, err
 	}
