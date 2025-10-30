@@ -49,6 +49,7 @@ func (receiver *HttpServer) RunHttp() {
 	engine := gin.New()
 	engine.RedirectTrailingSlash = false
 	engine.Use(receiver.traceIdMiddleware())
+	engine.Use(receiver.GinLogger())
 	engine.Use(gin.Recovery())
 
 	// 加载HTML模板
@@ -162,9 +163,65 @@ func (receiver *HttpServer) GetFunctionName(i any) string {
 
 func (receiver *HttpServer) traceIdMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uuidV4 := uuid.New().String()
-		c.Set("traceId", uuidV4)
-		c.Writer.Header().Set("trace-id", uuidV4)
+		v7, err := uuid.NewV7()
+		if err != nil {
+			v7 = uuid.New()
+		}
+		c.Set("traceId", v7.String())
+		c.Writer.Header().Set("trace-id", v7.String())
 		c.Next()
+	}
+}
+
+func (receiver *HttpServer) GinLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		query := c.Request.URL.RawQuery
+		traceId := c.GetString("traceId")
+
+		c.Next()
+
+		// 请求处理完成后记录日志
+		cost := time.Since(start)
+		zapLogger := receiver.Helper.GetLogger()
+
+		// 根据状态码决定日志级别
+		statusCode := c.Writer.Status()
+		if statusCode >= 500 {
+			zapLogger.Error("请求处理",
+				NewLoggerField("traceId", traceId),
+				NewLoggerField("method", c.Request.Method),
+				NewLoggerField("path", path),
+				NewLoggerField("query", query),
+				NewLoggerField("status", statusCode),
+				NewLoggerField("ip", c.ClientIP()),
+				NewLoggerField("latency", cost),
+				NewLoggerField("user-agent", c.Request.UserAgent()),
+				NewLoggerField("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
+			)
+		} else if statusCode >= 400 {
+			zapLogger.Warn("请求处理",
+				NewLoggerField("traceId", traceId),
+				NewLoggerField("method", c.Request.Method),
+				NewLoggerField("path", path),
+				NewLoggerField("query", query),
+				NewLoggerField("status", statusCode),
+				NewLoggerField("ip", c.ClientIP()),
+				NewLoggerField("latency", cost),
+				NewLoggerField("user-agent", c.Request.UserAgent()),
+			)
+		} else {
+			zapLogger.Info("请求处理",
+				NewLoggerField("traceId", traceId),
+				NewLoggerField("method", c.Request.Method),
+				NewLoggerField("path", path),
+				NewLoggerField("query", query),
+				NewLoggerField("status", statusCode),
+				NewLoggerField("ip", c.ClientIP()),
+				NewLoggerField("latency", cost),
+				NewLoggerField("user-agent", c.Request.UserAgent()),
+			)
+		}
 	}
 }
