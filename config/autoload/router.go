@@ -1,6 +1,8 @@
 package autoload
 
 import (
+	"net/http"
+
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
@@ -221,6 +223,12 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					}
 				}
 
+				apiOidc := api.Group("/oidc")
+				{
+					// OIDC 授权流程端点
+					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
+					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
+				}
 			}
 
 			// 社会化登录路由组
@@ -247,25 +255,22 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			oidc := router.Group("/oidc")
 			{
 				// OIDC 核心端点
-				oidc.GET("/:appId/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize)) // 授权端点
-				oidc.POST("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
+				MethodGetPost := []string{http.MethodGet, http.MethodPost}
+				oidc.Match(MethodGetPost, "/:uuid/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
+				oidc.POST("/:uuid/token", deps.WrapHandler(controller.OIDCController{}.Token))                               // 令牌端点
+				oidc.Match(MethodGetPost, "/:uuid/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))         // 用户信息端点
+				oidc.POST("/:uuid/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect))                     // 令牌内省端点
+				oidc.POST("/:uuid/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))                             // 令牌撤销端点
+				oidc.GET("/:uuid/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))                                  // JSON Web Key Set端点
+				oidc.GET("/:uuid/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+			}
 
-				oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token)) // 令牌端点
-
-				oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))  // 用户信息端点
-				oidc.POST("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo)) // 用户信息端点
-
-				oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
-				oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
-				oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点
-
-				// OIDC 授权流程端点
-				oidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
-				oidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent))      // 授权确认接口
-				oidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
-
-				// OIDC 发现文档端点（标准位置）
-				oidc.GET("/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+			webhook := router.Group("/webhook")
+			{
+				webhookOidc := webhook.Group("/oidc")
+				{
+					webhookOidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent)) // 授权确认接口
+				}
 			}
 
 		},

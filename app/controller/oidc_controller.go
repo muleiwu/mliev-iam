@@ -83,6 +83,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 // Token OIDC令牌端点
 // POST /oidc/token
 func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface) {
+	appUuid := c.Param("uuid")
 	var req dto.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
 		oc.tokenError(c, "invalid_request", "请求参数错误: "+err.Error(), http.StatusBadRequest)
@@ -108,7 +109,7 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 
 	// 获取issuer，确保与Discovery端点一致
-	issuer := utils.GetBaseURL(c, helper)
+	issuer := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", appUuid))
 
 	var response *dto.TokenResponse
 	var err error
@@ -234,8 +235,9 @@ func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
 // Discovery OIDC发现文档端点
 // GET /.well-known/openid-configuration
 func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInterface) {
+	appUuid := c.Param("uuid")
 	// 构建基础URL，支持反向代理场景
-	baseURL := utils.GetBaseURL(c, helper)
+	baseURL := utils.GetBaseURL(c, helper, appUuid)
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
 	response := discoveryService.GetDiscoveryDocument()

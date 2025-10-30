@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
@@ -124,6 +125,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 // Consent OIDC授权确认接口
 // POST /api/oidc/consent
 func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.HelperInterface) {
+	appUuid := ctx.Param("uuid")
 	var req ConsentRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -185,7 +187,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 	}
 
 	// 获取issuer，确保与Discovery端点一致
-	issuer := utils.GetBaseURL(ctx, helper)
+	issuer := utils.GetBaseURL(ctx, helper, fmt.Sprintf("/oidc/%s", appUuid))
 
 	authResponse, err := authService.ProcessAuthorize(authReq, *session.UserID, issuer)
 	if err != nil {
