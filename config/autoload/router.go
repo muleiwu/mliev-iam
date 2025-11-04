@@ -31,6 +31,13 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			// API 路由组
 			api := router.Group("/api")
 			{
+				// 系统管理路由
+				adminSystem := api.Group("/system")
+				{
+					adminSystem.GET("/reload", deps.WrapHandler(AdminController.SystemController{}.ReloadConfig)) // 重新加载配置
+					adminSystem.GET("/info", deps.WrapHandler(AdminController.SystemController{}.GetSystemInfo))  // 获取系统信息
+				}
+
 				// 管理员路由组
 				admin := api.Group("/admin")
 				{

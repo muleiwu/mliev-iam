@@ -45,6 +45,12 @@ func (receiver *Migration) Run() error {
 	return nil
 }
 
+// Stop implements ServerInterface
+func (receiver *Migration) Stop() error {
+	// Migration service doesn't need to stop anything
+	return nil
+}
+
 // seedData 初始化种子数据
 func (receiver *Migration) seedData() error {
 	db := receiver.Helper.GetDatabase()

@@ -202,3 +202,21 @@ func (receiver *Env) GetTime(key string, defaultValue time.Time) time.Time {
 	}
 	return defaultValue
 }
+
+// Reload 重新加载配置文件
+func (receiver *Env) Reload() error {
+	// 清除缓存
+	receiver.cache = sync.Map{}
+
+	// 重新读取配置文件
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Printf("警告: 重新加载配置文件失败: %v\n", err)
+		return err
+	}
+
+	// 重新预加载所有配置到缓存
+	receiver.preloadAllConfigs()
+
+	fmt.Printf("配置文件已成功重新加载\n")
+	return nil
+}

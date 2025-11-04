@@ -13,6 +13,7 @@ MLiev IAM 是一个基于 Go 语言开发的现代化企业级身份认证与访
 - **🏢 组织架构** - 支持多层级组织架构和部门管理
 - **📊 审计日志** - 完整的操作审计和安全日志记录
 - **🔧 API优先** - RESTful API设计，易于集成和扩展
+- **🔄 配置热重载** - 支持通过信号或API重新加载配置，无需重启进程
 
 ### 技术栈
 
@@ -176,6 +177,31 @@ docker build -t mliev-iam .
 docker run -p 8080:8080 mliev-iam
 ```
 
+### 配置重载
+
+系统支持在运行时重新加载配置，无需重启进程：
+
+**方法一：使用系统信号**
+```bash
+# 发送 SIGHUP 信号触发重载
+kill -HUP <PID>
+
+# 或使用脚本
+./scripts/reload-config.sh signal
+```
+
+**方法二：使用 API 接口**
+```bash
+# 需要管理员权限
+curl -X POST http://localhost:8080/api/admin/system/reload \
+  -H "Authorization: Bearer <access_token>"
+
+# 或使用脚本
+./scripts/reload-config.sh api
+```
+
+详细说明请参考：[配置重载指南](_docs/CONFIG_RELOAD_GUIDE.md)
+
 ### API 文档
 
 启动服务后，访问以下端点：
@@ -183,6 +209,8 @@ docker run -p 8080:8080 mliev-iam
 - 健康检查: `GET /health`
 - 简单健康检查: `GET /health/simple`
 - 首页: `GET /`
+- 系统信息: `GET /api/admin/system/info`
+- 配置重载: `POST /api/admin/system/reload`
 
 ## 数据模型设计
 
