@@ -22,6 +22,26 @@ func (ic InstallController) CheckInstall(c *gin.Context, helper interfaces.Helpe
 	ic.Success(c, response)
 }
 
+// TestConnection 测试数据库连接
+// POST /api/install/test-connection
+func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.HelperInterface) {
+	var req dto.DatabaseConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ic.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	installService := service.NewInstallService(helper.GetDatabase())
+
+	// 测试数据库连接
+	if err := installService.TestDatabaseConnection(req); err != nil {
+		ic.Error(c, constants.ErrCodeBadRequest, "数据库连接测试失败: "+err.Error())
+		return
+	}
+
+	ic.SuccessWithMessage(c, "数据库连接测试成功", nil)
+}
+
 // SubmitInstall 提交系统安装
 // POST /api/install/submit
 func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.HelperInterface) {
