@@ -31,6 +31,13 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			// API 路由组
 			api := router.Group("/api")
 			{
+				// 系统安装路由（公开访问，但已安装后会拒绝）
+				install := api.Group("/install")
+				{
+					install.GET("/check", deps.WrapHandler(AdminController.InstallController{}.CheckInstall))    // 检查安装状态
+					install.POST("/submit", deps.WrapHandler(AdminController.InstallController{}.SubmitInstall)) // 提交安装
+				}
+
 				// 系统管理路由
 				adminSystem := api.Group("/system")
 				{

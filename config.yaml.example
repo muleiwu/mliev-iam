@@ -1,3 +1,7 @@
+# 系统配置
+system:
+  installed: false  # 系统是否已安装
+
 # 服务器配置
 server:
   mode: release  # debug, release, test

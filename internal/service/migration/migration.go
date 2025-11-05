@@ -55,6 +55,13 @@ func (receiver *Migration) Stop() error {
 func (receiver *Migration) seedData() error {
 	db := receiver.Helper.GetDatabase()
 
+	// 检查系统是否已通过安装接口安装
+	installed := receiver.Helper.GetConfig().GetBool("system.installed", false)
+	if installed {
+		receiver.Helper.GetLogger().Info("[system already installed via install API, skipping seed data]")
+		return nil
+	}
+
 	// 检查是否已经初始化过
 	var count int64
 	db.Model(&model.User{}).Count(&count)
