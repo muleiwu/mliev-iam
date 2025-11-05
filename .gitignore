@@ -5,3 +5,4 @@ config.yaml
 /keys/
 /dist/
 /mliev-iam
+/static/install/
