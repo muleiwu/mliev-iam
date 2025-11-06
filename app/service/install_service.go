@@ -28,7 +28,7 @@ func NewInstallService(db *gorm.DB) *InstallService {
 // CheckInstallStatus 检查安装状态
 func (s *InstallService) CheckInstallStatus() *dto.InstallCheckResponse {
 	// 读取配置文件中的 installed 标记
-	installed := viper.GetBool("system.installed")
+	installed := viper.GetBool("app.installed")
 
 	response := &dto.InstallCheckResponse{
 		Installed:          installed,

@@ -50,14 +50,6 @@ func (receiver *HttpServer) RunHttp() {
 	engine.Use(receiver.GinLogger())
 	engine.Use(gin.Recovery())
 
-	// 加载HTML模板
-	if err := receiver.loadTemplates(engine); err != nil {
-		receiver.Helper.GetLogger().Error(fmt.Sprintf("加载模板失败: %v", err))
-	}
-
-	// 加载网站静态资源
-	receiver.loadWebStatic(engine)
-
 	// 注册中间件
 	//handlerFuncs := config.MiddlewareConfig{}.Get()
 	middlewareFuncList := receiver.Helper.GetConfig().Get("http.middleware", []gin.HandlerFunc{}).([]gin.HandlerFunc)
@@ -69,6 +61,14 @@ func (receiver *HttpServer) RunHttp() {
 		receiver.Helper.GetLogger().Info(fmt.Sprintf("注册中间件: %s", receiver.GetFunctionName(handlerFunc)))
 	}
 	receiver.Helper.GetLogger().Info(fmt.Sprintf("注册中间件: %d 个", len(middlewareFuncList)))
+
+	// 加载HTML模板
+	if err := receiver.loadTemplates(engine); err != nil {
+		receiver.Helper.GetLogger().Error(fmt.Sprintf("加载模板失败: %v", err))
+	}
+
+	// 加载网站静态资源
+	receiver.loadWebStatic(engine)
 
 	deps := NewHttpDeps(receiver.Helper, engine)
 	header := receiver.Helper.GetConfig().Get("http.router", func(router *gin.Engine, deps *HttpDeps) {

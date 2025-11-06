@@ -13,6 +13,11 @@ type Migration struct {
 
 func (receiver *Migration) Run() error {
 
+	if !receiver.Helper.GetConfig().GetBool("app.installed", false) {
+		receiver.Helper.GetLogger().Warn("No Install, stop migrated !")
+		return nil
+	}
+
 	if len(receiver.Migration) > 0 {
 		// Disable foreign key checks during migration
 		db := receiver.Helper.GetDatabase()
