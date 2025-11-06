@@ -9,6 +9,7 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/spf13/viper"
 	"gorm.io/datatypes"
 	"gorm.io/driver/mysql"
@@ -17,12 +18,13 @@ import (
 
 // InstallService 安装服务
 type InstallService struct {
-	db *gorm.DB
+	db     *gorm.DB
+	helper interfaces.HelperInterface
 }
 
 // NewInstallService 创建安装服务实例
-func NewInstallService(db *gorm.DB) *InstallService {
-	return &InstallService{db: db}
+func NewInstallService(db *gorm.DB, helper interfaces.HelperInterface) *InstallService {
+	return &InstallService{db: db, helper: helper}
 }
 
 // CheckInstallStatus 检查安装状态
@@ -109,6 +111,11 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) error
 
 // CreateInitialData 创建初始数据（部门、角色、权限、管理员）
 func (s *InstallService) CreateInitialData(adminInfo dto.AdminAccountInfo) error {
+	// 0. 先创建数据库表结构
+	if err := s.createDatabaseTables(); err != nil {
+		return fmt.Errorf("创建数据库表结构失败: %w", err)
+	}
+
 	// 开启事务
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// 1. 创建默认部门
@@ -405,8 +412,12 @@ func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
 	viper.Set("database.charset", charset)
 
 	// 写入配置文件
-	if err := viper.WriteConfig(); err != nil {
-		return fmt.Errorf("写入数据库配置失败: %w", err)
+	// 先尝试 SafeWriteConfig（如果文件不存在会创建）
+	if err := viper.SafeWriteConfig(); err != nil {
+		// 如果文件已存在，使用 WriteConfig 更新
+		if err := viper.WriteConfig(); err != nil {
+			return fmt.Errorf("写入数据库配置失败: %w", err)
+		}
 	}
 
 	return nil
@@ -418,9 +429,44 @@ func (s *InstallService) MarkAsInstalled() error {
 	viper.Set("app.installed", true)
 
 	// 写入配置文件
-	if err := viper.WriteConfig(); err != nil {
-		return fmt.Errorf("标记系统已安装失败: %w", err)
+	// 先尝试 SafeWriteConfig（如果文件不存在会创建）
+	if err := viper.SafeWriteConfig(); err != nil {
+		// 如果文件已存在，使用 WriteConfig 更新
+		if err := viper.WriteConfig(); err != nil {
+			return fmt.Errorf("标记系统已安装失败: %w", err)
+		}
 	}
+
+	return nil
+}
+
+// createDatabaseTables 创建数据库表结构
+func (s *InstallService) createDatabaseTables() error {
+	// 从配置中获取迁移模型列表（与 config/autoload/migration.go 保持一致）
+	migrationConfig := s.helper.GetConfig().Get("database.migration", []any{})
+	if migrationConfig == nil {
+		return fmt.Errorf("未找到数据库迁移配置")
+	}
+
+	models, ok := migrationConfig.([]interface{})
+	if !ok {
+		return fmt.Errorf("数据库迁移配置格式错误")
+	}
+
+	if len(models) == 0 {
+		return fmt.Errorf("数据库迁移配置为空")
+	}
+
+	// 禁用外键检查
+	s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
+
+	// 执行自动迁移
+	if err := s.db.AutoMigrate(models...); err != nil {
+		return fmt.Errorf("数据库表结构迁移失败: %w", err)
+	}
+
+	// 重新启用外键检查
+	s.db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
 
 	return nil
 }

@@ -12,9 +12,9 @@ type Migration struct {
 }
 
 func (receiver *Migration) Run() error {
-
+	// 检查系统是否已安装，未安装时跳过迁移（因为没有数据库配置）
 	if !receiver.Helper.GetConfig().GetBool("app.installed", false) {
-		receiver.Helper.GetLogger().Warn("No Install, stop migrated !")
+		receiver.Helper.GetLogger().Warn("系统未安装，跳过数据库迁移")
 		return nil
 	}
 

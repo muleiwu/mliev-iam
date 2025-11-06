@@ -19,7 +19,7 @@ type InstallController struct {
 // CheckInstall 检查系统安装状态
 // GET /api/install/check
 func (ic InstallController) CheckInstall(c *gin.Context, helper interfaces.HelperInterface) {
-	installService := service.NewInstallService(helper.GetDatabase())
+	installService := service.NewInstallService(helper.GetDatabase(), helper)
 	response := installService.CheckInstallStatus()
 
 	ic.Success(c, response)
@@ -34,7 +34,7 @@ func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase())
+	installService := service.NewInstallService(helper.GetDatabase(), helper)
 
 	// 测试数据库连接
 	if err := installService.TestDatabaseConnection(req); err != nil {
@@ -54,7 +54,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase())
+	installService := service.NewInstallService(helper.GetDatabase(), helper)
 
 	// 1. 检查系统是否已安装
 	status := installService.CheckInstallStatus()
