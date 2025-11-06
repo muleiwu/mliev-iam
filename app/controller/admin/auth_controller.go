@@ -7,7 +7,6 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
@@ -177,7 +176,7 @@ func (ac AuthController) isAdminUser(user *dto.UserResponse, helper interfaces.H
 	}
 
 	// 验证是否为系统角色
-	if superAdminRole.Type != model.RoleTypeSystem {
+	if !superAdminRole.IsSystem() {
 		return false
 	}
 

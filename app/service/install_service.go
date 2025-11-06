@@ -195,15 +195,20 @@ func (s *InstallService) createDefaultDepartment(tx *gorm.DB) (uint, error) {
 // createDefaultRole 创建默认角色
 func (s *InstallService) createDefaultRole(tx *gorm.DB) (uint, error) {
 	// 创建超级管理员角色
+	roleType := model.RoleTypeSystem
+	roleStatus := model.RoleStatusEnabled
+	level := 1
+	dataScope := 1
+
 	superAdminRole := &model.Role{
 		Name:        "超级管理员",
 		Code:        "super_admin",
 		Description: "系统超级管理员，拥有所有权限",
-		Type:        model.RoleTypeSystem,
-		Status:      model.RoleStatusEnabled,
-		Level:       1,
+		Type:        &roleType,
+		Status:      &roleStatus,
+		Level:       &level,
 		Path:        "/1",
-		DataScope:   1, // 全部数据权限
+		DataScope:   &dataScope, // 全部数据权限
 		Attributes:  datatypes.JSON("{}"),
 		Remark:      "系统默认超级管理员角色",
 	}

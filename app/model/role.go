@@ -51,21 +51,21 @@ func (rs RoleStatus) String() string {
 // 角色模型用于RBAC权限控制，支持角色定义与管理
 type Role struct {
 	// 基础信息
-	ID          uint       `gorm:"primaryKey" json:"id"`
-	Name        string     `gorm:"uniqueIndex;size:50;not null" json:"name" validate:"required,min=2,max=50"`
-	Code        string     `gorm:"uniqueIndex;size:50;not null" json:"code" validate:"required,min=2,max=50"`
-	Description string     `gorm:"size:255" json:"description" validate:"max=255"`
-	Type        RoleType   `gorm:"type:tinyint;default:1;not null" json:"type"`
-	Status      RoleStatus `gorm:"type:tinyint;default:1;not null" json:"status"`
+	ID          uint        `gorm:"primaryKey" json:"id"`
+	Name        string      `gorm:"uniqueIndex;size:50;not null" json:"name" validate:"required,min=2,max=50"`
+	Code        string      `gorm:"uniqueIndex;size:50;not null" json:"code" validate:"required,min=2,max=50"`
+	Description string      `gorm:"size:255" json:"description" validate:"max=255"`
+	Type        *RoleType   `gorm:"type:tinyint;default:1;not null" json:"type"`
+	Status      *RoleStatus `gorm:"type:tinyint;default:1;not null" json:"status"`
 
 	// 层级关系
 	ParentID *uint  `gorm:"index" json:"parentId"`
-	Level    int    `gorm:"default:1;not null" json:"level"`
+	Level    *int   `gorm:"default:1;not null" json:"level"`
 	Path     string `gorm:"size:500" json:"path"` // 层级路径，如: /1/2/3/
 	Sort     int    `gorm:"default:0" json:"sort"`
 
 	// 权限范围
-	DataScope int    `gorm:"default:1;not null" json:"dataScope"` // 数据权限范围：1全部 2本部门 3本部门及下级 4仅本人
+	DataScope *int   `gorm:"default:1;not null" json:"dataScope"` // 数据权限范围：1全部 2本部门 3本部门及下级 4仅本人
 	ScopeDesc string `gorm:"size:255" json:"scopeDesc"`           // 数据权限范围描述
 
 	// 时间信息
@@ -91,17 +91,21 @@ func (*Role) TableName() string {
 
 // BeforeCreate hook to set default values before creating
 func (r *Role) BeforeCreate(tx *gorm.DB) error {
-	if r.Status == 0 {
-		r.Status = RoleStatusEnabled
+	if r.Status == nil {
+		enabled := RoleStatusEnabled
+		r.Status = &enabled
 	}
-	if r.Type == 0 {
-		r.Type = RoleTypeCustom
+	if r.Type == nil {
+		custom := RoleTypeCustom
+		r.Type = &custom
 	}
-	if r.Level == 0 {
-		r.Level = 1
+	if r.Level == nil {
+		level := 1
+		r.Level = &level
 	}
-	if r.DataScope == 0 {
-		r.DataScope = 1
+	if r.DataScope == nil {
+		scope := 1
+		r.DataScope = &scope
 	}
 	return nil
 }
@@ -115,10 +119,14 @@ func (r *Role) AfterCreate(tx *gorm.DB) error {
 			return err
 		}
 		r.Path = parent.Path + "/" + string(rune(r.ID))
-		r.Level = parent.Level + 1
+		if parent.Level != nil {
+			level := *parent.Level + 1
+			r.Level = &level
+		}
 	} else {
 		r.Path = "/" + string(rune(r.ID))
-		r.Level = 1
+		level := 1
+		r.Level = &level
 	}
 
 	return tx.Model(r).Updates(map[string]interface{}{
@@ -129,22 +137,24 @@ func (r *Role) AfterCreate(tx *gorm.DB) error {
 
 // IsEnabled checks if role is enabled
 func (r *Role) IsEnabled() bool {
-	return r.Status == RoleStatusEnabled
+	return r.Status != nil && *r.Status == RoleStatusEnabled
 }
 
 // IsSystem checks if role is system role
 func (r *Role) IsSystem() bool {
-	return r.Type == RoleTypeSystem
+	return r.Type != nil && *r.Type == RoleTypeSystem
 }
 
 // Enable enables the role
 func (r *Role) Enable() {
-	r.Status = RoleStatusEnabled
+	enabled := RoleStatusEnabled
+	r.Status = &enabled
 }
 
 // Disable disables the role
 func (r *Role) Disable() {
-	r.Status = RoleStatusDisabled
+	disabled := RoleStatusDisabled
+	r.Status = &disabled
 }
 
 // IsRoot checks if role is root level
@@ -161,5 +171,5 @@ func (r *Role) GetAncestors() []uint {
 
 // CanManageDataScope checks if role can manage data in specified scope
 func (r *Role) CanManageDataScope(targetScope int) bool {
-	return r.DataScope <= targetScope
+	return r.DataScope != nil && *r.DataScope <= targetScope
 }

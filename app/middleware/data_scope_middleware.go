@@ -169,7 +169,9 @@ func getMaxDataScope(userID uint, db *gorm.DB) int {
 			roleDataScope := userRole.DataScope
 			if roleDataScope == 0 {
 				// 如果用户角色关联中没有设置，使用角色的数据权限范围
-				roleDataScope = userRole.Role.DataScope
+				if userRole.Role.DataScope != nil {
+					roleDataScope = *userRole.Role.DataScope
+				}
 			}
 
 			if roleDataScope < maxDataScope {
