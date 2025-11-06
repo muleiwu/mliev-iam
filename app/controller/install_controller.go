@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"time"
+
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/reload"
 	"github.com/gin-gonic/gin"
 )
 
@@ -92,8 +95,15 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 	// 7. 返回成功响应
 	response := dto.InstallSubmitResponse{
 		Success: true,
-		Message: "系统安装成功，请使用管理员账户登录",
+		Message: "系统安装成功，服务将自动重启以应用新配置，请稍后使用管理员账户登录",
 	}
 
 	ic.SuccessWithMessage(c, "系统安装成功", response)
+
+	// 8. 异步触发配置重载（在响应返回后）
+	go func() {
+		time.Sleep(500 * time.Millisecond) // 短暂延迟，确保响应已发送
+		reload.TriggerReload()
+		helper.GetLogger().Info("安装完成，已触发配置重载")
+	}()
 }
