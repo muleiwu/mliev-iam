@@ -415,7 +415,7 @@ func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
 // MarkAsInstalled 标记系统为已安装
 func (s *InstallService) MarkAsInstalled() error {
 	// 设置安装标记
-	viper.Set("system.installed", true)
+	viper.Set("app.installed", true)
 
 	// 写入配置文件
 	if err := viper.WriteConfig(); err != nil {

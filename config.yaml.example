@@ -1,5 +1,5 @@
 # 系统配置
-system:
+app:
   installed: false  # 系统是否已安装
 
 # 服务器配置

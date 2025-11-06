@@ -34,9 +34,9 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				// 系统安装路由（公开访问，但已安装后会拒绝）
 				install := api.Group("/install")
 				{
-					install.GET("/check", deps.WrapHandler(AdminController.InstallController{}.CheckInstall))              // 检查安装状态
-					install.POST("/test-connection", deps.WrapHandler(AdminController.InstallController{}.TestConnection)) // 测试数据库连接
-					install.POST("/submit", deps.WrapHandler(AdminController.InstallController{}.SubmitInstall))           // 提交安装
+					install.GET("/check", deps.WrapHandler(controller.InstallController{}.CheckInstall))              // 检查安装状态
+					install.POST("/test-connection", deps.WrapHandler(controller.InstallController{}.TestConnection)) // 测试数据库连接
+					install.POST("/submit", deps.WrapHandler(controller.InstallController{}.SubmitInstall))           // 提交安装
 				}
 
 				// 系统管理路由

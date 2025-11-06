@@ -1,4 +1,4 @@
-package admin
+package controller
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
@@ -10,7 +10,7 @@ import (
 
 // InstallController 系统安装控制器
 type InstallController struct {
-	BaseController
+	BaseResponse
 }
 
 // CheckInstall 检查系统安装状态
