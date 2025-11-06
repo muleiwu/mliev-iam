@@ -37,9 +37,14 @@ func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.Hel
 	installService := service.NewInstallService(helper.GetDatabase(), helper)
 
 	// 测试数据库连接
-	if err := installService.TestDatabaseConnection(req); err != nil {
+	testDB, err := installService.TestDatabaseConnection(req)
+	if err != nil {
 		ic.Error(c, constants.ErrCodeBadRequest, "数据库连接测试失败: "+err.Error())
 		return
+	}
+	// 测试成功后关闭连接
+	if sqlDB, err := testDB.DB(); err == nil {
+		sqlDB.Close()
 	}
 
 	ic.SuccessWithMessage(c, "数据库连接测试成功", nil)
@@ -63,31 +68,36 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 		return
 	}
 
-	// 2. 测试数据库连接
-	if err := installService.TestDatabaseConnection(req.Database); err != nil {
+	// 2. 测试数据库连接并获取连接实例
+	testDB, err := installService.TestDatabaseConnection(req.Database)
+	if err != nil {
 		ic.Error(c, constants.ErrCodeBadRequest, "数据库连接测试失败: "+err.Error())
 		return
 	}
+	// 确保在函数退出时关闭数据库连接
+	defer func() {
+		if sqlDB, err := testDB.DB(); err == nil {
+			sqlDB.Close()
+		}
+	}()
 
-	// 3. 更新数据库配置到配置文件
-	if err := installService.UpdateDatabaseConfig(req.Database); err != nil {
+	// 3. 使用测试成功的数据库连接创建新的 service 实例
+	newInstallService := service.NewInstallService(testDB, helper)
+
+	// 4. 更新数据库配置到配置文件
+	if err := newInstallService.UpdateDatabaseConfig(req.Database); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "更新数据库配置失败: "+err.Error())
 		return
 	}
 
-	// 4. 重新加载配置以使用新的数据库配置
-	// 注意：这里需要重新初始化数据库连接，但由于当前架构限制，
-	// 我们假设在测试连接时已经验证了配置的有效性
-	// 实际生产环境中可能需要重启应用或重新加载数据库连接
-
 	// 5. 创建初始数据（部门、角色、权限、管理员）
-	if err := installService.CreateInitialData(req.Admin); err != nil {
+	if err := newInstallService.CreateInitialData(req.Admin); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "创建初始数据失败: "+err.Error())
 		return
 	}
 
 	// 6. 标记系统为已安装
-	if err := installService.MarkAsInstalled(); err != nil {
+	if err := newInstallService.MarkAsInstalled(); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "标记系统已安装失败: "+err.Error())
 		return
 	}

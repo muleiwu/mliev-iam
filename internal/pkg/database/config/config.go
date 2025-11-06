@@ -20,7 +20,7 @@ func NewConfig(config configInterface.ConfigInterface) *DatabaseConfig {
 		Driver:   config.GetString("database.driver", "postgresql"),
 		Host:     config.GetString("database.host", "127.0.0.1"),
 		Port:     config.GetInt("database.port", 5432),
-		DBName:   config.GetString("database.dbname", "test"),
+		DBName:   config.GetString("database.database", "test"),
 		Username: config.GetString("database.username", "test"),
 		Password: config.GetString("database.password", "123456"),
 	}

@@ -70,7 +70,7 @@ func (s *InstallService) CheckInstallStatus() *dto.InstallCheckResponse {
 }
 
 // TestDatabaseConnection 测试数据库连接
-func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) error {
+func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gorm.DB, error) {
 	// 设置默认字符集
 	charset := config.Charset
 	if charset == "" {
@@ -90,23 +90,21 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) error
 	// 尝试连接数据库
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return fmt.Errorf("数据库连接失败: %w", err)
+		return nil, fmt.Errorf("数据库连接失败: %w", err)
 	}
 
 	// 测试连接
 	sqlDB, err := db.DB()
 	if err != nil {
-		return fmt.Errorf("获取数据库实例失败: %w", err)
+		return nil, fmt.Errorf("获取数据库实例失败: %w", err)
 	}
 
 	if err := sqlDB.Ping(); err != nil {
-		return fmt.Errorf("数据库ping失败: %w", err)
+		return nil, fmt.Errorf("数据库ping失败: %w", err)
 	}
 
-	// 关闭测试连接
-	sqlDB.Close()
-
-	return nil
+	// 返回数据库连接供后续使用
+	return db, nil
 }
 
 // CreateInitialData 创建初始数据（部门、角色、权限、管理员）
@@ -404,6 +402,7 @@ func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
 	}
 
 	// 更新配置
+	viper.Set("database.driver", "mysql")
 	viper.Set("database.host", config.Host)
 	viper.Set("database.port", config.Port)
 	viper.Set("database.username", config.Username)
