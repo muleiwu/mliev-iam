@@ -1,4 +1,4 @@
-.PHONY: all install-frontend build-frontend build-packages build-oidc build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help
+.PHONY: all install-frontend build-frontend build-packages build-oidc build-install build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -11,6 +11,7 @@ help:
 	@echo "  make build-frontend     - 编译所有前端应用（包含核心包）"
 	@echo "  make build-packages     - 仅编译 @vben-core 核心包"
 	@echo "  make build-oidc         - 编译 web-oidc 前端"
+	@echo "  make build-install      - 编译 web-install 前端"
 	@echo "  make build-antd         - 编译 web-antd 前端"
 	@echo "  make build-go           - 编译 Go 后端"
 	@echo "  make release            - 交叉编译发布（goreleaser）"
@@ -91,6 +92,8 @@ dev-build-frontend:
 	@echo "==> 启动开发模式..."
 	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
+	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-antd && pnpm dev:static
 
@@ -103,6 +106,8 @@ dev:
 	@echo "==> 启动开发模式..."
 	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
+	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-antd && pnpm dev:static &
 	@sleep 3
