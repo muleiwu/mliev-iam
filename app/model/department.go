@@ -109,7 +109,7 @@ type Department struct {
 	Children []Department `gorm:"foreignKey:ParentID" json:"children,omitempty"`
 	Parent   *Department  `gorm:"foreignKey:ParentID" json:"parent,omitempty"`
 	Manager  *User        `gorm:"foreignKey:ManagerID" json:"manager,omitempty"`
-	Users    []User       `gorm:"foreignKey:DepartmentID" json:"users,omitempty"`
+	// Users    []User       `gorm:"many2many:user_departments;" json:"users,omitempty"`
 }
 
 // TableName returns the table name for Department model.

@@ -20,6 +20,7 @@ const (
 type Application struct {
 	// 基础信息
 	ID          uint   `gorm:"primaryKey" json:"id"`
+	UUID        string `gorm:"size:36;uniqueIndex;not null" json:"uuid" validate:"required"`
 	Name        string `gorm:"size:100;not null" json:"name" validate:"required"`
 	Description string `gorm:"type:text" json:"description"`
 

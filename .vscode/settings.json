@@ -1,0 +1,11 @@
+{
+  "tailwindCSS.experimental.configFile": {
+    "**/admin-web/**": "admin-web/apps/web-antd/tailwind.config.mjs"
+  },
+  "tailwindCSS.includeLanguages": {
+    "vue": "html",
+    "typescript": "javascript"
+  },
+  "tailwindCSS.validate": true
+}
+

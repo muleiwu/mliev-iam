@@ -1,11 +1,13 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
 )
@@ -105,7 +107,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 	response := LoginResponse{
 		Success: true,
 		Message: "登录成功",
-		NextURL: "/oidc/consent?session_id=" + req.SessionID,
+		NextURL: "/auth/#/oidc/consent?session_id=" + req.SessionID,
 		UserInfo: &struct {
 			ID       uint   `json:"id"`
 			Username string `json:"username"`
@@ -123,6 +125,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 // Consent OIDC授权确认接口
 // POST /api/oidc/consent
 func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.HelperInterface) {
+	appUuid := ctx.Param("uuid")
 	var req ConsentRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -183,7 +186,10 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 		CodeChallengeMethod: session.CodeChallengeMethod,
 	}
 
-	authResponse, err := authService.ProcessAuthorize(authReq, *session.UserID)
+	// 获取issuer，确保与Discovery端点一致
+	issuer := utils.GetBaseURL(ctx, helper, fmt.Sprintf("/oidc/%s", appUuid))
+
+	authResponse, err := authService.ProcessAuthorize(authReq, *session.UserID, issuer)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "处理授权请求失败: "+err.Error())
 		return

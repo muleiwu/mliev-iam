@@ -1,19 +1,22 @@
 package service
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"cnb.cool/mliev/iam/mliev-iam/internal/helper"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -38,7 +41,7 @@ func NewOIDCAuthorizationService(db *gorm.DB) *OIDCAuthorizationService {
 }
 
 // ProcessAuthorize 处理授权请求
-func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, userID uint) (*dto.AuthorizeResponse, error) {
+func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, userID uint, issuer string) (*dto.AuthorizeResponse, error) {
 	// 1. 验证应用（OIDC客户端）
 	app, err := s.appService.GetApplicationByClientID(req.ClientID)
 	if err != nil {
@@ -89,31 +92,31 @@ func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, u
 	case model.ResponseTypeCode:
 		return s.handleAuthorizationCodeFlow(req, app, user, scopes)
 	case model.ResponseTypeToken:
-		return s.handleImplicitFlow(req, app, user, scopes)
+		return s.handleImplicitFlow(req, app, user, scopes, issuer)
 	case model.ResponseTypeIDToken:
-		return s.handleImplicitIDTokenFlow(req, app, user, scopes)
+		return s.handleImplicitIDTokenFlow(req, app, user, scopes, issuer)
 	default:
 		return s.errorResponse("unsupported_response_type", "不支持的响应类型", req.State), nil
 	}
 }
 
 // ExchangeCodeForToken 交换授权码获取令牌
-func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest) (*dto.TokenResponse, error) {
+func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, issuer string) (*dto.TokenResponse, error) {
 	// 1. 验证授权类型
 	if req.GrantType != string(model.GrantTypeAuthorizationCode) {
-		return nil, errors.New("unsupported_grant_type")
+		return nil, constants.ErrUnsupportedGrantType
 	}
 
 	// 2. 验证应用（客户端）
 	app, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
 	if err != nil {
-		return nil, errors.New("invalid_client")
+		return nil, constants.ErrInvalidClient
 	}
 
 	// 3. 获取授权码
 	authCode, err := s.authCodeDAO.GetValidByCode(req.Code)
 	if err != nil {
-		return nil, errors.New("invalid_grant")
+		return nil, constants.ErrInvalidGrant
 	}
 
 	// 4. 验证授权码
@@ -124,30 +127,30 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest) (
 	// 5. 标记授权码为已使用
 	authCode.MarkAsUsed()
 	if err := s.authCodeDAO.Update(authCode); err != nil {
-		return nil, errors.New("server_error")
+		return nil, constants.ErrServerError
 	}
 
 	// 6. 生成令牌
-	return s.generateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce)
+	return s.generateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer)
 }
 
 // ExchangeClientCredentials 客户端凭据流程
 func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenRequest) (*dto.TokenResponse, error) {
 	// 1. 验证授权类型
 	if req.GrantType != string(model.GrantTypeClientCredentials) {
-		return nil, errors.New("unsupported_grant_type")
+		return nil, constants.ErrUnsupportedGrantType
 	}
 
 	// 2. 验证应用（客户端）
 	app, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
 	if err != nil {
-		return nil, errors.New("invalid_client")
+		return nil, constants.ErrInvalidClient
 	}
 
 	// 3. 验证客户端支持client_credentials授权类型
 	handler := s.getOIDCHandler()
 	if err := handler.ValidateGrantType(app, string(model.GrantTypeClientCredentials)); err != nil {
-		return nil, errors.New("unauthorized_client")
+		return nil, constants.ErrUnauthorizedClient
 	}
 
 	// 4. 解析请求的作用域
@@ -166,7 +169,7 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 	// 5. 验证作用域
 	if len(scopes) > 0 {
 		if err := handler.ValidateScopes(app, scopes); err != nil {
-			return nil, errors.New("invalid_scope")
+			return nil, constants.ErrInvalidScope
 		}
 	}
 
@@ -183,11 +186,12 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		UserID:      0, // 客户端凭据流程不关联用户
 		Scopes:      scopes,
 		ExpiresAt:   time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		Attributes:  make(map[string]interface{}),
 	}
 
 	// 保存令牌
 	if err := s.tokenDAO.Create(token); err != nil {
-		return nil, errors.New("server_error")
+		return nil, constants.ErrServerError
 	}
 
 	response := &dto.TokenResponse{
@@ -201,16 +205,16 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 }
 
 // RefreshToken 刷新令牌
-func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest) (*dto.TokenResponse, error) {
+func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest, issuer string) (*dto.TokenResponse, error) {
 	// 1. 验证授权类型
 	if req.GrantType != string(model.GrantTypeRefreshToken) {
-		return nil, errors.New("unsupported_grant_type")
+		return nil, constants.ErrUnsupportedGrantType
 	}
 
 	// 2. 验证应用（客户端）
 	app, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
 	if err != nil {
-		return nil, errors.New("invalid_client")
+		return nil, constants.ErrInvalidClient
 	}
 
 	// 获取ClientID
@@ -219,18 +223,18 @@ func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest) (*dto.Tok
 	// 3. 获取刷新令牌
 	token, err := s.tokenDAO.GetValidByRefreshToken(req.RefreshToken)
 	if err != nil {
-		return nil, errors.New("invalid_grant")
+		return nil, constants.ErrInvalidGrant
 	}
 
 	// 4. 验证刷新令牌
 	if token.ClientID != clientID {
-		return nil, errors.New("invalid_grant")
+		return nil, constants.ErrInvalidGrant
 	}
 
 	// 5. 撤销旧令牌
 	token.Revoke()
 	if err := s.tokenDAO.Update(token); err != nil {
-		return nil, errors.New("server_error")
+		return nil, constants.ErrServerError
 	}
 
 	// 6. 解析请求的作用域
@@ -239,14 +243,14 @@ func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest) (*dto.Tok
 		scopes = s.parseScopes(req.Scope)
 		// 验证请求的作用域不能超过原有的作用域
 		if err := s.validateRefreshScopes(token.Scopes, scopes); err != nil {
-			return nil, errors.New("invalid_scope")
+			return nil, constants.ErrInvalidScope
 		}
 	} else {
 		scopes = token.Scopes
 	}
 
 	// 7. 生成新令牌
-	return s.generateTokens(app, token.UserID, scopes, "")
+	return s.generateTokens(app, token.UserID, scopes, "", issuer)
 }
 
 // IntrospectToken 令牌内省
@@ -265,23 +269,29 @@ func (s *OIDCAuthorizationService) IntrospectToken(req *dto.IntrospectionRequest
 		return &dto.IntrospectionResponse{Active: false}, nil
 	}
 
-	// 3. 获取用户信息
-	user, err := s.userService.GetUserByID(token.UserID)
-	if err != nil {
-		return &dto.IntrospectionResponse{Active: false}, nil
-	}
-
-	// 4. 构建响应
-	return &dto.IntrospectionResponse{
+	// 3. 构建基础响应
+	response := &dto.IntrospectionResponse{
 		Active:    true,
-		Sub:       strconv.FormatUint(uint64(user.ID), 10),
 		ClientID:  token.ClientID,
-		Username:  user.Username,
 		TokenType: string(token.TokenType),
 		Exp:       token.ExpiresAt.Unix(),
 		Iat:       token.CreatedAt.Unix(),
 		Scope:     strings.Join(token.Scopes, " "),
-	}, nil
+	}
+
+	// 4. 如果有用户信息（UserID > 0），添加用户相关字段
+	// UserID = 0 表示客户端凭据流程，不关联特定用户
+	if token.UserID > 0 {
+		user, err := s.userService.GetUserByID(token.UserID)
+		if err != nil {
+			// 令牌有效但用户不存在，返回无效令牌
+			return &dto.IntrospectionResponse{Active: false}, nil
+		}
+		response.Sub = strconv.FormatUint(uint64(user.ID), 10)
+		response.Username = user.Username
+	}
+
+	return response, nil
 }
 
 // RevokeToken 撤销令牌
@@ -289,7 +299,7 @@ func (s *OIDCAuthorizationService) RevokeToken(req *dto.RevocationRequest) error
 	// 1. 验证应用（客户端）
 	app, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
 	if err != nil {
-		return errors.New("invalid_client")
+		return constants.ErrInvalidClient
 	}
 
 	// 获取ClientID
@@ -312,12 +322,12 @@ func (s *OIDCAuthorizationService) RevokeToken(req *dto.RevocationRequest) error
 
 	// 4. 验证令牌所属客户端
 	if token.ClientID != clientID {
-		return errors.New("invalid_grant")
+		return constants.ErrInvalidGrant
 	}
 
 	// 5. 撤销令牌
 	if err := s.tokenDAO.RevokeToken(req.Token); err != nil {
-		return errors.New("server_error")
+		return constants.ErrServerError
 	}
 
 	return nil
@@ -346,7 +356,7 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 	}
 
 	if err := s.authCodeDAO.Create(authCode); err != nil {
-		return s.errorResponse("server_error", "服务器错误", req.State), nil
+		return s.errorResponse("server_error", "创建授权码失败: "+err.Error(), req.State), nil
 	}
 
 	return &dto.AuthorizeResponse{
@@ -356,9 +366,9 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 }
 
 // handleImplicitFlow 处理隐式流程
-func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string) (*dto.AuthorizeResponse, error) {
+func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string, issuer string) (*dto.AuthorizeResponse, error) {
 	// 隐式流程直接生成访问令牌
-	tokenResponse, err := s.generateTokens(app, user.ID, scopes, req.Nonce)
+	tokenResponse, err := s.generateTokens(app, user.ID, scopes, req.Nonce, issuer)
 	if err != nil {
 		return s.errorResponse("server_error", "服务器错误", req.State), nil
 	}
@@ -371,9 +381,9 @@ func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest,
 }
 
 // handleImplicitIDTokenFlow 处理隐式ID令牌流程
-func (s *OIDCAuthorizationService) handleImplicitIDTokenFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string) (*dto.AuthorizeResponse, error) {
+func (s *OIDCAuthorizationService) handleImplicitIDTokenFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string, issuer string) (*dto.AuthorizeResponse, error) {
 	// 生成ID令牌
-	idToken, err := s.generateIDToken(app, user, scopes, req.Nonce)
+	idToken, err := s.generateIDToken(app, user, scopes, req.Nonce, issuer)
 	if err != nil {
 		return s.errorResponse("server_error", "服务器错误", req.State), nil
 	}
@@ -390,22 +400,22 @@ func (s *OIDCAuthorizationService) validateAuthorizationCode(authCode *model.Aut
 
 	// 验证客户端ID
 	if authCode.ClientID != clientID {
-		return errors.New("invalid_grant")
+		return constants.ErrInvalidGrant
 	}
 
 	// 验证重定向URI
 	if authCode.RedirectURI != req.RedirectURI {
-		return errors.New("invalid_grant")
+		return constants.ErrInvalidGrant
 	}
 
 	// 验证PKCE（如果有）
 	if authCode.CodeChallenge != "" {
 		if req.CodeVerifier == "" {
-			return errors.New("invalid_request")
+			return constants.ErrInvalidRequest
 		}
 
 		if err := s.validatePKCE(authCode.CodeChallenge, authCode.CodeChallengeMethod, req.CodeVerifier); err != nil {
-			return errors.New("invalid_grant")
+			return constants.ErrInvalidGrant
 		}
 	}
 
@@ -450,7 +460,7 @@ func (s *OIDCAuthorizationService) validateRefreshScopes(originalScopes, request
 }
 
 // generateTokens 生成令牌
-func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID uint, scopes []string, nonce string) (*dto.TokenResponse, error) {
+func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
 	// 生成访问令牌
 	accessToken := s.generateAccessToken()
 	refreshToken := s.generateRefreshToken()
@@ -467,6 +477,7 @@ func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID
 		Scopes:       scopes,
 		RefreshToken: refreshToken,
 		ExpiresAt:    time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		Attributes:   make(map[string]interface{}),
 	}
 
 	// 生成ID令牌（如果作用域包含openid）
@@ -476,7 +487,7 @@ func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID
 			return nil, err
 		}
 
-		idToken, err := s.generateIDToken(app, user, scopes, nonce)
+		idToken, err := s.generateIDToken(app, user, scopes, nonce, issuer)
 		if err != nil {
 			return nil, err
 		}
@@ -504,31 +515,107 @@ func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID
 }
 
 // generateIDToken 生成ID令牌
-func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user *model.User, scopes []string, nonce string) (string, error) {
-	// 获取ID Token服务（需要从配置中获取RSA密钥管理器和issuer）
-	// 这里暂时返回占位符，等待集成全局配置
-	// TODO: 集成全局RSA密钥管理器和ID Token服务
-	return "id_token_placeholder", nil
+func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user *model.User, scopes []string, nonce string, issuer string) (string, error) {
+	// 获取全局配置
+	env := helper.GetHelper().GetEnv()
+
+	// 1. 读取OIDC配置
+	// issuer 现在从参数传入，确保与 Discovery 端点一致
+	algorithm := env.GetString("oidc.signing.algorithm", "RS256")
+	keyID := env.GetString("oidc.signing.key_id", "default")
+	idTokenLifetime := env.GetInt("oidc.token_lifetime.id_token", 3600)
+
+	// 2. 获取客户端ID
+	clientID := s.getClientIDFromApp(app)
+	if clientID == "" {
+		return "", fmt.Errorf("无法获取客户端ID")
+	}
+
+	// 3. 根据算法创建ID Token服务
+	var idTokenService *OIDCIDTokenService
+	var err error
+
+	switch strings.ToUpper(algorithm) {
+	case "RS256":
+		// 创建RSA密钥管理器
+		rsaKeyManager := jwt.NewRSAKeyManager(keyID)
+
+		// 尝试从文件路径加载私钥
+		privateKeyPath := env.GetString("oidc.signing.rsa_private_key_path", "")
+		if privateKeyPath != "" {
+			if err := rsaKeyManager.LoadPrivateKeyFromFile(privateKeyPath); err != nil {
+				return "", fmt.Errorf("加载RSA私钥失败: %w", err)
+			}
+		} else {
+			// 尝试从环境变量加载私钥内容
+			privateKeyEnv := env.GetString("oidc.signing.rsa_private_key_env", "")
+			if privateKeyEnv != "" {
+				privateKeyContent := env.GetString(privateKeyEnv, "")
+				if privateKeyContent != "" {
+					if err := rsaKeyManager.LoadPrivateKeyFromPEM(privateKeyContent); err != nil {
+						return "", fmt.Errorf("从环境变量加载RSA私钥失败: %w", err)
+					}
+				} else {
+					return "", fmt.Errorf("未配置RSA私钥（环境变量 %s 为空）", privateKeyEnv)
+				}
+			} else {
+				return "", fmt.Errorf("未配置RSA私钥路径或环境变量")
+			}
+		}
+
+		// 验证密钥是否已初始化
+		if !rsaKeyManager.IsInitialized() {
+			return "", fmt.Errorf("RSA密钥未正确初始化")
+		}
+
+		idTokenService = NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, idTokenLifetime)
+
+	case "HS256":
+		// 获取HMAC密钥
+		hmacSecret := env.GetString("oidc.signing.hmac_secret", "")
+		if hmacSecret == "" {
+			return "", fmt.Errorf("未配置HMAC密钥")
+		}
+
+		idTokenService = NewOIDCIDTokenServiceWithHMAC([]byte(hmacSecret), keyID, issuer, idTokenLifetime)
+
+	default:
+		return "", fmt.Errorf("不支持的签名算法: %s", algorithm)
+	}
+
+	// 4. 生成ID Token
+	idToken, err := idTokenService.GenerateIDToken(user, clientID, scopes, nonce, nil)
+	if err != nil {
+		return "", fmt.Errorf("生成ID Token失败: %w", err)
+	}
+
+	return idToken, nil
 }
 
 // 辅助方法
 
 func (s *OIDCAuthorizationService) generateAuthorizationCode() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 func (s *OIDCAuthorizationService) generateAccessToken() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 func (s *OIDCAuthorizationService) generateRefreshToken() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 func (s *OIDCAuthorizationService) parseScopes(scopeStr string) []string {

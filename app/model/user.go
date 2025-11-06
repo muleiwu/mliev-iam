@@ -44,8 +44,6 @@ type User struct {
 	RealName string `gorm:"size:50" json:"realName" validate:"max=50"`
 	Avatar   string `gorm:"size:255" json:"avatar" validate:"max=255"`
 
-	// 认证信息
-	Password     string `gorm:"size:100;not null" json:"-" validate:"required,min=6"`
 	Salt         string `gorm:"size:32" json:"-"`
 	PasswordHash string `gorm:"size:100" json:"-"`
 
@@ -68,10 +66,9 @@ type User struct {
 	Attributes JSONObject `gorm:"type:json" json:"attributes,omitempty"`
 	Remark     string     `gorm:"type:text" json:"remark"`
 
-	// 部门和角色关联（外键关联）
-	DepartmentID *uint `gorm:"index;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"departmentId"`
-	// Department   *Department `gorm:"foreignKey:DepartmentID" json:"department,omitempty"`
-	// Roles        []Role      `gorm:"many2many:user_roles;" json:"roles,omitempty"`
+	// 关联关系（通过独立关联表）
+	// Departments  []Department     `gorm:"many2many:user_departments;" json:"departments,omitempty"`
+	// Roles        []Role           `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 }
 
 // TableName returns the table name for User model.

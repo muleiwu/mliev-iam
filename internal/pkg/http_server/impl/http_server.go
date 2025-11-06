@@ -8,11 +8,8 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
-	"os"
-	"os/signal"
 	"reflect"
 	"runtime"
-	"syscall"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
@@ -23,6 +20,7 @@ import (
 type HttpServer struct {
 	Helper     interfaces.HelperInterface
 	routerFunc func(router *gin.Engine)
+	srv        *http.Server
 }
 
 func NewHttpServer(helper interfaces.HelperInterface) *HttpServer {
@@ -47,16 +45,10 @@ func (receiver *HttpServer) RunHttp() {
 	// 配置Gin引擎
 	// 配置Gin引擎并替换默认logger
 	engine := gin.New()
+	engine.RedirectTrailingSlash = false
 	engine.Use(receiver.traceIdMiddleware())
+	engine.Use(receiver.GinLogger())
 	engine.Use(gin.Recovery())
-
-	// 加载HTML模板
-	if err := receiver.loadTemplates(engine); err != nil {
-		receiver.Helper.GetLogger().Error(fmt.Sprintf("加载模板失败: %v", err))
-	}
-
-	// 加载网站静态资源
-	receiver.loadWebStatic(engine)
 
 	// 注册中间件
 	//handlerFuncs := config.MiddlewareConfig{}.Get()
@@ -70,6 +62,14 @@ func (receiver *HttpServer) RunHttp() {
 	}
 	receiver.Helper.GetLogger().Info(fmt.Sprintf("注册中间件: %d 个", len(middlewareFuncList)))
 
+	// 加载HTML模板
+	if err := receiver.loadTemplates(engine); err != nil {
+		receiver.Helper.GetLogger().Error(fmt.Sprintf("加载模板失败: %v", err))
+	}
+
+	// 加载网站静态资源
+	receiver.loadWebStatic(engine)
+
 	deps := NewHttpDeps(receiver.Helper, engine)
 	header := receiver.Helper.GetConfig().Get("http.router", func(router *gin.Engine, deps *HttpDeps) {
 
@@ -81,40 +81,41 @@ func (receiver *HttpServer) RunHttp() {
 
 	// 创建一个HTTP服务器，以便能够优雅关闭
 	addr := receiver.Helper.GetConfig().GetString("http.addr", ":8080")
-	srv := &http.Server{
+	receiver.srv = &http.Server{
 		Addr:    addr,
 		Handler: engine,
 	}
 
-	// 创建一个通道来接收中断信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
 	// 在单独的goroutine中启动服务器
 	go func() {
 		receiver.Helper.GetLogger().Info(fmt.Sprintf("服务器启动于 %s", addr))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := receiver.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			receiver.Helper.GetLogger().Error(fmt.Sprintf("启动服务器失败: %v", err))
+			panic(err)
 		}
 	}()
+}
 
-	// 在单独的goroutine中等待中断信号以便优雅关闭
-	go func() {
-		// 等待中断信号
-		<-quit
-		receiver.Helper.GetLogger().Info("正在关闭服务器...")
+// Stop 停止HTTP服务器
+func (receiver *HttpServer) Stop() error {
+	if receiver.srv == nil {
+		return nil
+	}
 
-		// 创建一个5秒的上下文用于超时控制
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	receiver.Helper.GetLogger().Info("正在关闭HTTP服务器...")
 
-		// 优雅地关闭服务器
-		if err := srv.Shutdown(ctx); err != nil {
-			receiver.Helper.GetLogger().Error(fmt.Sprintf("服务器强制关闭: %v", err))
-		}
+	// 创建一个5秒的上下文用于超时控制
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		receiver.Helper.GetLogger().Info("服务器已优雅关闭")
-	}()
+	// 优雅地关闭服务器
+	if err := receiver.srv.Shutdown(ctx); err != nil {
+		receiver.Helper.GetLogger().Error(fmt.Sprintf("HTTP服务器强制关闭: %v", err))
+		return err
+	}
+
+	receiver.Helper.GetLogger().Info("HTTP服务器已优雅关闭")
+	return nil
 }
 
 // loadTemplates 加载模板到Gin引擎
@@ -160,9 +161,65 @@ func (receiver *HttpServer) GetFunctionName(i any) string {
 
 func (receiver *HttpServer) traceIdMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uuidV4 := uuid.New().String()
-		c.Set("traceId", uuidV4)
-		c.Writer.Header().Set("trace-id", uuidV4)
+		v7, err := uuid.NewV7()
+		if err != nil {
+			v7 = uuid.New()
+		}
+		c.Set("traceId", v7.String())
+		c.Writer.Header().Set("trace-id", v7.String())
 		c.Next()
+	}
+}
+
+func (receiver *HttpServer) GinLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		query := c.Request.URL.RawQuery
+		traceId := c.GetString("traceId")
+
+		c.Next()
+
+		// 请求处理完成后记录日志
+		cost := time.Since(start)
+		zapLogger := receiver.Helper.GetLogger()
+
+		// 根据状态码决定日志级别
+		statusCode := c.Writer.Status()
+		if statusCode >= 500 {
+			zapLogger.Error("请求处理",
+				NewLoggerField("traceId", traceId),
+				NewLoggerField("method", c.Request.Method),
+				NewLoggerField("path", path),
+				NewLoggerField("query", query),
+				NewLoggerField("status", statusCode),
+				NewLoggerField("ip", c.ClientIP()),
+				NewLoggerField("latency", cost),
+				NewLoggerField("user-agent", c.Request.UserAgent()),
+				NewLoggerField("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
+			)
+		} else if statusCode >= 400 {
+			zapLogger.Warn("请求处理",
+				NewLoggerField("traceId", traceId),
+				NewLoggerField("method", c.Request.Method),
+				NewLoggerField("path", path),
+				NewLoggerField("query", query),
+				NewLoggerField("status", statusCode),
+				NewLoggerField("ip", c.ClientIP()),
+				NewLoggerField("latency", cost),
+				NewLoggerField("user-agent", c.Request.UserAgent()),
+			)
+		} else {
+			zapLogger.Info("请求处理",
+				NewLoggerField("traceId", traceId),
+				NewLoggerField("method", c.Request.Method),
+				NewLoggerField("path", path),
+				NewLoggerField("query", query),
+				NewLoggerField("status", statusCode),
+				NewLoggerField("ip", c.ClientIP()),
+				NewLoggerField("latency", cost),
+				NewLoggerField("user-agent", c.Request.UserAgent()),
+			)
+		}
 	}
 }

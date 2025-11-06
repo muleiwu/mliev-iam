@@ -15,10 +15,11 @@ func (receiver Migration) Get() []any {
 		&model.Role{},
 		&model.Permission{},
 
-		// 用户相关模型（依赖Department）
+		// 用户相关模型
 		&model.User{},
 
-		// 关联表模型（依赖User和Role/Permission）
+		// 关联表模型（依赖User和Role/Permission/Department）
+		&model.UserDepartment{}, // 用户部门关联表（保持独立性，支持To C和To B）
 		&model.UserRole{},
 		&model.RolePermission{},
 
@@ -28,6 +29,10 @@ func (receiver Migration) Get() []any {
 		// OIDC协议相关模型
 		&model.AuthorizationCode{},
 		&model.OIDCToken{},
+
+		// 社会化登录相关模型
+		&model.SocialProvider{},    // 社会化登录提供商配置表
+		&model.UserSocialAccount{}, // 用户社交账号绑定表
 
 		// 测试模型（可选）
 		//&model.TestDemo{},

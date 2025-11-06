@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
@@ -197,7 +196,7 @@ func RequireRole(roleCode string, helper interfaces.HelperInterface) gin.Handler
 		// 检查是否有指定角色
 		hasRole := false
 		for _, role := range userRoles {
-			if role.Code == roleCode && role.Status == model.RoleStatusEnabled {
+			if role.Code == roleCode && role.IsEnabled() {
 				hasRole = true
 				break
 			}
@@ -269,7 +268,7 @@ func RequireAnyRole(roleCodes []string, helper interfaces.HelperInterface) gin.H
 		// 检查是否有任意一个指定角色
 		hasRole := false
 		for _, role := range userRoles {
-			if role.Status == model.RoleStatusEnabled {
+			if role.IsEnabled() {
 				for _, roleCode := range roleCodes {
 					if role.Code == roleCode {
 						hasRole = true

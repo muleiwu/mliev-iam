@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
@@ -59,7 +60,7 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 
 	// 这里可以添加额外的管理员权限验证
 	// 例如检查用户是否有管理员角色或权限
-	if !ac.isAdminUser(userResponse) {
+	if !ac.isAdminUser(userResponse, helper) {
 		ac.Error(c, constants.ErrCodeForbidden, "权限不足，仅限管理员登录")
 		return
 	}
@@ -162,20 +163,33 @@ func (ac AuthController) GetAdminProfile(c *gin.Context, helper interfaces.Helpe
 }
 
 // isAdminUser 检查用户是否为管理员
-// 这里应该根据实际的角色权限系统来实现
-func (ac AuthController) isAdminUser(user *dto.UserResponse) bool {
-	// 简单的检查逻辑，可以根据实际需求扩展
-	// 例如检查用户名是否为admin，或者检查用户的角色权限
-	adminUsernames := []string{"admin", "administrator", "root"}
-	for _, adminUsername := range adminUsernames {
-		if strings.EqualFold(user.Username, adminUsername) {
-			return true
-		}
+// 通过查询用户是否关联 super_admin 系统角色来判断
+func (ac AuthController) isAdminUser(user *dto.UserResponse, helper interfaces.HelperInterface) bool {
+	// 创建 RoleDao 实例
+	roleDao := dao.NewRoleDao(helper.GetDatabase())
+
+	// 查询 super_admin 角色
+	superAdminRole, err := roleDao.GetByCode("super_admin")
+	if err != nil {
+		// 如果角色不存在，返回 false
+		return false
 	}
 
-	// 这里还可以添加基于角色的检查
-	// 例如检查用户是否有管理员角色
-	// return user.HasRole("admin") || user.HasPermission("admin_access")
+	// 验证是否为系统角色
+	if !superAdminRole.IsSystem() {
+		return false
+	}
 
-	return false
+	// 创建 UserRoleDao 实例
+	userRoleDao := dao.NewUserRoleDao(helper.GetDatabase())
+
+	// 查询用户和角色的关联
+	userRole, err := userRoleDao.GetByUserIDAndRoleID(user.ID, superAdminRole.ID)
+	if err != nil {
+		// 如果关联不存在，返回 false
+		return false
+	}
+
+	// 检查关联是否有效（激活、已批准且未过期）
+	return userRole.IsValid()
 }

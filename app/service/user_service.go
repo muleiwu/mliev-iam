@@ -78,13 +78,11 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		Nickname:     req.Nickname,
 		RealName:     req.RealName,
 		Avatar:       req.Avatar,
-		Password:     req.Password, // 这里存储的是明文密码，实际应该清除
 		Salt:         salt,
 		PasswordHash: passwordHash,
 		Status:       model.UserStatusInactive,
 		IsActivated:  false,
 		IsVerified:   false,
-		DepartmentID: req.DepartmentID,
 		Remark:       req.Remark,
 	}
 
@@ -92,9 +90,6 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 	if err := s.userDao.Create(user); err != nil {
 		return nil, err
 	}
-
-	// 清除明文密码
-	user.Password = ""
 
 	// 转换为响应DTO
 	response := dto.ConvertToUserResponse(user)
@@ -163,9 +158,6 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	}
 	if req.Avatar != "" {
 		user.Avatar = req.Avatar
-	}
-	if req.DepartmentID != nil {
-		user.DepartmentID = req.DepartmentID
 	}
 	if req.Remark != "" {
 		user.Remark = req.Remark
@@ -334,6 +326,18 @@ func (s *UserService) GetUsersByDepartment(departmentID uint) ([]dto.UserRespons
 	return dto.ConvertToUserResponses(users), nil
 }
 
+// GetUserDepartments 获取用户的部门列表
+func (s *UserService) GetUserDepartments(userID uint) ([]*dto.UserDepartmentResponseDto, error) {
+	// 使用 UserDepartmentDao 获取用户的部门关系
+	userDeptDao := dao.NewUserDepartmentDao(s.database)
+	userDepts, err := userDeptDao.FindByUserWithDepartment(userID)
+	if err != nil {
+		return nil, fmt.Errorf("获取用户部门失败: %w", err)
+	}
+
+	return dto.ToUserDepartmentResponseDtoList(userDepts), nil
+}
+
 // GetActiveUsersCount 获取活跃用户数量
 func (s *UserService) GetActiveUsersCount() (int64, error) {
 	return s.userDao.GetActiveUsersCount()
@@ -354,6 +358,11 @@ func (s *UserService) generatePasswordHash(password string) (salt, hash string, 
 	hash = hex.EncodeToString(h.Sum(nil))
 
 	return salt, hash, nil
+}
+
+// GeneratePasswordHash 生成密码哈希（公开方法）
+func (s *UserService) GeneratePasswordHash(password string) (salt, hash string, err error) {
+	return s.generatePasswordHash(password)
 }
 
 // verifyPassword 验证密码

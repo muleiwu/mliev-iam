@@ -97,7 +97,16 @@ func (s *OIDCUserInfoService) buildUserInfoResponse(user *model.User, scopes []s
 
 	if s.hasScope(scopes, "email") {
 		response.Email = user.Email
-		response.EmailVerified = user.IsVerified
+		// 优先从扩展属性中获取email_verified，否则使用IsVerified作为fallback
+		if user.Attributes != nil {
+			if emailVerified, ok := user.Attributes["email_verified"].(bool); ok {
+				response.EmailVerified = emailVerified
+			} else {
+				response.EmailVerified = user.IsVerified
+			}
+		} else {
+			response.EmailVerified = user.IsVerified
+		}
 	}
 
 	if s.hasScope(scopes, "phone") {
@@ -153,12 +162,12 @@ func NewOIDCDiscoveryService(baseURL string) *OIDCDiscoveryService {
 func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse {
 	return &dto.OIDCDiscoveryResponse{
 		Issuer:                            s.baseURL,
-		AuthorizationEndpoint:             fmt.Sprintf("%s/oidc/authorize", s.baseURL),
-		TokenEndpoint:                     fmt.Sprintf("%s/oidc/token", s.baseURL),
-		UserInfoEndpoint:                  fmt.Sprintf("%s/oidc/userinfo", s.baseURL),
-		JwksURI:                           fmt.Sprintf("%s/oidc/jwks", s.baseURL),
-		RevocationEndpoint:                fmt.Sprintf("%s/oidc/revoke", s.baseURL),
-		IntrospectionEndpoint:             fmt.Sprintf("%s/oidc/introspect", s.baseURL),
+		AuthorizationEndpoint:             fmt.Sprintf("%s/authorize", s.baseURL),
+		TokenEndpoint:                     fmt.Sprintf("%s/token", s.baseURL),
+		UserInfoEndpoint:                  fmt.Sprintf("%s/userinfo", s.baseURL),
+		JwksURI:                           fmt.Sprintf("%s/jwks", s.baseURL),
+		RevocationEndpoint:                fmt.Sprintf("%s/revoke", s.baseURL),
+		IntrospectionEndpoint:             fmt.Sprintf("%s/introspect", s.baseURL),
 		ResponseTypesSupported:            []string{"code", "token", "id_token", "code token", "code id_token", "token id_token", "code token id_token"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256", "HS256"},

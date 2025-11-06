@@ -8,27 +8,25 @@ import (
 
 // CreateUserRequest 创建用户请求
 type CreateUserRequest struct {
-	Username     string `json:"username" validate:"required,min=3,max=50" binding:"required"`
-	Email        string `json:"email" validate:"email,max=100" binding:"omitempty,email"`
-	Phone        string `json:"phone" validate:"max=20" binding:"omitempty"`
-	Nickname     string `json:"nickname" validate:"max=50" binding:"omitempty"`
-	RealName     string `json:"realName" validate:"max=50" binding:"omitempty"`
-	Avatar       string `json:"avatar" validate:"max=255" binding:"omitempty"`
-	Password     string `json:"password" validate:"required,min=6" binding:"required"`
-	DepartmentID *uint  `json:"departmentId" binding:"omitempty"`
-	Remark       string `json:"remark" binding:"omitempty"`
+	Username string `json:"username" validate:"required,min=3,max=50" binding:"required"`
+	Email    string `json:"email" validate:"email,max=100" binding:"omitempty,email"`
+	Phone    string `json:"phone" validate:"max=20" binding:"omitempty"`
+	Nickname string `json:"nickname" validate:"max=50" binding:"omitempty"`
+	RealName string `json:"realName" validate:"max=50" binding:"omitempty"`
+	Avatar   string `json:"avatar" validate:"max=255" binding:"omitempty"`
+	Password string `json:"password" validate:"required,min=6" binding:"required"`
+	Remark   string `json:"remark" binding:"omitempty"`
 }
 
 // UpdateUserRequest 更新用户请求
 type UpdateUserRequest struct {
-	Email        string                 `json:"email" validate:"email,max=100" binding:"omitempty,email"`
-	Phone        string                 `json:"phone" validate:"max=20" binding:"omitempty"`
-	Nickname     string                 `json:"nickname" validate:"max=50" binding:"omitempty"`
-	RealName     string                 `json:"realName" validate:"max=50" binding:"omitempty"`
-	Avatar       string                 `json:"avatar" validate:"max=255" binding:"omitempty"`
-	DepartmentID *uint                  `json:"departmentId" binding:"omitempty"`
-	Remark       string                 `json:"remark" binding:"omitempty"`
-	Attributes   map[string]interface{} `json:"attributes" binding:"omitempty"`
+	Email      string                 `json:"email" validate:"email,max=100" binding:"omitempty,email"`
+	Phone      string                 `json:"phone" validate:"max=20" binding:"omitempty"`
+	Nickname   string                 `json:"nickname" validate:"max=50" binding:"omitempty"`
+	RealName   string                 `json:"realName" validate:"max=50" binding:"omitempty"`
+	Avatar     string                 `json:"avatar" validate:"max=255" binding:"omitempty"`
+	Remark     string                 `json:"remark" binding:"omitempty"`
+	Attributes map[string]interface{} `json:"attributes" binding:"omitempty"`
 }
 
 // ChangePasswordRequest 修改密码请求
@@ -39,15 +37,14 @@ type ChangePasswordRequest struct {
 
 // UserQueryRequest 用户查询请求
 type UserQueryRequest struct {
-	Page         int    `form:"page" validate:"min=1" binding:"omitempty,min=1"`
-	PageSize     int    `form:"pageSize" validate:"min=1,max=100" binding:"omitempty,min=1,max=100"`
-	Username     string `form:"username" binding:"omitempty"`
-	Email        string `form:"email" binding:"omitempty"`
-	Phone        string `form:"phone" binding:"omitempty"`
-	RealName     string `form:"realName" binding:"omitempty"`
-	Status       *int   `form:"status" binding:"omitempty"`
-	DepartmentID *uint  `form:"departmentId" binding:"omitempty"`
-	Keyword      string `form:"keyword" binding:"omitempty"` // 关键词搜索（用户名、邮箱、真实姓名）
+	Page     int    `form:"page" validate:"min=1" binding:"omitempty,min=1"`
+	PageSize int    `form:"pageSize" validate:"min=1,max=100" binding:"omitempty,min=1,max=100"`
+	Username string `form:"username" binding:"omitempty"`
+	Email    string `form:"email" binding:"omitempty"`
+	Phone    string `form:"phone" binding:"omitempty"`
+	RealName string `form:"realName" binding:"omitempty"`
+	Status   *int   `form:"status" binding:"omitempty"`
+	Keyword  string `form:"keyword" binding:"omitempty"` // 关键词搜索（用户名、邮箱、真实姓名）
 }
 
 // UserResponse 用户响应信息
@@ -67,7 +64,6 @@ type UserResponse struct {
 	FailureCount int                    `json:"failureCount"`
 	LastLoginAt  *time.Time             `json:"lastLoginAt"`
 	LastLoginIP  string                 `json:"lastLoginIP"`
-	DepartmentID *uint                  `json:"departmentId"`
 	Attributes   map[string]interface{} `json:"attributes,omitempty"`
 	Remark       string                 `json:"remark"`
 	CreatedAt    time.Time              `json:"createdAt"`
@@ -113,7 +109,6 @@ func ConvertToUserResponse(user *model.User) UserResponse {
 		FailureCount: user.FailureCount,
 		LastLoginAt:  user.LastLoginAt,
 		LastLoginIP:  user.LastLoginIP,
-		DepartmentID: user.DepartmentID,
 		Attributes:   user.Attributes,
 		Remark:       user.Remark,
 		CreatedAt:    user.CreatedAt,

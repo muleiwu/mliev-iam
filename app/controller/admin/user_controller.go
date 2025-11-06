@@ -252,6 +252,26 @@ func (auc UserController) GetUsersByDepartment(c *gin.Context, helper interfaces
 	auc.Success(c, response)
 }
 
+// GetUserDepartments 获取用户的部门列表（管理员操作）
+// GET /api/admin/users/:id/departments
+func (auc UserController) GetUserDepartments(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	userID, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		auc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	response, err := userService.GetUserDepartments(uint(userID))
+	if err != nil {
+		auc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	auc.Success(c, response)
+}
+
 // GetActiveUsersCount 获取活跃用户数量统计（管理员操作）
 // GET /api/admin/users/stats/active-count
 func (auc UserController) GetActiveUsersCount(c *gin.Context, helper interfaces.HelperInterface) {

@@ -117,19 +117,44 @@ type RoleStatsResponse struct {
 
 // ConvertToRoleResponse 转换为角色响应DTO
 func ConvertToRoleResponse(role *model.Role) RoleResponse {
+	// 处理指针类型的字段
+	var roleType model.RoleType
+	var typeName string
+	if role.Type != nil {
+		roleType = *role.Type
+		typeName = role.Type.String()
+	}
+
+	var roleStatus model.RoleStatus
+	var statusName string
+	if role.Status != nil {
+		roleStatus = *role.Status
+		statusName = role.Status.String()
+	}
+
+	var level int
+	if role.Level != nil {
+		level = *role.Level
+	}
+
+	var dataScope int
+	if role.DataScope != nil {
+		dataScope = *role.DataScope
+	}
+
 	response := RoleResponse{
 		ID:          role.ID,
 		Name:        role.Name,
 		Code:        role.Code,
 		Description: role.Description,
-		Type:        role.Type,
-		TypeName:    role.Type.String(),
-		Status:      role.Status,
-		StatusName:  role.Status.String(),
+		Type:        roleType,
+		TypeName:    typeName,
+		Status:      roleStatus,
+		StatusName:  statusName,
 		ParentID:    role.ParentID,
-		Level:       role.Level,
+		Level:       level,
 		Path:        role.Path,
-		DataScope:   role.DataScope,
+		DataScope:   dataScope,
 		ScopeDesc:   role.ScopeDesc,
 		CreatedAt:   role.CreatedAt,
 		UpdatedAt:   role.UpdatedAt,

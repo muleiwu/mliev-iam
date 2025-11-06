@@ -21,7 +21,7 @@ type AuthorizationCode struct {
 
 	// 授权信息
 	RedirectURI string   `gorm:"size:255;not null" json:"redirectUri"`
-	Scopes      []string `gorm:"type:json" json:"scopes"`
+	Scopes      []string `gorm:"type:json;serializer:json" json:"scopes"`
 	State       string   `gorm:"size:255" json:"state"`
 	Nonce       string   `gorm:"size:255" json:"nonce"`
 

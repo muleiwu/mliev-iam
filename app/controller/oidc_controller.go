@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -8,7 +10,9 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	"github.com/gin-gonic/gin"
 )
 
@@ -65,48 +69,74 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		if err == nil {
 			sessionService.MarkAsAuthenticated(session.SessionID, uint(userID))
 			// 重定向到授权确认页面
-			consentURL := "/oidc/consent?session_id=" + session.SessionID
+			consentURL := "/auth/#/oidc/consent?session_id=" + session.SessionID
 			c.Redirect(http.StatusFound, consentURL)
 			return
 		}
 	}
 
 	// 4. 用户未登录，重定向到登录页面
-	loginURL := "/oidc/login?session_id=" + session.SessionID
+	loginURL := "/auth/#/oidc/login?session_id=" + session.SessionID
 	c.Redirect(http.StatusFound, loginURL)
 }
 
 // Token OIDC令牌端点
 // POST /oidc/token
 func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface) {
+	appUuid := c.Param("uuid")
 	var req dto.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
-		oc.tokenError(c, "invalid_request", "请求参数错误: "+err.Error())
+		oc.tokenError(c, "invalid_request", "请求参数错误: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 支持HTTP Basic认证
+	// 根据 RFC 6749 Section 2.3.1，客户端可以通过HTTP Basic认证或请求体传递凭据
+	if req.ClientID == "" || req.ClientSecret == "" {
+		clientID, clientSecret, hasAuth := c.Request.BasicAuth()
+		if hasAuth {
+			req.ClientID = clientID
+			req.ClientSecret = clientSecret
+		}
+	}
+
+	// 验证必需的客户端凭据（除了public客户端的某些流程）
+	if req.ClientID == "" {
+		oc.tokenErrorWithAuth(c, "invalid_client", "缺少客户端凭据")
 		return
 	}
 
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
+
+	// 获取issuer，确保与Discovery端点一致
+	issuer := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", appUuid))
 
 	var response *dto.TokenResponse
 	var err error
 
 	switch req.GrantType {
 	case "authorization_code":
-		response, err = authService.ExchangeCodeForToken(&req)
+		response, err = authService.ExchangeCodeForToken(&req, issuer)
 	case "refresh_token":
-		response, err = authService.RefreshToken(&req)
+		response, err = authService.RefreshToken(&req, issuer)
 	case "client_credentials":
 		response, err = authService.ExchangeClientCredentials(&req)
 	default:
-		oc.tokenError(c, "unsupported_grant_type", "不支持的授权类型")
+		oc.tokenError(c, "unsupported_grant_type", "不支持的授权类型", http.StatusBadRequest)
 		return
 	}
 
 	if err != nil {
-		// 解析错误类型
+		// 解析错误类型并返回适当的状态码
 		errorCode := err.Error()
+		statusCode := oc.getStatusCodeForError(errorCode)
 		errorDescription := oc.getTokenErrorDescription(errorCode)
-		oc.tokenError(c, errorCode, errorDescription)
+
+		if statusCode == http.StatusUnauthorized {
+			oc.tokenErrorWithAuth(c, errorCode, errorDescription)
+		} else {
+			oc.tokenError(c, errorCode, errorDescription, statusCode)
+		}
 		return
 	}
 
@@ -114,47 +144,100 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 }
 
 // UserInfo OIDC用户信息端点
-// GET /oidc/userinfo
+// GET/POST /oidc/userinfo
+// 支持 GET (token 在 Authorization 头) 和 POST (token 在请求体或头)
 func (oc OIDCController) UserInfo(c *gin.Context, helper interfaces.HelperInterface) {
-	// 从Authorization头获取访问令牌
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
+	// 1. 获取访问令牌
+	accessToken := oc.extractAccessToken(c)
+	if accessToken == "" {
+		oc.userInfoError(c, "invalid_token", "缺少或无效的访问令牌")
 		return
 	}
 
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_token"})
-		return
-	}
-
-	accessToken := parts[1]
-
+	// 2. 获取用户信息
 	userInfoService := service.NewOIDCUserInfoService(helper.GetDatabase())
 	response, err := userInfoService.GetUserInfo(accessToken)
 	if err != nil {
 		errorCode := err.Error()
-		statusCode := http.StatusUnauthorized
+		errorDescription := oc.getUserInfoErrorDescription(errorCode)
+
+		// 根据错误类型返回不同状态码
 		if errorCode == "insufficient_scope" {
-			statusCode = http.StatusForbidden
+			// RFC 6750 Section 3: scope 不足返回 403 + WWW-Authenticate 头，必须包含 scope 参数
+			c.Header("WWW-Authenticate", fmt.Sprintf(`Bearer realm="userinfo", error="insufficient_scope", error_description="%s", scope="openid"`, errorDescription))
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":             errorCode,
+				"error_description": errorDescription,
+			})
+		} else {
+			// 其他错误返回 401
+			oc.userInfoError(c, errorCode, errorDescription)
 		}
-		c.JSON(statusCode, gin.H{"error": errorCode})
 		return
 	}
 
 	c.JSON(http.StatusOK, response)
 }
 
+// extractAccessToken 从请求中提取访问令牌
+// 支持 Authorization 头 (Bearer token) 和请求体 (POST)
+func (oc OIDCController) extractAccessToken(c *gin.Context) string {
+	// 1. 优先从 Authorization 头获取
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+
+	// 2. 如果是 POST 请求，尝试从请求体获取
+	if c.Request.Method == "POST" {
+		token := c.PostForm("access_token")
+		if token != "" {
+			return strings.TrimSpace(token)
+		}
+	}
+
+	return ""
+}
+
+// userInfoError 返回 UserInfo 端点的错误响应
+// 根据 RFC 6750 Section 3，必须包含 WWW-Authenticate 头
+func (oc OIDCController) userInfoError(c *gin.Context, error, errorDescription string) {
+	// 构建 WWW-Authenticate 头
+	wwwAuth := `Bearer realm="userinfo", error="` + error + `"`
+	if errorDescription != "" {
+		wwwAuth += `, error_description="` + errorDescription + `"`
+	}
+	c.Header("WWW-Authenticate", wwwAuth)
+
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"error":             error,
+		"error_description": errorDescription,
+	})
+}
+
+// getUserInfoErrorDescription 获取 UserInfo 错误描述
+func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
+	switch errorCode {
+	case "invalid_token":
+		return "访问令牌无效或已过期"
+	case "insufficient_scope":
+		return "权限不足，需要 openid scope"
+	case "user_not_found":
+		return "用户不存在"
+	default:
+		return "未知错误"
+	}
+}
+
 // Discovery OIDC发现文档端点
 // GET /.well-known/openid-configuration
 func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInterface) {
-	// 构建基础URL
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	baseURL := scheme + "://" + c.Request.Host
+	appUuid := c.Param("uuid")
+	// 构建基础URL，支持反向代理场景
+	baseURL := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", appUuid))
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
 	response := discoveryService.GetDiscoveryDocument()
@@ -222,20 +305,76 @@ func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterfac
 // JWKS JSON Web Key Set端点
 // GET /oidc/jwks
 func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface) {
-	// 获取全局RSA密钥管理器
-	// TODO: 需要从配置中获取全局RSA密钥管理器实例
-	// 暂时返回占位符响应
+	env := helper.GetEnv()
+
+	// 获取签名算法配置
+	algorithm := env.GetString("oidc.signing.algorithm", "RS256")
+
+	// JWKS 只对非对称加密算法（如RS256）有意义
+	// 对称加密算法（如HS256）不应该暴露密钥
+	if strings.ToUpper(algorithm) != "RS256" {
+		// 对于HS256等对称加密，返回空的密钥集
+		c.JSON(http.StatusOK, gin.H{
+			"keys": []gin.H{},
+		})
+		return
+	}
+
+	// 读取RSA密钥配置
+	keyID := env.GetString("oidc.signing.key_id", "default")
+	privateKeyPath := env.GetString("oidc.signing.rsa_private_key_path", "")
+
+	// 创建RSA密钥管理器并加载私钥
+	rsaKeyManager := jwt.NewRSAKeyManager(keyID)
+
+	var err error
+	if privateKeyPath != "" {
+		err = rsaKeyManager.LoadPrivateKeyFromFile(privateKeyPath)
+	} else {
+		// 尝试从环境变量加载
+		privateKeyEnv := env.GetString("oidc.signing.rsa_private_key_env", "")
+		if privateKeyEnv != "" {
+			privateKeyContent := env.GetString(privateKeyEnv, "")
+			if privateKeyContent != "" {
+				err = rsaKeyManager.LoadPrivateKeyFromPEM(privateKeyContent)
+			} else {
+				err = errors.New("RSA私钥环境变量为空")
+			}
+		} else {
+			err = errors.New("未配置RSA私钥路径或环境变量")
+		}
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":             "server_error",
+			"error_description": "无法加载RSA公钥",
+		})
+		return
+	}
+
+	// 验证密钥是否已初始化
+	if !rsaKeyManager.IsInitialized() {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":             "server_error",
+			"error_description": "RSA密钥未正确初始化",
+		})
+		return
+	}
+
+	// 获取JWK格式的公钥
+	jwk, err := rsaKeyManager.GetJWK()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":             "server_error",
+			"error_description": "生成JWK失败",
+		})
+		return
+	}
+
+	// 返回JWKS响应
 	jwks := gin.H{
-		"keys": []gin.H{
-			{
-				"kty": "RSA",
-				"use": "sig",
-				"kid": "default",
-				"alg": "RS256",
-				"n":   "placeholder_n",
-				"e":   "AQAB",
-			},
-		},
+		"keys": []gin.H{jwk},
 	}
 
 	c.JSON(http.StatusOK, jwks)
@@ -253,11 +392,33 @@ func (oc OIDCController) redirectWithError(c *gin.Context, redirectURI, error, e
 }
 
 // tokenError 返回令牌错误响应
-func (oc OIDCController) tokenError(c *gin.Context, error, errorDescription string) {
-	c.JSON(http.StatusBadRequest, dto.TokenErrorResponse{
+func (oc OIDCController) tokenError(c *gin.Context, error, errorDescription string, statusCode int) {
+	c.JSON(statusCode, dto.TokenErrorResponse{
 		Error:            error,
 		ErrorDescription: errorDescription,
 	})
+}
+
+// tokenErrorWithAuth 返回带WWW-Authenticate头的401错误
+// 根据 RFC 6750 Section 3，当客户端认证失败时必须包含此头
+func (oc OIDCController) tokenErrorWithAuth(c *gin.Context, error, errorDescription string) {
+	c.Header("WWW-Authenticate", `Bearer realm="token"`)
+	c.JSON(http.StatusUnauthorized, dto.TokenErrorResponse{
+		Error:            error,
+		ErrorDescription: errorDescription,
+	})
+}
+
+// getStatusCodeForError 根据错误代码返回HTTP状态码
+func (oc OIDCController) getStatusCodeForError(errorCode string) int {
+	switch errorCode {
+	case "invalid_client":
+		return http.StatusUnauthorized
+	case "server_error":
+		return http.StatusInternalServerError
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 // getTokenErrorDescription 获取令牌错误描述

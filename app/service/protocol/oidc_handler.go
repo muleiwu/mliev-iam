@@ -1,15 +1,12 @@
 package protocol
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -83,28 +80,32 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 }
 
 // PrepareConfig 准备OIDC配置（生成ClientID和ClientSecret）
-func (h *OIDCProtocolHandler) PrepareConfig(config map[string]interface{}) (map[string]interface{}, error) {
-	// 生成ClientID
-	clientID := h.generateClientID()
-	config["clientId"] = clientID
+// 注意：此方法返回的配置包含明文的ClientSecret，仅用于创建时返回给前端
+func (h *OIDCProtocolHandler) PrepareConfig(uuid string, config map[string]interface{}) (map[string]interface{}, error) {
+	// 使用传入的UUID作为ClientID
+	config["clientId"] = uuid
 
-	// 生成ClientSecret（并进行哈希）
+	// 生成ClientSecret（明文）
 	clientSecret := h.generateClientSecret()
-	config["clientSecret"] = h.hashClientSecret(clientSecret)
+	config["clientSecret"] = clientSecret
 
 	// 设置默认的Token有效期（如果未设置）
 	if _, ok := config["tokenLifetime"]; !ok {
 		config["tokenLifetime"] = 3600
 	}
 
-	// 返回包含明文ClientSecret的配置（用于响应）
-	responseConfig := make(map[string]interface{})
-	for k, v := range config {
-		responseConfig[k] = v
-	}
-	responseConfig["clientSecretPlain"] = clientSecret // 用于返回给用户，仅此一次
+	return config, nil
+}
 
-	return responseConfig, nil
+// EncryptSensitiveFields 加密/哈希配置中的敏感字段（用于存储）
+// 此方法会直接修改传入的配置对象
+func (h *OIDCProtocolHandler) EncryptSensitiveFields(config map[string]interface{}) error {
+	// 对ClientSecret进行哈希处理
+	if clientSecret, ok := config["clientSecret"].(string); ok && clientSecret != "" {
+		config["clientSecret"] = h.hashClientSecret(clientSecret)
+	}
+
+	return nil
 }
 
 // CreateApplication 创建OIDC应用
@@ -305,21 +306,27 @@ func (h *OIDCProtocolHandler) generateClientID() string {
 
 // generateClientSecret 生成客户端密钥
 func (h *OIDCProtocolHandler) generateClientSecret() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return base64.URLEncoding.EncodeToString(bytes)
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
 }
 
 // hashClientSecret 哈希客户端密钥
 func (h *OIDCProtocolHandler) hashClientSecret(secret string) string {
-	hash := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(hash[:])
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		// bcrypt 失败的概率极低，这里简单处理
+		panic(fmt.Sprintf("bcrypt hash failed: %v", err))
+	}
+	return string(hash)
 }
 
 // verifyClientSecret 验证客户端密钥
 func (h *OIDCProtocolHandler) verifyClientSecret(secret, hashedSecret string) bool {
-	hash := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(hash[:]) == hashedSecret
+	err := bcrypt.CompareHashAndPassword([]byte(hashedSecret), []byte(secret))
+	return err == nil
 }
 
 // validateRedirectURIFormat 验证重定向URI格式

@@ -9,7 +9,11 @@ type ProtocolHandler interface {
 	ValidateConfig(config map[string]interface{}) error
 
 	// PrepareConfig 准备配置（例如生成ClientID/Secret）
-	PrepareConfig(config map[string]interface{}) (map[string]interface{}, error)
+	// uuid 参数用于设置协议特定的唯一标识符（如 OIDC 的 ClientID、SAML 的 EntityID）
+	PrepareConfig(uuid string, config map[string]interface{}) (map[string]interface{}, error)
+
+	// EncryptSensitiveFields 加密/哈希配置中的敏感字段（用于存储）
+	EncryptSensitiveFields(config map[string]interface{}) error
 
 	// CreateApplication 创建应用时的协议特定处理
 	CreateApplication(app *model.Application) error

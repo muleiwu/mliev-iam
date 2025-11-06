@@ -1,6 +1,8 @@
 package autoload
 
 import (
+	"net/http"
+
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
@@ -29,6 +31,21 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			// API 路由组
 			api := router.Group("/api")
 			{
+				// 系统安装路由（公开访问，但已安装后会拒绝）
+				install := api.Group("/install")
+				{
+					install.GET("/check", deps.WrapHandler(controller.InstallController{}.CheckInstall))              // 检查安装状态
+					install.POST("/test-connection", deps.WrapHandler(controller.InstallController{}.TestConnection)) // 测试数据库连接
+					install.POST("/submit", deps.WrapHandler(controller.InstallController{}.SubmitInstall))           // 提交安装
+				}
+
+				// 系统管理路由
+				adminSystem := api.Group("/system")
+				{
+					adminSystem.GET("/reload", deps.WrapHandler(AdminController.SystemController{}.ReloadConfig)) // 重新加载配置
+					adminSystem.GET("/info", deps.WrapHandler(AdminController.SystemController{}.GetSystemInfo))  // 获取系统信息
+				}
+
 				// 管理员路由组
 				admin := api.Group("/admin")
 				{
@@ -62,6 +79,9 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 
 						// 统计信息（管理员）
 						adminUsers.GET("/stats/active-count", deps.WrapHandler(AdminController.UserController{}.GetActiveUsersCount)) // 活跃用户统计
+
+						// 用户部门管理（管理员）
+						adminUsers.GET("/:id/departments", deps.WrapHandler(AdminController.UserController{}.GetUserDepartments)) // 获取用户部门
 
 						// 用户角色管理（管理员）
 						adminUsers.POST("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.AssignUserRole))            // 分配角色
@@ -178,42 +198,95 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 统计信息（管理员）
 						adminApps.GET("/stats", deps.WrapHandler(AdminController.ApplicationController{}.GetStats)) // 获取应用统计信息
 					}
+
+					// 社会化登录提供商管理路由（管理员）
+					adminSocialProviders := admin.Group("/social-providers", middleware.AdminAuthMiddleware(helper))
+					{
+						// 提供商基础CRUD操作（管理员）
+						adminSocialProviders.POST("", deps.WrapHandler(AdminController.SocialProviderController{}.CreateProvider))       // 创建提供商
+						adminSocialProviders.GET("", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderList))       // 获取提供商列表
+						adminSocialProviders.GET("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.GetProvider))       // 获取提供商详情
+						adminSocialProviders.PUT("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.UpdateProvider))    // 更新提供商
+						adminSocialProviders.DELETE("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.DeleteProvider)) // 删除提供商
+
+						// 批量操作（管理员）
+						adminSocialProviders.POST("/batch", deps.WrapHandler(AdminController.SocialProviderController{}.BatchOperation)) // 批量操作提供商
+
+						// 统计信息（管理员）
+						adminSocialProviders.GET("/stats", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderStats)) // 获取提供商统计信息
+					}
 				}
 
 				// 普通用户路由组
 				user := api.Group("/user")
 				{
-					// 用户认证相关
+					// 公开端点：用户认证相关
 					user.POST("/login", deps.WrapHandler(controller.UserController{}.ValidateLogin)) // 用户登录验证
 
-					// 用户个人信息管理
-					user.GET("/profile", deps.WrapHandler(controller.UserController{}.GetUserProfile))    // 获取当前用户信息
-					user.PUT("/profile", deps.WrapHandler(controller.UserController{}.UpdateUserProfile)) // 更新当前用户信息
+					// 需要用户认证的端点（使用JWT认证中间件）
+					userAuth := user.Group("", middleware.AuthMiddleware(helper))
+					{
+						// 用户个人信息管理
+						userAuth.GET("/profile", deps.WrapHandler(controller.UserController{}.GetUserProfile))    // 获取当前用户信息
+						userAuth.PUT("/profile", deps.WrapHandler(controller.UserController{}.UpdateUserProfile)) // 更新当前用户信息
 
-					// 用户密码管理
-					user.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
+						// 用户密码管理
+						userAuth.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
+
+						// 用户社交账号管理
+						userAuth.GET("/social-accounts", deps.WrapHandler(controller.SocialAuthController{}.GetUserSocialAccounts)) // 获取已绑定社交账号
+					}
 				}
 
-				// OIDC 路由组（公开端点）
-				oidc := api.Group("/oidc")
+				apiOidc := api.Group("/oidc")
 				{
-					// OIDC 核心端点
-					oidc.GET("/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))    // 授权端点
-					oidc.POST("/token", deps.WrapHandler(controller.OIDCController{}.Token))           // 令牌端点
-					oidc.GET("/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))      // 用户信息端点
-					oidc.POST("/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect)) // 令牌内省端点
-					oidc.POST("/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))         // 令牌撤销端点
-					oidc.GET("/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))              // JSON Web Key Set端点
-
 					// OIDC 授权流程端点
-					oidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
-					oidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent))      // 授权确认接口
-					oidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
+					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
+					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
 				}
 			}
 
-			// OIDC 发现文档端点（标准位置）
-			router.GET("/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+			// 社会化登录路由组
+			social := router.Group("/social")
+			{
+				// 公开端点
+				social.GET("/providers", deps.WrapHandler(controller.SocialAuthController{}.GetEnabledProviders))     // 获取可用提供商列表
+				social.GET("/auth/:provider", deps.WrapHandler(controller.SocialAuthController{}.InitiateAuth))       // 发起OAuth授权
+				social.GET("/callback/:provider", deps.WrapHandler(controller.SocialAuthController{}.HandleCallback)) // OAuth回调处理
+
+				// 绑定/注册端点（公开，用于OIDC流程）
+				social.POST("/bind-with-login", deps.WrapHandler(controller.SocialAuthController{}.BindWithLogin))           // 用社交账号绑定已有账户
+				social.POST("/register-with-social", deps.WrapHandler(controller.SocialAuthController{}.RegisterWithSocial)) // 用社交账号注册新账户
+
+				// 需要用户认证的端点（使用JWT认证中间件）
+				socialAuth := social.Group("", middleware.AuthMiddleware(helper))
+				{
+					socialAuth.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
+					socialAuth.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
+				}
+			}
+
+			// OIDC 路由组（公开端点）
+			oidc := router.Group("/oidc")
+			{
+				// OIDC 核心端点
+				MethodGetPost := []string{http.MethodGet, http.MethodPost}
+				oidc.Match(MethodGetPost, "/:uuid/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
+				oidc.POST("/:uuid/token", deps.WrapHandler(controller.OIDCController{}.Token))                               // 令牌端点
+				oidc.Match(MethodGetPost, "/:uuid/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))         // 用户信息端点
+				oidc.POST("/:uuid/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect))                     // 令牌内省端点
+				oidc.POST("/:uuid/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))                             // 令牌撤销端点
+				oidc.GET("/:uuid/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))                                  // JSON Web Key Set端点
+				oidc.GET("/:uuid/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+			}
+
+			webhook := router.Group("/webhook")
+			{
+				webhookOidc := webhook.Group("/oidc")
+				{
+					webhookOidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent)) // 授权确认接口
+				}
+			}
 
 		},
 	}

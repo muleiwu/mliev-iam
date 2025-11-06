@@ -54,28 +54,31 @@ func (s *RoleService) CreateRole(req *dto.CreateRoleRequest) (*dto.RoleResponse,
 	}
 
 	// 创建角色对象
+	status := model.RoleStatusEnabled
 	role := &model.Role{
 		Name:        req.Name,
 		Code:        req.Code,
 		Description: req.Description,
 		ParentID:    req.ParentID,
-		Status:      model.RoleStatusEnabled,
+		Status:      &status,
 		Attributes:  req.Attributes,
 		Remark:      req.Remark,
 	}
 
 	// 设置角色类型
 	if req.Type != nil {
-		role.Type = *req.Type
+		role.Type = req.Type
 	} else {
-		role.Type = model.RoleTypeCustom
+		custom := model.RoleTypeCustom
+		role.Type = &custom
 	}
 
 	// 设置数据权限范围
 	if req.DataScope != nil {
-		role.DataScope = *req.DataScope
+		role.DataScope = req.DataScope
 	} else {
-		role.DataScope = 2 // 默认本部门数据
+		defaultScope := 2 // 默认本部门数据
+		role.DataScope = &defaultScope
 	}
 	role.ScopeDesc = req.ScopeDesc
 
@@ -143,7 +146,7 @@ func (s *RoleService) UpdateRole(id uint, req *dto.UpdateRoleRequest) (*dto.Role
 		role.Description = req.Description
 	}
 	if req.DataScope != nil {
-		role.DataScope = *req.DataScope
+		role.DataScope = req.DataScope
 	}
 	if req.ScopeDesc != "" {
 		role.ScopeDesc = req.ScopeDesc

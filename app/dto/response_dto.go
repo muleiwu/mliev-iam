@@ -4,7 +4,7 @@ package dto
 type Response struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
+	Data    any    `json:"data"`
 }
 
 // BaseQueryRequest 基础查询请求结构
