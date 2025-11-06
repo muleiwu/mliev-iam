@@ -518,72 +518,54 @@ func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID
 func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user *model.User, scopes []string, nonce string, issuer string) (string, error) {
 	// 获取全局配置
 	env := helper.GetHelper().GetEnv()
-
-	// 1. 读取OIDC配置
-	// issuer 现在从参数传入，确保与 Discovery 端点一致
-	algorithm := env.GetString("oidc.signing.algorithm", "RS256")
-	keyID := env.GetString("oidc.signing.key_id", "default")
 	idTokenLifetime := env.GetInt("oidc.token_lifetime.id_token", 3600)
 
-	// 2. 获取客户端ID
+	// 1. 获取客户端ID
 	clientID := s.getClientIDFromApp(app)
 	if clientID == "" {
 		return "", fmt.Errorf("无法获取客户端ID")
 	}
 
-	// 3. 根据算法创建ID Token服务
-	var idTokenService *OIDCIDTokenService
-	var err error
-
-	switch strings.ToUpper(algorithm) {
-	case "RS256":
-		// 创建RSA密钥管理器
-		rsaKeyManager := jwt.NewRSAKeyManager(keyID)
-
-		// 尝试从文件路径加载私钥
-		privateKeyPath := env.GetString("oidc.signing.rsa_private_key_path", "")
-		if privateKeyPath != "" {
-			if err := rsaKeyManager.LoadPrivateKeyFromFile(privateKeyPath); err != nil {
-				return "", fmt.Errorf("加载RSA私钥失败: %w", err)
-			}
-		} else {
-			// 尝试从环境变量加载私钥内容
-			privateKeyEnv := env.GetString("oidc.signing.rsa_private_key_env", "")
-			if privateKeyEnv != "" {
-				privateKeyContent := env.GetString(privateKeyEnv, "")
-				if privateKeyContent != "" {
-					if err := rsaKeyManager.LoadPrivateKeyFromPEM(privateKeyContent); err != nil {
-						return "", fmt.Errorf("从环境变量加载RSA私钥失败: %w", err)
-					}
-				} else {
-					return "", fmt.Errorf("未配置RSA私钥（环境变量 %s 为空）", privateKeyEnv)
-				}
-			} else {
-				return "", fmt.Errorf("未配置RSA私钥路径或环境变量")
-			}
-		}
-
-		// 验证密钥是否已初始化
-		if !rsaKeyManager.IsInitialized() {
-			return "", fmt.Errorf("RSA密钥未正确初始化")
-		}
-
-		idTokenService = NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, idTokenLifetime)
-
-	case "HS256":
-		// 获取HMAC密钥
-		hmacSecret := env.GetString("oidc.signing.hmac_secret", "")
-		if hmacSecret == "" {
-			return "", fmt.Errorf("未配置HMAC密钥")
-		}
-
-		idTokenService = NewOIDCIDTokenServiceWithHMAC([]byte(hmacSecret), keyID, issuer, idTokenLifetime)
-
-	default:
-		return "", fmt.Errorf("不支持的签名算法: %s", algorithm)
+	// 2. 从数据库获取应用的主密钥管理器
+	keyService := NewApplicationKeyService(s.db)
+	keyManager, err := keyService.GetPrimaryKeyManagerForApplication(app.ID)
+	if err != nil {
+		return "", fmt.Errorf("获取应用签名密钥失败: %w", err)
 	}
 
-	// 4. 生成ID Token
+	// 3. 验证密钥是否已初始化
+	if !keyManager.IsInitialized() {
+		return "", fmt.Errorf("应用签名密钥未正确初始化")
+	}
+
+	// 4. 根据密钥类型创建ID Token服务
+	var idTokenService *OIDCIDTokenService
+
+	switch keyManager.GetKeyType() {
+	case jwt.KeyTypeRSA:
+		rsaKeyManager, ok := keyManager.(*jwt.RSAKeyManager)
+		if !ok {
+			return "", fmt.Errorf("密钥管理器类型转换失败")
+		}
+		idTokenService = NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, idTokenLifetime)
+
+	case jwt.KeyTypeHMAC:
+		hmacKeyManager, ok := keyManager.(*jwt.HMACKeyManager)
+		if !ok {
+			return "", fmt.Errorf("密钥管理器类型转换失败")
+		}
+		idTokenService = NewOIDCIDTokenServiceWithHMAC(
+			hmacKeyManager.GetSecret(),
+			keyManager.GetKeyID(),
+			issuer,
+			idTokenLifetime,
+		)
+
+	default:
+		return "", fmt.Errorf("不支持的密钥类型: %s", keyManager.GetKeyType())
+	}
+
+	// 5. 生成ID Token
 	idToken, err := idTokenService.GenerateIDToken(user, clientID, scopes, nonce, nil)
 	if err != nil {
 		return "", fmt.Errorf("生成ID Token失败: %w", err)

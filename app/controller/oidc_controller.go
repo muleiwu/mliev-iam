@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,8 +11,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // OIDCController OIDC控制器
@@ -305,79 +304,61 @@ func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterfac
 // JWKS JSON Web Key Set端点
 // GET /oidc/jwks
 func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface) {
-	env := helper.GetEnv()
+	db := helper.GetDatabase()
 
-	// 获取签名算法配置
-	algorithm := env.GetString("oidc.signing.algorithm", "RS256")
+	// 支持通过 client_id 查询参数指定应用
+	clientID := c.Query("client_id")
 
-	// JWKS 只对非对称加密算法（如RS256）有意义
-	// 对称加密算法（如HS256）不应该暴露密钥
-	if strings.ToUpper(algorithm) != "RS256" {
-		// 对于HS256等对称加密，返回空的密钥集
-		c.JSON(http.StatusOK, gin.H{
-			"keys": []gin.H{},
-		})
-		return
-	}
+	var jwks []gin.H
 
-	// 读取RSA密钥配置
-	keyID := env.GetString("oidc.signing.key_id", "default")
-	privateKeyPath := env.GetString("oidc.signing.rsa_private_key_path", "")
-
-	// 创建RSA密钥管理器并加载私钥
-	rsaKeyManager := jwt.NewRSAKeyManager(keyID)
-
-	var err error
-	if privateKeyPath != "" {
-		err = rsaKeyManager.LoadPrivateKeyFromFile(privateKeyPath)
-	} else {
-		// 尝试从环境变量加载
-		privateKeyEnv := env.GetString("oidc.signing.rsa_private_key_env", "")
-		if privateKeyEnv != "" {
-			privateKeyContent := env.GetString(privateKeyEnv, "")
-			if privateKeyContent != "" {
-				err = rsaKeyManager.LoadPrivateKeyFromPEM(privateKeyContent)
-			} else {
-				err = errors.New("RSA私钥环境变量为空")
-			}
-		} else {
-			err = errors.New("未配置RSA私钥路径或环境变量")
+	if clientID != "" {
+		// 为特定应用返回 JWKS
+		jwk, err := oc.getJWKSForApplication(db, clientID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":             "server_error",
+				"error_description": "无法获取密钥",
+			})
+			return
 		}
+		if jwk != nil {
+			jwks = append(jwks, jwk)
+		}
+	} else {
+		// 返回所有应用的公钥（多租户模式）
+		// 这里可以选择返回所有公钥，或者要求必须指定 client_id
+		// 为安全起见，返回空集合，要求指定 client_id
+		jwks = []gin.H{}
 	}
 
+	c.JSON(http.StatusOK, gin.H{
+		"keys": jwks,
+	})
+}
+
+// getJWKSForApplication 获取指定应用的 JWK
+func (oc OIDCController) getJWKSForApplication(db *gorm.DB, clientID string) (gin.H, error) {
+	// 1. 获取应用
+	appService := service.NewApplicationService(db)
+	app, err := appService.GetApplicationByClientID(clientID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":             "server_error",
-			"error_description": "无法加载RSA公钥",
-		})
-		return
+		return nil, err
 	}
 
-	// 验证密钥是否已初始化
-	if !rsaKeyManager.IsInitialized() {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":             "server_error",
-			"error_description": "RSA密钥未正确初始化",
-		})
-		return
-	}
-
-	// 获取JWK格式的公钥
-	jwk, err := rsaKeyManager.GetJWK()
+	// 2. 获取应用的主密钥管理器
+	keyService := service.NewApplicationKeyService(db)
+	keyManager, err := keyService.GetPrimaryKeyManagerForApplication(app.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":             "server_error",
-			"error_description": "生成JWK失败",
-		})
-		return
+		return nil, err
 	}
 
-	// 返回JWKS响应
-	jwks := gin.H{
-		"keys": []gin.H{jwk},
+	// 3. 获取 JWK（对称加密算法会返回 nil）
+	jwk, err := keyManager.GetJWK()
+	if err != nil {
+		return nil, err
 	}
 
-	c.JSON(http.StatusOK, jwks)
+	return jwk, nil
 }
 
 // 私有方法

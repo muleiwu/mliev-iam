@@ -20,18 +20,34 @@ type RSAKeyManager struct {
 	privateKey *rsa.PrivateKey
 	publicKey  *rsa.PublicKey
 	keyID      string
+	algorithm  string // RS256, RS512等
+	keySize    int    // 密钥长度（2048, 4096等）
 	mu         sync.RWMutex
 }
 
 // NewRSAKeyManager 创建RSA密钥管理器
 func NewRSAKeyManager(keyID string) *RSAKeyManager {
 	return &RSAKeyManager{
-		keyID: keyID,
+		keyID:     keyID,
+		algorithm: "RS256", // 默认RS256
+		keySize:   2048,    // 默认2048位
 	}
 }
 
-// GenerateKey 生成新的RSA密钥对
-func (m *RSAKeyManager) GenerateKey(bits int) error {
+// NewRSAKeyManagerWithAlgorithm 创建指定算法的RSA密钥管理器
+func NewRSAKeyManagerWithAlgorithm(keyID, algorithm string, keySize int) *RSAKeyManager {
+	if keySize < 2048 {
+		keySize = 2048
+	}
+	return &RSAKeyManager{
+		keyID:     keyID,
+		algorithm: algorithm,
+		keySize:   keySize,
+	}
+}
+
+// GenerateKeyWithSize 生成指定大小的RSA密钥对
+func (m *RSAKeyManager) GenerateKeyWithSize(bits int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -46,6 +62,7 @@ func (m *RSAKeyManager) GenerateKey(bits int) error {
 
 	m.privateKey = privateKey
 	m.publicKey = &privateKey.PublicKey
+	m.keySize = bits
 
 	return nil
 }
@@ -296,4 +313,77 @@ func (m *RSAKeyManager) IsInitialized() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.privateKey != nil && m.publicKey != nil
+}
+
+// ============== KeyManager 接口实现 ==============
+
+// GenerateKey 生成新的RSA密钥对（实现KeyManager接口）
+func (m *RSAKeyManager) GenerateKey() error {
+	return m.GenerateKeyWithSize(m.keySize)
+}
+
+// GetAlgorithm 获取签名算法
+func (m *RSAKeyManager) GetAlgorithm() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.algorithm
+}
+
+// GetKeyType 获取密钥类型
+func (m *RSAKeyManager) GetKeyType() KeyType {
+	return KeyTypeRSA
+}
+
+// GetKeySize 获取密钥长度
+func (m *RSAKeyManager) GetKeySize() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.keySize > 0 {
+		return m.keySize
+	}
+	// 如果未设置，尝试从私钥获取
+	if m.privateKey != nil {
+		return m.privateKey.N.BitLen()
+	}
+	return 0
+}
+
+// ExportPrivateKey 导出私钥（实现KeyManager接口）
+func (m *RSAKeyManager) ExportPrivateKey() (string, error) {
+	return m.ExportPrivateKeyToPEM()
+}
+
+// ExportPublicKey 导出公钥（实现KeyManager接口）
+func (m *RSAKeyManager) ExportPublicKey() (string, error) {
+	return m.ExportPublicKeyToPEM()
+}
+
+// LoadPrivateKey 加载私钥（实现KeyManager接口）
+func (m *RSAKeyManager) LoadPrivateKey(data string) error {
+	return m.LoadPrivateKeyFromPEM(data)
+}
+
+// LoadPublicKey 加载公钥（实现KeyManager接口）
+func (m *RSAKeyManager) LoadPublicKey(data string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	block, _ := pem.Decode([]byte(data))
+	if block == nil {
+		return errors.New("无效的PEM格式")
+	}
+
+	publicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("解析公钥失败: %w", err)
+	}
+
+	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+	if !ok {
+		return errors.New("公钥不是RSA类型")
+	}
+
+	m.publicKey = rsaPublicKey
+
+	return nil
 }

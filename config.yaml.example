@@ -91,20 +91,10 @@ oidc:
   # - 生产环境: "https://auth.example.com"
   issuer: "http://localhost:8080"
   
-  # 签名密钥配置
-  signing:
-    # JWT签名算法，支持 RS256 (推荐), HS256
-    algorithm: "RS256"
-    # 密钥标识符
-    key_id: "default"
-    # RSA私钥路径（用于RS256算法） - 推荐使用
-    rsa_private_key_path: "./keys/oidc_private_key.pem"
-    # RSA公钥路径（用于RS256算法）
-    rsa_public_key_path: "./keys/oidc_public_key.pem"
-    # 或者使用环境变量存储私钥内容
-    # rsa_private_key_env: "OIDC_RSA_PRIVATE_KEY"
-    # HMAC密钥（用于HS256算法，不推荐用于生产环境）
-    # hmac_secret: "your-oidc-hmac-secret-key"
+  # 注意：签名密钥配置已移除
+  # 每个 OIDC 应用在创建时会自动生成独立的签名密钥（默认 RS256, 2048位）
+  # 密钥存储在数据库中，支持密钥轮转和多种算法（RS256, RS512, HS256等）
+  # 无需手动配置密钥文件
   
   # 默认令牌生命周期（秒）
   token_lifetime:

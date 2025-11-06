@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -17,7 +19,9 @@ type OIDCProtocolHandler struct {
 
 // NewOIDCProtocolHandler 创建OIDC协议处理器
 func NewOIDCProtocolHandler(db *gorm.DB) *OIDCProtocolHandler {
-	return &OIDCProtocolHandler{db: db}
+	return &OIDCProtocolHandler{
+		db: db,
+	}
 }
 
 // ValidateConfig 验证OIDC配置
@@ -110,8 +114,20 @@ func (h *OIDCProtocolHandler) EncryptSensitiveFields(config map[string]interface
 
 // CreateApplication 创建OIDC应用
 func (h *OIDCProtocolHandler) CreateApplication(app *model.Application) error {
-	// OIDC协议在创建时不需要额外处理
-	// 所有逻辑都在PrepareConfig中完成
+	// 1. 从配置中获取签名算法（可选）
+	algorithm := "RS256" // 默认RS256
+	if alg, ok := app.ProtocolConfig["signingAlgorithm"].(string); ok && alg != "" {
+		algorithm = alg
+	}
+
+	// 2. 获取密钥大小
+	keySize := h.getDefaultKeySize(algorithm)
+
+	// 3. 为应用生成签名密钥
+	if err := h.generateKeyForApplication(app.ID, algorithm, keySize); err != nil {
+		return fmt.Errorf("生成签名密钥失败: %w", err)
+	}
+
 	return nil
 }
 
@@ -138,6 +154,12 @@ func (h *OIDCProtocolHandler) UpdateApplication(app *model.Application, updates 
 
 // DeleteApplication 删除OIDC应用
 func (h *OIDCProtocolHandler) DeleteApplication(id uint) error {
+	// 删除应用的所有密钥
+	keyDAO := dao.NewApplicationOIDCKeyDAO(h.db)
+	if err := keyDAO.DeleteByApplicationID(id); err != nil {
+		return fmt.Errorf("删除应用密钥失败: %w", err)
+	}
+
 	// TODO: 在删除应用前，需要撤销所有相关的令牌和授权码
 	// 这里可以添加清理逻辑
 	return nil
@@ -370,4 +392,94 @@ func (h *OIDCProtocolHandler) validateRedirectURIFormat(uri string) error {
 	}
 
 	return nil
+}
+
+// generateKeyForApplication 为应用生成密钥
+func (h *OIDCProtocolHandler) generateKeyForApplication(appID uint, algorithm string, keySize int) error {
+	// 1. 创建密钥工厂
+	factory := jwt.NewKeyManagerFactory()
+
+	// 2. 验证算法是否支持
+	if !factory.IsAlgorithmSupported(algorithm) {
+		return fmt.Errorf("不支持的算法: %s", algorithm)
+	}
+
+	// 3. 生成密钥ID
+	keyID, err := uuid.NewV7()
+	if err != nil {
+		keyID = uuid.New() // 回退到v4
+	}
+	keyIDStr := keyID.String()
+
+	// 4. 创建密钥管理器
+	keyManager, err := factory.CreateKeyManager(algorithm, keyIDStr, keySize)
+	if err != nil {
+		return fmt.Errorf("创建密钥管理器失败: %w", err)
+	}
+
+	// 5. 生成密钥
+	if err := keyManager.GenerateKey(); err != nil {
+		return fmt.Errorf("生成密钥失败: %w", err)
+	}
+
+	// 6. 导出密钥
+	privateKey, err := keyManager.ExportPrivateKey()
+	if err != nil {
+		return fmt.Errorf("导出私钥失败: %w", err)
+	}
+
+	publicKey, _ := keyManager.ExportPublicKey() // 对称加密可能返回空
+
+	// 7. 创建密钥记录
+	key := &model.ApplicationOIDCKey{
+		ApplicationID: appID,
+		KeyID:         keyIDStr,
+		Algorithm:     keyManager.GetAlgorithm(),
+		KeyType:       string(keyManager.GetKeyType()),
+		PrivateKey:    privateKey, // TODO: 加密存储
+		PublicKey:     publicKey,
+		KeySize:       keyManager.GetKeySize(),
+		IsPrimary:     true, // 默认设为主密钥
+	}
+
+	// 8. 保存到数据库（事务：先取消其他主密钥，再保存新密钥）
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		// 取消该应用下所有密钥的主密钥状态
+		if err := tx.Model(&model.ApplicationOIDCKey{}).
+			Where("application_id = ?", appID).
+			Update("is_primary", false).Error; err != nil {
+			return err
+		}
+
+		// 保存新密钥
+		if err := tx.Create(key).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("保存密钥失败: %w", err)
+	}
+
+	return nil
+}
+
+// getDefaultKeySize 获取默认密钥大小
+func (h *OIDCProtocolHandler) getDefaultKeySize(algorithm string) int {
+	switch algorithm {
+	case "RS256", "RS384":
+		return 2048
+	case "RS512":
+		return 4096
+	case "HS256":
+		return 256
+	case "HS384":
+		return 384
+	case "HS512":
+		return 512
+	default:
+		return 2048
+	}
 }
