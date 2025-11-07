@@ -234,9 +234,9 @@ func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
 // Discovery OIDC发现文档端点
 // GET /.well-known/openid-configuration
 func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInterface) {
-	appUuid := c.Param("uuid")
+	clientId := c.Param("client_id")
 	// 构建基础URL，支持反向代理场景
-	baseURL := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", appUuid))
+	baseURL := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", clientId))
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
 	response := discoveryService.GetDiscoveryDocument()
@@ -337,7 +337,7 @@ func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface)
 }
 
 // getJWKSForApplication 获取指定应用的 JWK
-func (oc OIDCController) getJWKSForApplication(db *gorm.DB, clientID string) (gin.H, error) {
+func (oc OIDCController) getJWKSForApplication(db *gorm.DB, clientID string) (map[string]any, error) {
 	// 1. 获取应用
 	appService := service.NewApplicationService(db)
 	app, err := appService.GetApplicationByClientID(clientID)
