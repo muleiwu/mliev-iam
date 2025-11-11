@@ -196,6 +196,9 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						adminApps.GET("/:id/keys", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationKeys))           // 获取应用密钥列表
 						adminApps.POST("/:id/keys/rotate", deps.WrapHandler(AdminController.ApplicationController{}.RotateApplicationKey)) // 轮转应用密钥
 
+						// 客户端密钥管理（管理员）- 仅OIDC应用
+						adminApps.POST("/:id/secret/reset", deps.WrapHandler(AdminController.ApplicationController{}.ResetClientSecret)) // 重置客户端密钥
+
 						// 批量操作（管理员）
 						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
 

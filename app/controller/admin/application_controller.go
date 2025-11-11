@@ -412,6 +412,37 @@ func (ac ApplicationController) RotateApplicationKey(c *gin.Context, helper inte
 	ac.SuccessWithMessage(c, "密钥轮转成功", response)
 }
 
+// ResetClientSecret 重置应用的客户端密钥
+// POST /api/admin/applications/:id/secret/reset
+func (ac ApplicationController) ResetClientSecret(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "应用ID格式错误")
+		return
+	}
+
+	appService := service.NewApplicationService(helper.GetDatabase())
+	newSecret, err := appService.ResetClientSecret(uint(id))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		} else if strings.Contains(err.Error(), "只有 OIDC") {
+			errCode = constants.ErrCodeBadRequest
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
+
+	response := dto.ResetClientSecretResponse{
+		ClientSecret: newSecret,
+		Message:      "客户端密钥已重置，请妥善保存新密钥",
+	}
+
+	ac.SuccessWithMessage(c, "客户端密钥重置成功", response)
+}
+
 // 辅助函数
 func boolPtr(b bool) *bool {
 	return &b

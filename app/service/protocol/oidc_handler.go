@@ -479,3 +479,24 @@ func (h *OIDCProtocolHandler) getDefaultKeySize(algorithm string) int {
 		return 2048
 	}
 }
+
+// ResetClientSecret 重置客户端密钥
+func (h *OIDCProtocolHandler) ResetClientSecret(appID uint) (string, error) {
+	// 生成新的客户端密钥（明文）
+	newClientSecret := h.generateClientSecret()
+
+	// 加密密钥
+	hashedSecret, err := bcrypt.GenerateFromPassword([]byte(newClientSecret), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("加密客户端密钥失败: %w", err)
+	}
+
+	// 更新数据库
+	appDAO := dao.NewApplicationDAO(h.db)
+	err = appDAO.UpdateClientSecret(appID, string(hashedSecret))
+	if err != nil {
+		return "", fmt.Errorf("更新客户端密钥失败: %w", err)
+	}
+
+	return newClientSecret, nil
+}

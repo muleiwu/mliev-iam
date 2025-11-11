@@ -319,3 +319,31 @@ func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig
 
 	return response
 }
+
+// ResetClientSecret 重置应用的客户端密钥（仅 OIDC）
+func (s *ApplicationService) ResetClientSecret(appID uint) (string, error) {
+	// 检查应用是否存在
+	app, err := s.GetApplication(appID)
+	if err != nil {
+		return "", err
+	}
+
+	// 只有 OIDC 协议支持
+	if app.ProtocolType != "oidc" {
+		return "", errors.New("只有 OIDC 协议应用支持重置客户端密钥")
+	}
+
+	// 获取 OIDC 处理器
+	handler, err := s.protocolFactory.GetHandler("oidc")
+	if err != nil {
+		return "", err
+	}
+
+	oidcHandler, ok := handler.(*protocol.OIDCProtocolHandler)
+	if !ok {
+		return "", errors.New("OIDC 处理器类型错误")
+	}
+
+	// 重置密钥
+	return oidcHandler.ResetClientSecret(appID)
+}
