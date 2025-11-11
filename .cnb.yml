@@ -216,7 +216,7 @@ develop:
         - name: remove tag public
           type: artifact:remove-tag
           options:
-            name: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam
+            name: mliev/open/mliev-iam
             tags:
               - ${CNB_COMMIT}-linux-amd64
               - ${CNB_COMMIT}-linux-arm64
@@ -301,7 +301,7 @@ $:
         - name: remove tag public
           type: artifact:remove-tag
           options:
-            name: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam
+            name: mliev/open/mliev-iam
             tags:
               - ${CNB_COMMIT}-linux-amd64
               - ${CNB_COMMIT}-linux-arm64
