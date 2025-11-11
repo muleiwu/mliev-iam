@@ -89,14 +89,29 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 		IsVerified:      false,
 	}
 
-	// 9. 执行协议特定的创建逻辑
-	if err := handler.CreateApplication(app); err != nil {
-		return nil, fmt.Errorf("创建应用失败: %w", err)
-	}
+	// 9. 使用事务确保应用和协议特定资源一起创建
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// 9.1 先保存应用到数据库（获取ID）
+		if err := tx.Create(app).Error; err != nil {
+			return fmt.Errorf("保存应用失败: %w", err)
+		}
 
-	// 10. 保存到数据库
-	if err := s.appDAO.Create(app); err != nil {
-		return nil, fmt.Errorf("保存应用失败: %w", err)
+		// 9.2 在事务上下文中创建协议处理器（使用 tx 而不是 db）
+		txHandler, err := s.protocolFactory.GetHandlerWithDB(req.ProtocolType, tx)
+		if err != nil {
+			return err
+		}
+
+		// 9.3 执行协议特定的创建逻辑（此时app.ID已经有值）
+		if err := txHandler.CreateApplication(app); err != nil {
+			return fmt.Errorf("创建应用失败: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	// 11. 转换为响应（使用明文配置副本）

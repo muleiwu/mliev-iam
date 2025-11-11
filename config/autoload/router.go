@@ -192,6 +192,10 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						adminApps.PUT("/:id", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplication))    // 更新应用
 						adminApps.DELETE("/:id", deps.WrapHandler(AdminController.ApplicationController{}.DeleteApplication)) // 删除应用
 
+						// 应用密钥管理（管理员）- 仅OIDC应用
+						adminApps.GET("/:id/keys", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationKeys))           // 获取应用密钥列表
+						adminApps.POST("/:id/keys/rotate", deps.WrapHandler(AdminController.ApplicationController{}.RotateApplicationKey)) // 轮转应用密钥
+
 						// 批量操作（管理员）
 						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
 

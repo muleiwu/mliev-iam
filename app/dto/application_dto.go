@@ -70,3 +70,24 @@ type CASApplicationConfig struct {
 	ServiceURL string            `json:"serviceUrl" binding:"required"`
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
+
+// ============== Application Key DTOs ==============
+
+// ApplicationKeyResponse 应用密钥响应（脱敏）
+type ApplicationKeyResponse struct {
+	ID        uint    `json:"id"`
+	KeyID     string  `json:"keyId"`
+	Algorithm string  `json:"algorithm"`
+	KeyType   string  `json:"keyType"`
+	KeySize   int     `json:"keySize"`
+	IsPrimary bool    `json:"isPrimary"`
+	PublicKey string  `json:"publicKey,omitempty"`
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+	CreatedAt string  `json:"createdAt"`
+}
+
+// RotateKeyRequest 轮转密钥请求
+type RotateKeyRequest struct {
+	Algorithm string `json:"algorithm,omitempty" validate:"omitempty,oneof=RS256 RS384 RS512 HS256 HS384 HS512 ES256 ES384 ES512"`
+	KeySize   int    `json:"keySize,omitempty" validate:"omitempty,min=256"`
+}
