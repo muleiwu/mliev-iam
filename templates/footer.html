@@ -1,0 +1,78 @@
+{{define "footer"}}
+<footer class="bg-dark text-light py-5 mt-5">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-4 mb-4">
+                <h5 class="mb-3">
+                    <i class="fas fa-shield-alt me-2"></i>Mliev IAM
+                </h5>
+                <p class="text-muted">
+                    企业级身份认证和访问管理系统，提供安全、可靠、标准化的身份认证解决方案。
+                </p>
+                <div class="mt-3">
+                    <a href="#" class="text-light me-3"><i class="fab fa-github fa-lg"></i></a>
+                    <a href="#" class="text-light me-3"><i class="fab fa-twitter fa-lg"></i></a>
+                    <a href="#" class="text-light"><i class="fab fa-linkedin fa-lg"></i></a>
+                </div>
+            </div>
+            
+            <div class="col-lg-2 col-md-6 mb-4">
+                <h6 class="mb-3">产品</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><a href="#features" class="text-muted text-decoration-none">功能特性</a></li>
+                    <li class="mb-2"><a href="#security" class="text-muted text-decoration-none">安全认证</a></li>
+                    <li class="mb-2"><a href="#scenarios" class="text-muted text-decoration-none">应用场景</a></li>
+                    <li class="mb-2"><a href="/api/docs" class="text-muted text-decoration-none">API文档</a></li>
+                </ul>
+            </div>
+            
+            <div class="col-lg-2 col-md-6 mb-4">
+                <h6 class="mb-3">开发者</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><a href="/api/docs" class="text-muted text-decoration-none">API参考</a></li>
+                    <li class="mb-2"><a href="/oidc/.well-known/openid-configuration" class="text-muted text-decoration-none">OIDC配置</a></li>
+                    <li class="mb-2"><a href="/health" class="text-muted text-decoration-none">系统状态</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">SDK下载</a></li>
+                </ul>
+            </div>
+            
+            <div class="col-lg-2 col-md-6 mb-4">
+                <h6 class="mb-3">支持</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">帮助中心</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">技术支持</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">社区论坛</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">联系我们</a></li>
+                </ul>
+            </div>
+            
+            <div class="col-lg-2 col-md-6 mb-4">
+                <h6 class="mb-3">关于</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">关于我们</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">隐私政策</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">服务条款</a></li>
+                    <li class="mb-2"><a href="#" class="text-muted text-decoration-none">安全公告</a></li>
+                </ul>
+            </div>
+        </div>
+        
+        <hr class="border-secondary my-4">
+        
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <p class="text-muted mb-0">
+                    &copy; 2024 Mliev IAM. All rights reserved.
+                </p>
+            </div>
+            <div class="col-md-6 text-md-end">
+                <p class="text-muted mb-0">
+                    Version {{.Version}} | 
+                    <a href="/health" class="text-muted text-decoration-none">系统状态</a> | 
+                    <a href="#" class="text-muted text-decoration-none">反馈建议</a>
+                </p>
+            </div>
+        </div>
+    </div>
+</footer>
+{{end}}
