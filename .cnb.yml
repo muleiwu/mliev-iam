@@ -12,7 +12,6 @@
     - docker
   env:
     PRIVATE_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-amd64
-    PUBLIC_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam:${CNB_COMMIT}-linux-amd64
   stages:
     - name: echo CNB_REPO_NAME
       script: echo ${CNB_REPO_NAME}
@@ -24,10 +23,6 @@
       script: docker build -t ${PRIVATE_IMAGE_TAG} .
     - name: docker push Private
       script: docker push ${PRIVATE_IMAGE_TAG}
-    - name: docker tag Public
-      script: docker tag ${PRIVATE_IMAGE_TAG} ${PUBLIC_IMAGE_TAG}
-    - name: docker push Public
-      script: docker push ${PUBLIC_IMAGE_TAG}
     - name: resolve
       type: cnb:resolve
       options:
@@ -41,7 +36,6 @@
     - docker
   env:
     PRIVATE_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-arm64
-    PUBLIC_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam:${CNB_COMMIT}-linux-arm64
   stages:
     - name: echo CNB_REPO_NAME
       script: echo ${CNB_REPO_NAME}
@@ -53,10 +47,6 @@
       script: docker build -t ${PRIVATE_IMAGE_TAG} .
     - name: docker push Private
       script: docker push ${PRIVATE_IMAGE_TAG}
-    - name: docker tag Public
-      script: docker tag ${PRIVATE_IMAGE_TAG} ${PUBLIC_IMAGE_TAG}
-    - name: docker push Public
-      script: docker push ${PUBLIC_IMAGE_TAG}
     - name: resolve
       type: cnb:resolve
       options:
@@ -195,28 +185,19 @@ develop:
               - linux/amd64
               - linux/arm64
 #              - linux/loong64
-        - name: remove tag private
-          type: artifact:remove-tag
-          options:
-            name: ${CNB_REPO_NAME}
-            tags:
-              - ${CNB_COMMIT}-linux-amd64
-              - ${CNB_COMMIT}-linux-arm64
-#              - ${CNB_COMMIT}-linux-loong64
-            type: docker
         - name: manifest public
           image: cnbcool/manifest
           settings:
             target: ${PUBLIC_IMAGE_NAME}:${CNB_BRANCH}
-            template: ${PUBLIC_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
             platforms:
               - linux/amd64
               - linux/arm64
 #              - linux/loong64
-        - name: remove tag public
+        - name: remove tag
           type: artifact:remove-tag
           options:
-            name: mliev/open/mliev-iam
+            name: ${CNB_REPO_NAME}
             tags:
               - ${CNB_COMMIT}-linux-amd64
               - ${CNB_COMMIT}-linux-arm64
@@ -271,7 +252,25 @@ $:
               - linux/amd64
               - linux/arm64
 #              - linux/loong64
-        - name: remove tag private
+        - name: manifest latest public
+          image: cnbcool/manifest
+          settings:
+            target: ${PUBLIC_IMAGE_NAME}:latest
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+#              - linux/loong64
+        - name: manifest version public
+          image: cnbcool/manifest
+          settings:
+            target: ${PUBLIC_IMAGE_NAME}:${CNB_BRANCH}
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+        #              - linux/loong64
+        - name: remove tag
           type: artifact:remove-tag
           options:
             name: ${CNB_REPO_NAME}
@@ -279,31 +278,4 @@ $:
               - ${CNB_COMMIT}-linux-amd64
               - ${CNB_COMMIT}-linux-arm64
 #              - ${CNB_COMMIT}-linux-loong64
-            type: docker
-        - name: manifest latest public
-          image: cnbcool/manifest
-          settings:
-            target: ${PUBLIC_IMAGE_NAME}:latest
-            template: ${PUBLIC_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
-            platforms:
-              - linux/amd64
-              - linux/arm64
-        #              - linux/loong64
-        - name: manifest version public
-          image: cnbcool/manifest
-          settings:
-            target: ${PUBLIC_IMAGE_NAME}:${CNB_BRANCH}
-            template: ${PUBLIC_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
-            platforms:
-              - linux/amd64
-              - linux/arm64
-        #              - linux/loong64
-        - name: remove tag public
-          type: artifact:remove-tag
-          options:
-            name: mliev/open/mliev-iam
-            tags:
-              - ${CNB_COMMIT}-linux-amd64
-              - ${CNB_COMMIT}-linux-arm64
-            #              - ${CNB_COMMIT}-linux-loong64
             type: docker
