@@ -12,6 +12,7 @@ type InstallCheckResponse struct {
 // InstallSubmitRequest 安装提交请求
 type InstallSubmitRequest struct {
 	Database DatabaseConfig   `json:"database" binding:"required"` // 数据库配置
+	Redis    RedisConfig      `json:"redis" binding:"required"`    // Redis配置
 	Admin    AdminAccountInfo `json:"admin" binding:"required"`    // 管理员账户信息
 }
 
@@ -23,6 +24,14 @@ type DatabaseConfig struct {
 	Password string `json:"password" binding:"required"`             // 数据库密码
 	Database string `json:"database" binding:"required"`             // 数据库名称
 	Charset  string `json:"charset"`                                 // 字符集，默认 utf8mb4
+}
+
+// RedisConfig Redis配置
+type RedisConfig struct {
+	Host     string `json:"host" binding:"required"`                 // Redis主机地址
+	Port     int    `json:"port" binding:"required,min=1,max=65535"` // Redis端口
+	Password string `json:"password"`                                // Redis密码（可选）
+	DB       int    `json:"db" binding:"min=0,max=15"`               // Redis数据库编号（0-15）
 }
 
 // AdminAccountInfo 管理员账户信息

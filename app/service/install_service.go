@@ -10,6 +10,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	redisImpl "cnb.cool/mliev/iam/mliev-iam/internal/pkg/redis/impl"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 	"gorm.io/datatypes"
 	"gorm.io/driver/mysql"
@@ -105,6 +107,18 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gor
 
 	// 返回数据库连接供后续使用
 	return db, nil
+}
+
+// TestRedisConnection 测试Redis连接
+func (s *InstallService) TestRedisConnection(config dto.RedisConfig) (*redis.Client, error) {
+	// 使用已有的Redis实现进行连接测试
+	client, err := redisImpl.NewRedis(s.helper, config.Host, config.Port, config.DB, config.Password)
+	if err != nil {
+		return nil, fmt.Errorf("Redis连接失败: %w", err)
+	}
+
+	// 返回Redis客户端供后续使用
+	return client, nil
 }
 
 // CreateInitialData 创建初始数据（部门、角色、权限、管理员）
@@ -422,6 +436,26 @@ func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
 		// 如果文件已存在，使用 WriteConfig 更新
 		if err := viper.WriteConfig(); err != nil {
 			return fmt.Errorf("写入数据库配置失败: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// UpdateRedisConfig 更新Redis配置到配置文件
+func (s *InstallService) UpdateRedisConfig(config dto.RedisConfig) error {
+	// 更新配置
+	viper.Set("redis.host", config.Host)
+	viper.Set("redis.port", config.Port)
+	viper.Set("redis.password", config.Password)
+	viper.Set("redis.db", config.DB)
+
+	// 写入配置文件
+	viper.SetConfigFile("./config/config.yaml")
+	if err := viper.SafeWriteConfig(); err != nil {
+		// 如果文件已存在，使用 WriteConfig 更新
+		if err := viper.WriteConfig(); err != nil {
+			return fmt.Errorf("写入Redis配置失败: %w", err)
 		}
 	}
 

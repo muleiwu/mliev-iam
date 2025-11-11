@@ -36,6 +36,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				{
 					install.GET("/check", deps.WrapHandler(controller.InstallController{}.CheckInstall))              // 检查安装状态
 					install.POST("/test-connection", deps.WrapHandler(controller.InstallController{}.TestConnection)) // 测试数据库连接
+					install.POST("/test-redis", deps.WrapHandler(controller.InstallController{}.TestRedisConnection)) // 测试Redis连接
 					install.POST("/submit", deps.WrapHandler(controller.InstallController{}.SubmitInstall))           // 提交安装
 				}
 
