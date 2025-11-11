@@ -221,7 +221,19 @@ footer a:hover {
 }
 
 .fade-in-up {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
     animation: fadeInUp 0.8s ease-out;
+    /* 确保动画完成后保持状态 */
+    animation-fill-mode: forwards;
+}
+
+/* 确保卡片元素在动画完成后保持可见 */
+.feature-card.fade-in-up,
+.scenario-card.fade-in-up,
+.security-badge.fade-in-up {
+    opacity: 1 !important;
+    transform: translateY(0) !important;
 }
 
 /* 滚动条样式 */

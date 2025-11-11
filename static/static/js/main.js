@@ -69,6 +69,10 @@ function initAnimations() {
             if (entry.isIntersecting) {
                 entry.target.classList.add('fade-in-up');
                 
+                // 确保元素在动画完成后保持可见
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+                
                 // 更新导航栏活动状态
                 const id = entry.target.getAttribute('id');
                 if (id) {
@@ -87,9 +91,13 @@ function initAnimations() {
     // 观察卡片元素
     const cards = document.querySelectorAll('.feature-card, .scenario-card, .security-badge');
     cards.forEach((card, index) => {
+        // 设置初始状态
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(30px)';
+        card.style.transition = 'opacity 0.8s ease-out, transform 0.8s ease-out';
+        
+        // 延迟观察，创建错落有致的效果
         setTimeout(() => {
-            card.style.opacity = '0';
-            card.style.transform = 'translateY(30px)';
             observer.observe(card);
         }, index * 100);
     });
@@ -212,16 +220,7 @@ function isElementInViewport(el) {
     );
 }
 
-// 添加CSS动画类
-const style = document.createElement('style');
-style.textContent = `
-    .fade-in-up {
-        opacity: 1;
-        transform: translateY(0);
-        transition: opacity 0.8s ease-out, transform 0.8s ease-out;
-    }
-`;
-document.head.appendChild(style);
+// CSS动画类已在style.css中定义，无需重复添加
 
 // 导出函数供全局使用
 window.MlievIAM = {
