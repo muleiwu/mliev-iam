@@ -307,7 +307,7 @@ func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface)
 	db := helper.GetDatabase()
 
 	// 支持通过 client_id 查询参数指定应用
-	clientID := c.Query("client_id")
+	clientID := c.Param("client_id")
 
 	var jwks []gin.H
 
