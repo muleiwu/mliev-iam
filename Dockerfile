@@ -13,7 +13,7 @@ COPY . /app
 RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
     cd /app/admin-web && \
     pnpm install && \
-    pnpm build:antd && pnpm build:oidc && ls /app && ls /app/static
+    pnpm build:antd && pnpm build:oidc && pnpm build:install && ls /app && ls /app/static
 
 
 # 构建阶段
