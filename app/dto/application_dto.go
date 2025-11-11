@@ -81,8 +81,8 @@ type ApplicationKeyResponse struct {
 	KeyType   string  `json:"keyType"`
 	KeySize   int     `json:"keySize"`
 	IsPrimary bool    `json:"isPrimary"`
-	PublicKey string  `json:"publicKey,omitempty"`
-	ExpiresAt *string `json:"expiresAt,omitempty"`
+	PublicKey string  `json:"publicKey"`
+	ExpiresAt *string `json:"expiresAt"`
 	CreatedAt string  `json:"createdAt"`
 }
 

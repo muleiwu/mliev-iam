@@ -60,6 +60,18 @@ func (dao *ApplicationOIDCKeyDAO) ListByApplicationID(appID uint) ([]*model.Appl
 	return keys, nil
 }
 
+// ListValidKeysByApplicationID 获取应用的所有有效密钥（未过期或过期时间为null）
+func (dao *ApplicationOIDCKeyDAO) ListValidKeysByApplicationID(appID uint) ([]*model.ApplicationOIDCKey, error) {
+	var keys []*model.ApplicationOIDCKey
+	err := dao.db.Where("application_id = ? AND (expires_at IS NULL OR expires_at > ?)", appID, gorm.Expr("NOW()")).
+		Order("is_primary DESC, created_at DESC").
+		Find(&keys).Error
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
 // Update 更新密钥
 func (dao *ApplicationOIDCKeyDAO) Update(key *model.ApplicationOIDCKey) error {
 	return dao.db.Save(key).Error

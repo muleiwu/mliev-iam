@@ -306,29 +306,24 @@ func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterfac
 func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface) {
 	db := helper.GetDatabase()
 
-	// 支持通过 client_id 查询参数指定应用
+	// 要求必须提供 client_id 参数
 	clientID := c.Param("client_id")
+	if clientID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":             "invalid_request",
+			"error_description": "缺少必需的 client_id 参数",
+		})
+		return
+	}
 
-	var jwks []gin.H
-
-	if clientID != "" {
-		// 为特定应用返回 JWKS
-		jwk, err := oc.getJWKSForApplication(db, clientID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":             "server_error",
-				"error_description": "无法获取密钥",
-			})
-			return
-		}
-		if jwk != nil {
-			jwks = append(jwks, jwk)
-		}
-	} else {
-		// 返回所有应用的公钥（多租户模式）
-		// 这里可以选择返回所有公钥，或者要求必须指定 client_id
-		// 为安全起见，返回空集合，要求指定 client_id
-		jwks = []gin.H{}
+	// 获取应用的所有有效密钥的 JWKS
+	jwks, err := oc.getJWKSArrayForApplication(db, clientID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":             "server_error",
+			"error_description": "无法获取密钥",
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -336,8 +331,8 @@ func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface)
 	})
 }
 
-// getJWKSForApplication 获取指定应用的 JWK
-func (oc OIDCController) getJWKSForApplication(db *gorm.DB, clientID string) (map[string]any, error) {
+// getJWKSArrayForApplication 获取指定应用的所有有效密钥的 JWK 数组
+func (oc OIDCController) getJWKSArrayForApplication(db *gorm.DB, clientID string) ([]map[string]any, error) {
 	// 1. 获取应用
 	appService := service.NewApplicationService(db)
 	app, err := appService.GetApplicationByClientID(clientID)
@@ -345,20 +340,35 @@ func (oc OIDCController) getJWKSForApplication(db *gorm.DB, clientID string) (ma
 		return nil, err
 	}
 
-	// 2. 获取应用的主密钥管理器
+	// 2. 获取应用的所有有效密钥
 	keyService := service.NewApplicationKeyService(db)
-	keyManager, err := keyService.GetPrimaryKeyManagerForApplication(app.ID)
+	keys, err := keyService.ListValidKeysByApplication(app.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. 获取 JWK（对称加密算法会返回 nil）
-	jwk, err := keyManager.GetJWK()
-	if err != nil {
-		return nil, err
+	// 3. 为每个密钥生成 JWK
+	var jwks []map[string]any
+	for _, key := range keys {
+		// 加载密钥管理器
+		keyManager, err := keyService.LoadKeyManager(key)
+		if err != nil {
+			continue // 跳过加载失败的密钥
+		}
+
+		// 获取 JWK（对称加密算法会返回 nil）
+		jwk, err := keyManager.GetJWK()
+		if err != nil {
+			continue // 跳过生成失败的密钥
+		}
+
+		// 只添加非空的 JWK（跳过对称加密算法）
+		if jwk != nil {
+			jwks = append(jwks, jwk)
+		}
 	}
 
-	return jwk, nil
+	return jwks, nil
 }
 
 // 私有方法

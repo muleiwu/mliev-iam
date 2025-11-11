@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -60,7 +61,13 @@ func (s *ApplicationKeyService) GenerateKeyForApplication(appID uint, algorithm 
 
 	publicKey, _ := keyManager.ExportPublicKey() // 对称加密可能返回空
 
-	// 6. 创建密钥记录
+	// 6. 获取当前的主密钥（用于设置过期时间）
+	oldPrimaryKey, err := s.keyDAO.GetPrimaryByApplicationID(appID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("获取旧主密钥失败: %w", err)
+	}
+
+	// 7. 创建密钥记录
 	key := &model.ApplicationOIDCKey{
 		ApplicationID: appID,
 		KeyID:         keyIDStr,
@@ -72,8 +79,18 @@ func (s *ApplicationKeyService) GenerateKeyForApplication(appID uint, algorithm 
 		IsPrimary:     true, // 默认设为主密钥
 	}
 
-	// 7. 保存到数据库（事务：先取消其他主密钥，再保存新密钥）
+	// 8. 保存到数据库（事务：设置旧主密钥过期时间、取消所有主密钥状态、保存新密钥）
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// 如果存在旧主密钥，设置其 7 天后过期
+		if oldPrimaryKey != nil {
+			expiresAt := time.Now().Add(7 * 24 * time.Hour)
+			if err := tx.Model(&model.ApplicationOIDCKey{}).
+				Where("id = ?", oldPrimaryKey.ID).
+				Update("expires_at", expiresAt).Error; err != nil {
+				return err
+			}
+		}
+
 		// 取消该应用下所有密钥的主密钥状态
 		if err := tx.Model(&model.ApplicationOIDCKey{}).
 			Where("application_id = ?", appID).
@@ -172,6 +189,16 @@ func (s *ApplicationKeyService) ListKeysByApplication(appID uint) ([]*model.Appl
 	keys, err := s.keyDAO.ListByApplicationID(appID)
 	if err != nil {
 		return nil, fmt.Errorf("获取密钥列表失败: %w", err)
+	}
+
+	return keys, nil
+}
+
+// ListValidKeysByApplication 获取应用的所有有效密钥（未过期或过期时间为null）
+func (s *ApplicationKeyService) ListValidKeysByApplication(appID uint) ([]*model.ApplicationOIDCKey, error) {
+	keys, err := s.keyDAO.ListValidKeysByApplicationID(appID)
+	if err != nil {
+		return nil, fmt.Errorf("获取有效密钥列表失败: %w", err)
 	}
 
 	return keys, nil

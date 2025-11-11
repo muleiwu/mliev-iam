@@ -17,12 +17,12 @@ type ApplicationOIDCKey struct {
 	Algorithm  string `gorm:"size:20;not null" json:"algorithm"`                 // RS256, RS512, HS256, HS512, ES256等
 	KeyType    string `gorm:"size:20;not null" json:"keyType"`                   // RSA, HMAC, ECDSA等
 	PrivateKey string `gorm:"type:text;not null" json:"-"`                       // 私钥数据（PEM或base64，加密存储）
-	PublicKey  string `gorm:"type:text" json:"publicKey,omitempty"`              // 公钥数据（非对称加密使用）
+	PublicKey  string `gorm:"type:text" json:"publicKey"`                        // 公钥数据（非对称加密使用）
 	KeySize    int    `gorm:"default:0" json:"keySize"`                          // 密钥长度（2048, 4096, 256等）
 	IsPrimary  bool   `gorm:"default:false;index:idx_app_keys" json:"isPrimary"` // 是否为主密钥
 
 	// 过期和时间信息
-	ExpiresAt *time.Time     `gorm:"index" json:"expiresAt,omitempty"` // 密钥过期时间（可选，为轮转预留）
+	ExpiresAt *time.Time     `gorm:"index" json:"expiresAt"` // 密钥过期时间（可选，为轮转预留）
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
