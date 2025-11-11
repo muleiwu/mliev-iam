@@ -14,14 +14,18 @@
     PRIVATE_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-amd64
     PUBLIC_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam:${CNB_COMMIT}-linux-amd64
   stages:
+    - name: echo CNB_REPO_NAME
+      script: echo ${CNB_REPO_NAME}
+    - name: echo Image Name
+      script: echo ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
     - name: docker login
       script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
     - name: docker build Private
       script: docker build -t ${PRIVATE_IMAGE_TAG} .
     - name: docker push Private
       script: docker push ${PRIVATE_IMAGE_TAG}
-    - name: docker build Public
-      script: docker build -t ${PUBLIC_IMAGE_TAG} .
+    - name: docker tag Public
+      script: docker tag ${PRIVATE_IMAGE_TAG} ${PUBLIC_IMAGE_TAG}
     - name: docker push Public
       script: docker push ${PUBLIC_IMAGE_TAG}
     - name: resolve
@@ -39,14 +43,18 @@
     PRIVATE_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-arm64
     PUBLIC_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam:${CNB_COMMIT}-linux-arm64
   stages:
+    - name: echo CNB_REPO_NAME
+      script: echo ${CNB_REPO_NAME}
+    - name: echo Image Name
+      script: echo ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
     - name: docker login
       script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
     - name: docker build Private
       script: docker build -t ${PRIVATE_IMAGE_TAG} .
     - name: docker push Private
       script: docker push ${PRIVATE_IMAGE_TAG}
-    - name: docker build Public
-      script: docker build -t ${PUBLIC_IMAGE_TAG} .
+    - name: docker tag Public
+      script: docker tag ${PRIVATE_IMAGE_TAG} ${PUBLIC_IMAGE_TAG}
     - name: docker push Public
       script: docker push ${PUBLIC_IMAGE_TAG}
     - name: resolve
