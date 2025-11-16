@@ -118,6 +118,7 @@ type TokenErrorResponse struct {
 // UserInfoResponse 用户信息响应
 type UserInfoResponse struct {
 	Sub                 string   `json:"sub"`
+	Id                  string   `json:"id"`
 	Name                string   `json:"name,omitempty"`
 	GivenName           string   `json:"given_name,omitempty"`
 	FamilyName          string   `json:"family_name,omitempty"`

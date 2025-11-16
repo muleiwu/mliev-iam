@@ -56,6 +56,7 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResp
 func (s *OIDCUserInfoService) buildUserInfoResponse(user *model.User, scopes []string) *dto.UserInfoResponse {
 	response := &dto.UserInfoResponse{
 		Sub: strconv.FormatUint(uint64(user.ID), 10),
+		Id:  strconv.FormatUint(uint64(user.ID), 10),
 	}
 
 	// 根据作用域返回相应的信息
