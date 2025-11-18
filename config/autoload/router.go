@@ -280,7 +280,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				// OIDC 核心端点
 				MethodGetPost := []string{http.MethodGet, http.MethodPost}
 				oidc.Match(MethodGetPost, "/:client_id/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
-				oidc.POST("/:client_id/token", deps.WrapHandler(controller.OIDCController{}.Token))                               // 令牌端点
+				oidc.Match(MethodGetPost, "/:client_id/token", deps.WrapHandler(controller.OIDCController{}.Token))               // 令牌端点
 				oidc.Match(MethodGetPost, "/:client_id/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))         // 用户信息端点
 				oidc.POST("/:client_id/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect))                     // 令牌内省端点
 				oidc.POST("/:client_id/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))                             // 令牌撤销端点
