@@ -2,38 +2,307 @@
 
 {{define "head"}}
 <style>
+    :root {
+        --primary-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+        --secondary-gradient: linear-gradient(135deg, #3b82f6 0%, #2dd4bf 100%);
+        --surface-color: rgba(255, 255, 255, 0.9);
+        --glass-bg: rgba(255, 255, 255, 0.7);
+        --glass-border: rgba(255, 255, 255, 0.5);
+        --text-primary: #1f2937;
+        --text-secondary: #4b5563;
+    }
+
+    body {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        color: var(--text-primary);
+        background-color: #f8fafc;
+        overflow-x: hidden;
+    }
+
+    /* Hero Section */
     .hero-section {
-        background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+        position: relative;
+        background: #0f172a;
         color: white;
-        padding: 120px 0 80px;
+        padding: 160px 0 120px;
+        overflow: hidden;
     }
-    .feature-card {
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+
+    .hero-bg-shape {
+        position: absolute;
+        width: 600px;
+        height: 600px;
+        background: var(--primary-gradient);
+        filter: blur(100px);
+        border-radius: 50%;
+        opacity: 0.4;
+        z-index: 0;
+        animation: float 10s infinite ease-in-out;
+    }
+
+    .hero-bg-shape-1 {
+        top: -100px;
+        right: -100px;
+    }
+
+    .hero-bg-shape-2 {
+        bottom: -100px;
+        left: -100px;
+        background: var(--secondary-gradient);
+        animation-delay: -5s;
+    }
+
+    .hero-content {
+        position: relative;
+        z-index: 1;
+    }
+
+    .hero-title {
+        font-size: 4rem;
+        font-weight: 800;
+        line-height: 1.2;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(to right, #fff, #cbd5e1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .hero-subtitle {
+        font-size: 1.25rem;
+        color: #94a3b8;
+        margin-bottom: 2.5rem;
+        max-width: 600px;
+    }
+
+    .btn-glow {
+        position: relative;
+        background: var(--primary-gradient);
+        border: none;
+        color: white;
+        font-weight: 600;
+        padding: 12px 32px;
+        border-radius: 50px;
+        transition: all 0.3s ease;
+        z-index: 1;
+    }
+
+    .btn-glow::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--primary-gradient);
+        border-radius: 50px;
+        filter: blur(10px);
+        opacity: 0.5;
+        z-index: -1;
+        transition: opacity 0.3s ease;
+    }
+
+    .btn-glow:hover {
+        transform: translateY(-2px);
+        color: white;
+    }
+
+    .btn-glow:hover::before {
+        opacity: 0.8;
+    }
+
+    /* Glass Cards */
+    .glass-card {
+        background: var(--glass-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--glass-border);
+        border-radius: 24px;
+        padding: 2rem;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         height: 100%;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
-    .feature-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+
+    .glass-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        border-color: rgba(255, 255, 255, 0.8);
     }
+
+    /* Features Section */
+    .section-title {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        color: var(--text-primary);
+    }
+
+    .section-subtitle {
+        color: var(--text-secondary);
+        font-size: 1.1rem;
+        margin-bottom: 4rem;
+    }
+
+    .feature-icon-wrapper {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 1.5rem;
+        color: #2563eb;
+        font-size: 1.5rem;
+        transition: transform 0.3s ease;
+    }
+
+    .glass-card:hover .feature-icon-wrapper {
+        transform: scale(1.1) rotate(5deg);
+    }
+
+    /* Security Section */
+    .security-section {
+        background: #fff;
+        position: relative;
+    }
+
     .security-badge {
-        background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-    }
-    .scenario-card {
-        border-left: 4px solid #007bff;
+        display: flex;
+        align-items: flex-start;
+        padding: 1.5rem;
+        border-radius: 16px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
         transition: all 0.3s ease;
     }
-    .scenario-card:hover {
-        border-left-width: 8px;
-        background-color: #f8f9fa;
+
+    .security-badge:hover {
+        background: #fff;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        border-color: #cbd5e1;
     }
-    .tech-icon {
-        font-size: 3rem;
-        color: #007bff;
-        margin-bottom: 1rem;
+
+    .security-icon {
+        flex-shrink: 0;
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: #f0fdf4;
+        color: #16a34a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 1rem;
+        font-size: 1.25rem;
+    }
+
+    /* Scenarios Section */
+    .scenario-card {
+        border: none;
+        background: white;
+        border-radius: 24px;
+        overflow: hidden;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        transition: all 0.3s ease;
+    }
+
+    .scenario-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    }
+
+    .scenario-header {
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        padding: 2rem;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .scenario-body {
+        padding: 2rem;
+    }
+
+    .feature-list li {
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        color: var(--text-secondary);
+    }
+
+    .feature-list i {
+        color: #10b981;
+        margin-right: 0.75rem;
+        font-size: 0.875rem;
+    }
+
+    /* Stats/Advantages */
+    .stat-card {
+        text-align: center;
+        padding: 2rem;
+    }
+
+    .stat-value {
+        font-size: 2.5rem;
+        font-weight: 800;
+        background: var(--primary-gradient);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.5rem;
+    }
+
+    /* Animations */
+    @keyframes float {
+
+        0%,
+        100% {
+            transform: translate(0, 0);
+        }
+
+        50% {
+            transform: translate(20px, -20px);
+        }
+    }
+
+    .fade-in-up {
+        animation: fadeInUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    @keyframes fadeInUp {
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .delay-100 {
+        animation-delay: 0.1s;
+    }
+
+    .delay-200 {
+        animation-delay: 0.2s;
+    }
+
+    .delay-300 {
+        animation-delay: 0.3s;
+    }
+
+    /* Staggered animation delays */
+    .row>div:nth-child(1) .fade-in-up {
+        animation-delay: 0.1s;
+    }
+
+    .row>div:nth-child(2) .fade-in-up {
+        animation-delay: 0.2s;
+    }
+
+    .row>div:nth-child(3) .fade-in-up {
+        animation-delay: 0.3s;
+    }
+
+    .row>div:nth-child(4) .fade-in-up {
+        animation-delay: 0.4s;
     }
 </style>
 {{end}}
@@ -41,26 +310,66 @@
 {{define "content"}}
 <!-- Hero Section -->
 <section class="hero-section">
-    <div class="container">
+    <div class="hero-bg-shape hero-bg-shape-1"></div>
+    <div class="hero-bg-shape hero-bg-shape-2"></div>
+
+    <div class="container hero-content">
         <div class="row align-items-center">
-            <div class="col-lg-6">
-                <h1 class="display-4 fw-bold mb-4">企业级身份认证管理</h1>
-                <p class="lead mb-4">
-                    Mliev IAM 提供安全、可靠、标准化的身份认证和访问管理解决方案，
-                    支持 OIDC、OAuth2、SAML 等国际标准协议，为企业数字化转型保驾护航。
-                </p>
-                <div class="d-flex gap-3">
-                    <a href="/admin" class="btn btn-light btn-lg">
-                        <i class="fas fa-rocket me-2"></i>立即开始
-                    </a>
-                    <a href="/api/docs" class="btn btn-outline-light btn-lg">
-                        <i class="fas fa-book me-2"></i>查看文档
-                    </a>
+            <div class="col-lg-7">
+                <div class="fade-in-up">
+                    <span
+                        class="badge bg-opacity-10 bg-white text-white border border-white border-opacity-25 rounded-pill px-3 py-2 mb-4">
+                        <i class="fas fa-star me-2 text-warning"></i>企业级身份认证首选
+                    </span>
+                    <h1 class="hero-title">
+                        构建安全、无缝的<br>
+                        数字身份体验
+                    </h1>
+                    <p class="hero-subtitle">
+                        MLiev IAM 提供基于 OIDC、OAuth2 等标准协议的统一身份认证解决方案。
+                        助力企业快速构建安全的访问控制体系，实现用户身份的集中化管理。
+                    </p>
+                    <div class="d-flex gap-3">
+                        <a href="/admin" class="btn btn-glow">
+                            <i class="fas fa-rocket me-2"></i>立即开始
+                        </a>
+                        <a href="/api/docs" class="btn btn-outline-light btn-lg rounded-pill px-4">
+                            <i class="fas fa-book me-2"></i>开发文档
+                        </a>
+                    </div>
                 </div>
             </div>
-            <div class="col-lg-6">
-                <div class="text-center">
-                    <i class="fas fa-shield-alt" style="font-size: 12rem; opacity: 0.3;"></i>
+            <div class="col-lg-5 d-none d-lg-block">
+                <div class="fade-in-up delay-200">
+                    <div class="position-relative">
+                        <!-- Abstract UI Representation -->
+                        <div class="glass-card p-4" style="transform: rotate(-5deg); margin-top: 2rem;">
+                            <div class="d-flex align-items-center mb-4">
+                                <div class="rounded-circle bg-primary p-3 text-white me-3">
+                                    <i class="fas fa-user-shield fa-lg"></i>
+                                </div>
+                                <div>
+                                    <h5 class="mb-1 fw-bold text-dark">身份验证通过</h5>
+                                    <small class="text-muted">刚刚 • SSO 登录</small>
+                                </div>
+                                <i class="fas fa-check-circle text-success ms-auto fa-lg"></i>
+                            </div>
+                            <div class="bg-light rounded-3 p-3 mb-3">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <small class="text-muted">访问应用</small>
+                                    <small class="fw-bold text-dark">CRM 系统</small>
+                                </div>
+                                <div class="progress" style="height: 6px;">
+                                    <div class="progress-bar bg-success" style="width: 100%"></div>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <span class="badge bg-primary bg-opacity-10 text-primary">OIDC</span>
+                                <span class="badge bg-info bg-opacity-10 text-info">MFA</span>
+                                <span class="badge bg-purple bg-opacity-10 text-purple">RBAC</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -68,24 +377,24 @@
 </section>
 
 <!-- Features Section -->
-<section id="features" class="py-5">
-    <div class="container">
-        <div class="text-center mb-5">
-            <h2 class="display-5 fw-bold">核心功能特性</h2>
-            <p class="lead text-light">全面支持主流身份认证协议，提供灵活的集成方案</p>
+<section id="features" class="py-5" style="background: #f8fafc;">
+    <div class="container py-5">
+        <div class="text-center mb-5 fade-in-up">
+            <h2 class="section-title">核心功能特性</h2>
+            <p class="section-subtitle">全面支持主流身份认证协议，提供灵活的集成方案</p>
         </div>
-        
+
         <div class="row g-4">
             {{range .Features}}
             <div class="col-md-6 col-lg-3">
-                <div class="card feature-card h-100 shadow-sm">
-                    <div class="card-body text-center p-4">
-                        <i class="{{.Icon}} tech-icon"></i>
-                        <h5 class="card-title">{{.Title}}</h5>
-                        <p class="card-text text-light">
-                            {{.Description}}
-                        </p>
+                <div class="glass-card fade-in-up">
+                    <div class="feature-icon-wrapper">
+                        <i class="{{.Icon}}"></i>
                     </div>
+                    <h5 class="fw-bold mb-3">{{.Title}}</h5>
+                    <p class="text-secondary mb-0">
+                        {{.Description}}
+                    </p>
                 </div>
             </div>
             {{end}}
@@ -94,50 +403,98 @@
 </section>
 
 <!-- Security Section -->
-<section id="security" class="py-5 bg-light">
-    <div class="container">
-        <div class="text-center mb-5">
-            <h2 class="display-5 fw-bold">企业级安全保障</h2>
-            <p class="lead text-light">符合国际安全标准，全方位保护您的身份数据</p>
-        </div>
-        
-        <div class="row g-4">
-            {{range .Security}}
-            <div class="col-md-6">
-                <div class="security-badge">
-                    <i class="{{.Icon}} fa-2x mb-3"></i>
-                    <h5>{{.Title}}</h5>
-                    <p>{{.Description}}</p>
+<section id="security" class="py-5 bg-white">
+    <div class="container py-5">
+        <div class="row align-items-center">
+            <div class="col-lg-5 mb-5 mb-lg-0">
+                <div class="fade-in-up">
+                    <h2 class="section-title mb-4">企业级安全保障</h2>
+                    <p class="text-secondary mb-4 lead">
+                        我们深知安全的重要性。MLiev IAM 采用业界领先的安全架构，
+                        符合国际安全标准，全方位保护您的身份数据。
+                    </p>
+                    <div class="d-flex flex-column gap-3">
+                        {{range .Security}}
+                        <div class="security-badge">
+                            <div class="security-icon">
+                                <i class="{{.Icon}}"></i>
+                            </div>
+                            <div>
+                                <h6 class="fw-bold mb-1">{{.Title}}</h6>
+                                <p class="text-secondary small mb-0">{{.Description}}</p>
+                            </div>
+                        </div>
+                        {{end}}
+                    </div>
                 </div>
             </div>
-            {{end}}
+            <div class="col-lg-6 offset-lg-1">
+                <div class="position-relative fade-in-up delay-200">
+                    <div class="glass-card bg-dark text-white p-5" style="background: #1e293b;">
+                        <div class="text-center mb-4">
+                            <i class="fas fa-shield-alt text-primary" style="font-size: 4rem;"></i>
+                        </div>
+                        <h3 class="text-center mb-4">安全合规认证</h3>
+                        <div class="row g-3 text-center">
+                            <div class="col-6">
+                                <div class="p-3 rounded bg-white bg-opacity-10">
+                                    <i class="fas fa-check-circle text-success mb-2"></i>
+                                    <div class="fw-bold">ISO 27001</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 rounded bg-white bg-opacity-10">
+                                    <i class="fas fa-check-circle text-success mb-2"></i>
+                                    <div class="fw-bold">GDPR Ready</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 rounded bg-white bg-opacity-10">
+                                    <i class="fas fa-check-circle text-success mb-2"></i>
+                                    <div class="fw-bold">SOC 2</div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 rounded bg-white bg-opacity-10">
+                                    <i class="fas fa-check-circle text-success mb-2"></i>
+                                    <div class="fw-bold">OAuth 2.1</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </section>
 
 <!-- Scenarios Section -->
-<section id="scenarios" class="py-5">
-    <div class="container">
-        <div class="text-center mb-5">
-            <h2 class="display-5 fw-bold">应用场景</h2>
-            <p class="lead text-light">适用于各种企业身份认证和访问管理需求</p>
+<section id="scenarios" class="py-5" style="background: #f1f5f9;">
+    <div class="container py-5">
+        <div class="text-center mb-5 fade-in-up">
+            <h2 class="section-title">多场景应用支持</h2>
+            <p class="section-subtitle">灵活适配各种业务场景，满足不同规模企业的需求</p>
         </div>
-        
+
         <div class="row g-4">
             {{range .Scenarios}}
             <div class="col-lg-6">
-                <div class="card scenario-card h-100">
-                    <div class="card-body p-4">
-                        <h5 class="card-title">
-                            <i class="{{.Icon}} me-2 text-primary"></i>
-                            {{.Title}}
-                        </h5>
-                        <p class="card-text">
+                <div class="scenario-card h-100 fade-in-up">
+                    <div class="scenario-header">
+                        <div class="d-flex align-items-center">
+                            <div class="rounded-circle bg-white p-3 shadow-sm me-3 text-primary">
+                                <i class="{{.Icon}} fa-lg"></i>
+                            </div>
+                            <h5 class="fw-bold mb-0">{{.Title}}</h5>
+                        </div>
+                    </div>
+                    <div class="scenario-body">
+                        <p class="text-secondary mb-4">
                             {{.Description}}
                         </p>
-                        <ul class="list-unstyled">
+                        <ul class="list-unstyled feature-list mb-0">
                             {{range .Features}}
-                            <li><i class="fas fa-check text-success me-2"></i>{{.}}</li>
+                            <li><i class="fas fa-check-circle"></i>{{.}}</li>
                             {{end}}
                         </ul>
                     </div>
@@ -149,21 +506,26 @@
 </section>
 
 <!-- Advantages Section -->
-<section id="advantages" class="py-5 bg-light">
-    <div class="container">
-        <div class="text-center mb-5">
-            <h2 class="display-5 fw-bold">技术优势</h2>
-            <p class="lead text-light">基于现代化技术架构，提供高性能、高可用的身份认证服务</p>
+<section id="advantages" class="py-5 bg-white">
+    <div class="container py-5">
+        <div class="text-center mb-5 fade-in-up">
+            <h2 class="section-title">技术优势</h2>
+            <p class="section-subtitle">基于现代化技术栈构建，性能强劲，扩展灵活</p>
         </div>
-        
+
         <div class="row g-4">
             {{range .Advantages}}
-            <div class="col-md-4 text-center">
-                <i class="{{.Icon}} tech-icon"></i>
-                <h5>{{.Title}}</h5>
-                <p class="text-light">
-                    {{.Description}}
-                </p>
+            <div class="col-md-4">
+                <div class="text-center p-4 fade-in-up">
+                    <div class="d-inline-flex align-items-center justify-content-center w-16 h-16 rounded-circle bg-primary bg-opacity-10 text-primary mb-4"
+                        style="width: 64px; height: 64px;">
+                        <i class="{{.Icon}} fa-2x"></i>
+                    </div>
+                    <h5 class="fw-bold mb-3">{{.Title}}</h5>
+                    <p class="text-secondary">
+                        {{.Description}}
+                    </p>
+                </div>
             </div>
             {{end}}
         </div>
@@ -171,18 +533,20 @@
 </section>
 
 <!-- CTA Section -->
-<section class="py-5 bg-primary text-white">
-    <div class="container text-center">
-        <h2 class="display-5 fw-bold mb-4">开始使用 Mliev IAM</h2>
-        <p class="lead mb-4">
-            立即部署企业级身份认证管理系统，为您的应用提供安全可靠的身份服务
+<section class="py-5 position-relative overflow-hidden">
+    <div class="position-absolute top-0 start-0 w-100 h-100"
+        style="background: var(--primary-gradient); opacity: 0.95; z-index: -1;"></div>
+    <div class="container text-center py-5 text-white">
+        <h2 class="display-5 fw-bold mb-4">准备好开始了吗？</h2>
+        <p class="lead mb-5 opacity-90">
+            立即部署 MLiev IAM，为您的企业构建安全、统一的身份认证平台
         </p>
         <div class="d-flex gap-3 justify-content-center">
-            <a href="/admin" class="btn btn-light btn-lg">
-                <i class="fas fa-rocket me-2"></i>管理控制台
+            <a href="/admin" class="btn btn-light btn-lg rounded-pill px-5 fw-bold text-primary shadow-lg">
+                <i class="fas fa-rocket me-2"></i>进入控制台
             </a>
-            <a href="/api/docs" class="btn btn-outline-light btn-lg">
-                <i class="fas fa-code me-2"></i>API 文档
+            <a href="/api/docs" class="btn btn-outline-light btn-lg rounded-pill px-5 fw-bold">
+                <i class="fas fa-code me-2"></i>查看文档
             </a>
         </div>
     </div>

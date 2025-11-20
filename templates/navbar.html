@@ -1,16 +1,51 @@
 {{define "navbar"}}
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
+<style>
+    .navbar-glass {
+        background: rgba(15, 23, 42, 0.8);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 1rem 0;
+        transition: all 0.3s ease;
+    }
+
+    .navbar-brand {
+        font-size: 1.5rem;
+        background: linear-gradient(to right, #fff, #cbd5e1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .nav-link {
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.7) !important;
+        transition: color 0.3s ease;
+    }
+
+    .nav-link:hover,
+    .nav-link.active {
+        color: white !important;
+    }
+
+    .btn-nav {
+        border-radius: 50px;
+        padding: 0.5rem 1.5rem;
+        font-weight: 600;
+    }
+</style>
+
+<nav class="navbar navbar-expand-lg navbar-dark fixed-top navbar-glass">
     <div class="container">
         <a class="navbar-brand fw-bold" href="/">
-            <i class="fas fa-shield-alt me-2"></i>Mliev IAM
+            <i class="fas fa-shield-alt me-2 text-primary"></i>Mliev IAM
         </a>
-        
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
-        
+
         <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto">
+            <ul class="navbar-nav me-auto ms-lg-4">
                 <li class="nav-item">
                     <a class="nav-link active" href="/">首页</a>
                 </li>
@@ -27,13 +62,13 @@
                     <a class="nav-link" href="#advantages">技术优势</a>
                 </li>
             </ul>
-            
-            <div class="d-flex">
-                <a href="/admin" class="btn btn-outline-light me-2">
-                    <i class="fas fa-cog me-1"></i>管理控制台
+
+            <div class="d-flex gap-2">
+                <a href="/admin" class="btn btn-outline-light btn-nav btn-sm">
+                    <i class="fas fa-cog me-1"></i>控制台
                 </a>
-                <a href="/api/docs" class="btn btn-light">
-                    <i class="fas fa-book me-1"></i>API文档
+                <a href="/api/docs" class="btn btn-primary btn-nav btn-sm">
+                    <i class="fas fa-book me-1"></i>文档
                 </a>
             </div>
         </div>
