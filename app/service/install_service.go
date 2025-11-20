@@ -11,10 +11,12 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	redisImpl "cnb.cool/mliev/iam/mliev-iam/internal/pkg/redis/impl"
+	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 	"gorm.io/datatypes"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -73,24 +75,59 @@ func (s *InstallService) CheckInstallStatus() *dto.InstallCheckResponse {
 
 // TestDatabaseConnection 测试数据库连接
 func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gorm.DB, error) {
-	// 设置默认字符集
-	charset := config.Charset
-	if charset == "" {
-		charset = "utf8mb4"
+	var dialector gorm.Dialector
+	driver := config.Driver
+	if driver == "" {
+		driver = "mysql" // 默认使用 MySQL
 	}
 
-	// 构建DSN
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-		config.Username,
-		config.Password,
-		config.Host,
-		config.Port,
-		config.Database,
-		charset,
-	)
+	switch driver {
+	case "mysql":
+		// 设置默认字符集
+		charset := config.Charset
+		if charset == "" {
+			charset = "utf8mb4"
+		}
+
+		// 构建MySQL DSN
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+			config.Username,
+			config.Password,
+			config.Host,
+			config.Port,
+			config.Database,
+			charset,
+		)
+		dialector = mysql.Open(dsn)
+
+	case "postgresql":
+		// 构建PostgreSQL DSN
+		dsn := fmt.Sprintf("user=%s password=%s host=%s port=%d dbname=%s sslmode=disable TimeZone=Asia/Shanghai",
+			config.Username,
+			config.Password,
+			config.Host,
+			config.Port,
+			config.Database,
+		)
+		dialector = postgres.New(postgres.Config{
+			DSN:                  dsn,
+			PreferSimpleProtocol: true,
+		})
+
+	case "sqlite":
+		// SQLite 使用文件路径
+		filePath := config.FilePath
+		if filePath == "" {
+			filePath = "mliev_iam.db"
+		}
+		dialector = sqlite.Open(filePath)
+
+	default:
+		return nil, fmt.Errorf("不支持的数据库驱动: %s", driver)
+	}
 
 	// 尝试连接数据库
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("数据库连接失败: %w", err)
 	}
@@ -414,20 +451,39 @@ func (s *InstallService) generatePasswordHash(password string) (salt, hash strin
 
 // UpdateDatabaseConfig 更新数据库配置到配置文件
 func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
-	// 设置默认字符集
-	charset := config.Charset
-	if charset == "" {
-		charset = "utf8mb4"
+	// 设置驱动类型，默认为 mysql
+	driver := config.Driver
+	if driver == "" {
+		driver = "mysql"
 	}
 
 	// 更新配置
-	viper.Set("database.driver", "mysql")
-	viper.Set("database.host", config.Host)
-	viper.Set("database.port", config.Port)
-	viper.Set("database.username", config.Username)
-	viper.Set("database.password", config.Password)
-	viper.Set("database.database", config.Database)
-	viper.Set("database.charset", charset)
+	viper.Set("database.driver", driver)
+
+	if driver == "sqlite" {
+		// SQLite 只需要文件路径
+		filePath := config.FilePath
+		if filePath == "" {
+			filePath = "mliev_iam.db"
+		}
+		viper.Set("database.filepath", filePath)
+	} else {
+		// MySQL 和 PostgreSQL 需要连接信息
+		viper.Set("database.host", config.Host)
+		viper.Set("database.port", config.Port)
+		viper.Set("database.username", config.Username)
+		viper.Set("database.password", config.Password)
+		viper.Set("database.database", config.Database)
+
+		// MySQL 需要字符集配置
+		if driver == "mysql" {
+			charset := config.Charset
+			if charset == "" {
+				charset = "utf8mb4"
+			}
+			viper.Set("database.charset", charset)
+		}
+	}
 
 	// 写入配置文件
 	// 先尝试 SafeWriteConfig（如果文件不存在会创建）
@@ -497,16 +553,25 @@ func (s *InstallService) createDatabaseTables() error {
 		return fmt.Errorf("数据库迁移配置为空")
 	}
 
-	// 禁用外键检查
-	s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
+	// 获取数据库驱动类型
+	driver := s.helper.GetConfig().GetString("database.driver", "mysql")
+
+	// 根据不同的数据库类型，执行相应的外键检查设置
+	if driver == "mysql" {
+		// MySQL: 禁用外键检查
+		s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
+	}
 
 	// 执行自动迁移
 	if err := s.db.AutoMigrate(models...); err != nil {
 		return fmt.Errorf("数据库表结构迁移失败: %w", err)
 	}
 
-	// 重新启用外键检查
-	s.db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
+	// 根据不同的数据库类型，恢复外键检查设置
+	if driver == "mysql" {
+		// MySQL: 重新启用外键检查
+		s.db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
+	}
 
 	return nil
 }
