@@ -304,6 +304,57 @@
     .row>div:nth-child(4) .fade-in-up {
         animation-delay: 0.4s;
     }
+
+    /* Mobile Responsive Styles */
+    @media (max-width: 991.98px) {
+        .hero-section {
+            padding: 120px 0 80px;
+            text-align: center;
+        }
+
+        .hero-title {
+            font-size: 3rem;
+        }
+
+        .hero-subtitle {
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .hero-content .d-flex {
+            justify-content: center;
+        }
+    }
+
+    @media (max-width: 767.98px) {
+        .hero-section {
+            padding: 100px 0 60px;
+        }
+
+        .hero-title {
+            font-size: 2.5rem;
+        }
+
+        .hero-bg-shape {
+            width: 300px;
+            height: 300px;
+            filter: blur(60px);
+        }
+
+        .section-title {
+            font-size: 2rem;
+        }
+
+        /* Adjust button layout on mobile */
+        .hero-content .d-flex {
+            flex-direction: column;
+            width: 100%;
+        }
+
+        .hero-content .btn {
+            width: 100%;
+        }
+    }
 </style>
 {{end}}
 
@@ -329,7 +380,7 @@
                         MLiev IAM 提供基于 OIDC、OAuth2 等标准协议的统一身份认证解决方案。
                         助力企业快速构建安全的访问控制体系，实现用户身份的集中化管理。
                     </p>
-                    <div class="d-flex gap-3">
+                    <div class="d-flex gap-3 flex-column flex-sm-row justify-content-center justify-content-lg-start">
                         <a href="/admin" class="btn btn-glow">
                             <i class="fas fa-rocket me-2"></i>立即开始
                         </a>
@@ -541,7 +592,7 @@
         <p class="lead mb-5 opacity-90">
             立即部署 MLiev IAM，为您的企业构建安全、统一的身份认证平台
         </p>
-        <div class="d-flex gap-3 justify-content-center">
+        <div class="d-flex gap-3 justify-content-center flex-column flex-sm-row">
             <a href="/admin" class="btn btn-light btn-lg rounded-pill px-5 fw-bold text-primary shadow-lg">
                 <i class="fas fa-rocket me-2"></i>进入控制台
             </a>
