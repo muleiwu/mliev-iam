@@ -9,6 +9,7 @@ func (receiver Database) InitConfig(helper envInterface.HelperInterface) map[str
 	return map[string]any{
 		"database.driver":   helper.GetEnv().GetString("database.driver", "mysql"),
 		"database.host":     helper.GetEnv().GetString("database.host", "127.0.0.1"),
+		"database.filepath": helper.GetEnv().GetString("database.filepath", "./config/mliev_iam.db"),
 		"database.port":     helper.GetEnv().GetInt("database.port", 3306),
 		"database.database": helper.GetEnv().GetString("database.database", "test"),
 		"database.username": helper.GetEnv().GetString("database.username", "test"),

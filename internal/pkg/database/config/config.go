@@ -24,7 +24,7 @@ func NewConfig(config configInterface.ConfigInterface) *DatabaseConfig {
 		DBName:   config.GetString("database.database", "test"),
 		Username: config.GetString("database.username", "test"),
 		Password: config.GetString("database.password", "123456"),
-		FilePath: config.GetString("database.filepath", ""),
+		FilePath: config.GetString("database.filepath", "./config/mliev_iam.db"),
 	}
 }
 
