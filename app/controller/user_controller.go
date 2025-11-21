@@ -172,3 +172,81 @@ func (uc UserController) UpdateUserProfile(c *gin.Context, helper interfaces.Hel
 
 	uc.SuccessWithMessage(c, "个人信息更新成功", response)
 }
+
+// Logout 用户退出登录
+// POST /api/auth/logout
+func (uc UserController) Logout(c *gin.Context, helper interfaces.HelperInterface) {
+	// 这里可以添加令牌失效逻辑
+	// 例如将令牌加入黑名单或从Redis中删除
+
+	uc.SuccessWithMessage(c, "退出登录成功", nil)
+}
+
+// RefreshToken 刷新访问令牌
+// POST /api/auth/refresh
+func (uc UserController) RefreshToken(c *gin.Context, helper interfaces.HelperInterface) {
+	// 从请求头或请求体中获取刷新令牌
+	refreshToken := c.GetHeader("Refresh-Token")
+	if refreshToken == "" {
+		var req struct {
+			RefreshToken string `json:"refreshToken" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			uc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+			return
+		}
+		refreshToken = req.RefreshToken
+	}
+
+	// 验证刷新令牌并生成新的访问令牌
+	jwtAuthService := service.NewJWTAuthService()
+	newAccessToken, err := jwtAuthService.RefreshToken(refreshToken)
+	if err != nil {
+		uc.Error(c, constants.ErrCodeUnauthorized, "刷新令牌无效或已过期: "+err.Error())
+		return
+	}
+
+	response := gin.H{
+		"accessToken": newAccessToken,
+		"tokenType":   "Bearer",
+		"expiresIn":   jwtAuthService.GetConfig().GetAccessTokenHours() * 3600, // 转换为秒
+	}
+
+	uc.SuccessWithMessage(c, "令牌刷新成功", response)
+}
+
+// GetAccessCodes 获取用户权限码
+// GET /api/auth/codes
+func (uc UserController) GetAccessCodes(c *gin.Context, helper interfaces.HelperInterface) {
+	// 这里需要从认证中间件或JWT中获取当前用户ID
+	// 暂时使用查询参数模拟
+	userIdStr := c.Query("userId")
+	if userIdStr == "" {
+		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
+		return
+	}
+
+	userId, err := strconv.ParseUint(userIdStr, 10, 32)
+	if err != nil {
+		uc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+		return
+	}
+
+	// 获取用户的所有权限码
+	userService := service.NewUserService(helper.GetDatabase())
+	permissions, err := userService.GetUserPermissions(uint(userId))
+	if err != nil {
+		uc.Error(c, constants.ErrCodeInternal, "获取权限码失败: "+err.Error())
+		return
+	}
+
+	// 提取权限码
+	accessCodes := make([]string, 0, len(permissions))
+	for _, perm := range permissions {
+		if perm.Code != "" {
+			accessCodes = append(accessCodes, perm.Code)
+		}
+	}
+
+	uc.Success(c, accessCodes)
+}

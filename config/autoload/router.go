@@ -246,10 +246,19 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					}
 				}
 
+				// 用户认证路由组（JWT令牌管理）
+				auth := api.Group("/auth")
+				{
+					auth.POST("/logout", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.Logout))        // 用户退出登录
+					auth.POST("/refresh", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.RefreshToken)) // 刷新访问令牌
+					auth.GET("/codes", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.GetAccessCodes))  // 获取用户权限码
+				}
+
 				apiOidc := api.Group("/oidc")
 				{
 					// OIDC 授权流程端点
 					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
+					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))    // 注册接口
 					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
 				}
 			}
