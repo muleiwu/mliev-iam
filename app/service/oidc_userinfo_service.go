@@ -97,7 +97,9 @@ func (s *OIDCUserInfoService) buildUserInfoResponse(user *model.User, scopes []s
 	}
 
 	if s.hasScope(scopes, "email") {
-		response.Email = user.Email
+		if user.Email != nil {
+			response.Email = *user.Email
+		}
 		// 优先从扩展属性中获取email_verified，否则使用IsVerified作为fallback
 		if user.Attributes != nil {
 			if emailVerified, ok := user.Attributes["email_verified"].(bool); ok {
@@ -111,7 +113,9 @@ func (s *OIDCUserInfoService) buildUserInfoResponse(user *model.User, scopes []s
 	}
 
 	if s.hasScope(scopes, "phone") {
-		response.PhoneNumber = user.Phone
+		if user.Phone != nil {
+			response.PhoneNumber = *user.Phone
+		}
 		// 可以添加phone_number_verified字段
 		if user.Attributes != nil {
 			if phoneVerified, ok := user.Attributes["phone_number_verified"].(bool); ok {

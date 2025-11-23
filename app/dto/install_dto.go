@@ -18,22 +18,14 @@ type InstallSubmitRequest struct {
 
 // DatabaseConfig 数据库配置
 type DatabaseConfig struct {
-	Driver   string `json:"driver"`                         // 数据库驱动类型 (mysql/postgresql/sqlite)
-	Host     string `json:"host"`                           // 数据库主机地址
-	Port     int    `json:"port" binding:"min=0,max=65535"` // 数据库端口
-	Username string `json:"username"`                       // 数据库用户名
-	Password string `json:"password"`                       // 数据库密码
-	Database string `json:"database"`                       // 数据库名称
-	Charset  string `json:"charset"`                        // 字符集，默认 utf8mb4 (仅 MySQL)
-	FilePath string `json:"filePath"`                       // SQLite 数据库文件路径 (仅 SQLite)
-}
-
-// RedisConfig Redis配置
-type RedisConfig struct {
-	Host     string `json:"host" binding:"required"`                 // Redis主机地址
-	Port     int    `json:"port" binding:"required,min=1,max=65535"` // Redis端口
-	Password string `json:"password"`                                // Redis密码（可选）
-	DB       int    `json:"db" binding:"min=0,max=15"`               // Redis数据库编号（0-15）
+	Driver   string `json:"driver"`                                  // 数据库驱动类型：mysql、postgresql、sqlite
+	FilePath string `json:"filePath"`                                // SQLite 数据库文件路径（仅sqlite时使用）
+	Host     string `json:"host" binding:"required"`                 // 数据库主机地址
+	Port     int    `json:"port" binding:"required,min=1,max=65535"` // 数据库端口
+	Username string `json:"username" binding:"required"`             // 数据库用户名
+	Password string `json:"password" binding:"required"`             // 数据库密码
+	Database string `json:"database" binding:"required"`             // 数据库名称
+	Charset  string `json:"charset"`                                 // 字符集，默认 utf8mb4
 }
 
 // AdminAccountInfo 管理员账户信息
@@ -49,4 +41,12 @@ type AdminAccountInfo struct {
 type InstallSubmitResponse struct {
 	Success bool   `json:"success"` // 是否成功
 	Message string `json:"message"` // 提示信息
+}
+
+// RedisConfig Redis配置
+type RedisConfig struct {
+	Host     string `json:"host"`     // Redis主机地址
+	Port     int    `json:"port"`     // Redis端口
+	Password string `json:"password"` // Redis密码
+	DB       int    `json:"db"`       // Redis数据库编号
 }

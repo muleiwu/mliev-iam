@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -140,6 +141,9 @@ func (auc UserController) GetUserList(c *gin.Context, helper interfaces.HelperIn
 		auc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
 		return
 	}
+
+	// 调试日志：输出排序参数
+	fmt.Printf("GetUserList - 排序参数: sortBy=%s, sortOrder=%s\n", req.SortBy, req.SortOrder)
 
 	userService := service.NewUserService(helper.GetDatabase())
 	response, err := userService.GetUserList(&req)
