@@ -116,14 +116,14 @@
       image: cnbcool/attachments:latest
       settings:
         attachments:
-          - ./dist/dwz-server_Darwin_arm64.tar.gz
-          - ./dist/dwz-server_Darwin_x86_64.tar.gz
-          - ./dist/dwz-server_Linux_arm64.tar.gz
-          - ./dist/dwz-server_Linux_armv5.tar.gz
-          - ./dist/dwz-server_Linux_armv6.tar.gz
-          - ./dist/dwz-server_Linux_armv7.tar.gz
-          - ./dist/dwz-server_Linux_loong64.tar.gz
-          - ./dist/dwz-server_Linux_x86_64.tar.gz
+          - ./dist/mliev-iam_Darwin_arm64.tar.gz
+          - ./dist/mliev-iam_Darwin_x86_64.tar.gz
+          - ./dist/mliev-iam_Linux_arm64.tar.gz
+          - ./dist/mliev-iam_Linux_armv5.tar.gz
+          - ./dist/mliev-iam_Linux_armv6.tar.gz
+          - ./dist/mliev-iam_Linux_armv7.tar.gz
+          - ./dist/mliev-iam_Linux_loong64.tar.gz
+          - ./dist/mliev-iam_Linux_x86_64.tar.gz
           - ./dist/checksums.txt
       exports:
         FILES: FILES
@@ -131,14 +131,14 @@
       image: cnbcool/attachments:latest
       settings:
         attachments:
-          - ./dist/dwz-server_Darwin_arm64.tar.gz
-          - ./dist/dwz-server_Darwin_x86_64.tar.gz
-          - ./dist/dwz-server_Linux_arm64.tar.gz
-          - ./dist/dwz-server_Linux_armv5.tar.gz
-          - ./dist/dwz-server_Linux_armv6.tar.gz
-          - ./dist/dwz-server_Linux_armv7.tar.gz
-          - ./dist/dwz-server_Linux_loong64.tar.gz
-          - ./dist/dwz-server_Linux_x86_64.tar.gz
+          - ./dist/mliev-iam_Darwin_arm64.tar.gz
+          - ./dist/mliev-iam_Darwin_x86_64.tar.gz
+          - ./dist/mliev-iam_Linux_arm64.tar.gz
+          - ./dist/mliev-iam_Linux_armv5.tar.gz
+          - ./dist/mliev-iam_Linux_armv6.tar.gz
+          - ./dist/mliev-iam_Linux_armv7.tar.gz
+          - ./dist/mliev-iam_Linux_loong64.tar.gz
+          - ./dist/mliev-iam_Linux_x86_64.tar.gz
           - ./dist/checksums.txt
         # 上传附件到指定仓库
         slug: mliev/open/mliev-iam
