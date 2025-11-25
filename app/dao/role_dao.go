@@ -58,7 +58,7 @@ func (d *RoleDao) GetByCode(code string) (*model.Role, error) {
 
 // Update 更新角色
 func (d *RoleDao) Update(role *model.Role) error {
-	return d.db.Save(role).Error
+	return d.db.Omit("Children", "Parent", "Permissions", "Users").Save(role).Error
 }
 
 // UpdateById 根据ID更新角色字段
@@ -126,8 +126,8 @@ func (d *RoleDao) List(req *dto.RoleQueryRequest) ([]*model.Role, int64, error) 
 		query = query.Order("level ASC, sort ASC, created_at DESC")
 	}
 
-	// 预加载关联数据
-	if err := query.Preload("Parent").Preload("Children").Find(&roles).Error; err != nil {
+	// 查询角色列表（平铺结构，不预加载关联以避免重复数据）
+	if err := query.Find(&roles).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -232,8 +232,8 @@ func (d *RoleDao) GetRolesByUserID(userID uint) ([]*model.Role, error) {
 func (d *RoleDao) AssignPermissions(roleID uint, permissionIDs []uint, grantedBy uint) error {
 	// 开启事务
 	return d.db.Transaction(func(tx *gorm.DB) error {
-		// 先删除现有权限关联
-		if err := tx.Where("role_id = ?", roleID).Delete(&model.RolePermission{}).Error; err != nil {
+		// 先删除现有权限关联（使用硬删除，避免主键冲突）
+		if err := tx.Where("role_id = ?", roleID).Unscoped().Delete(&model.RolePermission{}).Error; err != nil {
 			return err
 		}
 
