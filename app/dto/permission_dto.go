@@ -54,12 +54,13 @@ type UpdatePermissionRequest struct {
 // PermissionQueryRequest 权限查询请求
 type PermissionQueryRequest struct {
 	BaseQueryRequest
-	Name     string                  `form:"name" json:"name"`
-	Code     string                  `form:"code" json:"code"`
-	Type     *model.PermissionType   `form:"type" json:"type"`
-	Status   *model.PermissionStatus `form:"status" json:"status"`
-	ParentID *uint                   `form:"parentId" json:"parentId"`
-	Resource string                  `form:"resource" json:"resource"`
+	Name            string                  `form:"name" json:"name"`
+	Code            string                  `form:"code" json:"code"`
+	Type            *model.PermissionType   `form:"type" json:"type"`
+	Status          *model.PermissionStatus `form:"status" json:"status"`
+	ParentID        *uint                   `form:"parentId" json:"parentId"`
+	Resource        string                  `form:"resource" json:"resource"`
+	IncludeChildren bool                    `form:"includeChildren" json:"includeChildren"` // 是否递归查询所有子孙权限
 }
 
 // PermissionStatusUpdateRequest 权限状态更新请求

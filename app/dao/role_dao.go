@@ -104,7 +104,19 @@ func (d *RoleDao) List(req *dto.RoleQueryRequest) ([]*model.Role, int64, error) 
 			// 查询根角色
 			query = query.Where("parent_id IS NULL")
 		} else {
-			query = query.Where("parent_id = ?", *req.ParentID)
+			// 如果启用向下检索，递归查询所有子孙角色
+			if req.IncludeChildren {
+				childrenIDs, err := d.GetChildrenIDs(*req.ParentID)
+				if err != nil {
+					return nil, 0, err
+				}
+				// 将父角色ID也加入查询列表
+				allIDs := append([]uint{*req.ParentID}, childrenIDs...)
+				query = query.Where("id IN ?", allIDs)
+			} else {
+				// 只查询直接子角色
+				query = query.Where("parent_id = ?", *req.ParentID)
+			}
 		}
 	}
 

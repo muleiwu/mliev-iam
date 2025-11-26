@@ -37,11 +37,12 @@ type UpdateRoleRequest struct {
 // RoleQueryRequest 角色查询请求
 type RoleQueryRequest struct {
 	BaseQueryRequest
-	Name     string            `form:"name" json:"name"`
-	Code     string            `form:"code" json:"code"`
-	Type     *model.RoleType   `form:"type" json:"type"`
-	Status   *model.RoleStatus `form:"status" json:"status"`
-	ParentID *uint             `form:"parentId" json:"parentId"`
+	Name            string            `form:"name" json:"name"`
+	Code            string            `form:"code" json:"code"`
+	Type            *model.RoleType   `form:"type" json:"type"`
+	Status          *model.RoleStatus `form:"status" json:"status"`
+	ParentID        *uint             `form:"parentId" json:"parentId"`
+	IncludeChildren bool              `form:"includeChildren" json:"includeChildren"` // 是否递归查询所有子孙角色
 }
 
 // RoleStatusUpdateRequest 角色状态更新请求

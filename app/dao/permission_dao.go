@@ -95,7 +95,19 @@ func (d *PermissionDao) List(req *dto.PermissionQueryRequest) ([]*model.Permissi
 			// 查询根权限
 			query = query.Where("parent_id IS NULL")
 		} else {
-			query = query.Where("parent_id = ?", *req.ParentID)
+			// 如果启用向下检索，递归查询所有子孙权限
+			if req.IncludeChildren {
+				childrenIDs, err := d.GetChildrenIDs(*req.ParentID)
+				if err != nil {
+					return nil, 0, err
+				}
+				// 将父权限ID也加入查询列表
+				allIDs := append([]uint{*req.ParentID}, childrenIDs...)
+				query = query.Where("id IN ?", allIDs)
+			} else {
+				// 只查询直接子权限
+				query = query.Where("parent_id = ?", *req.ParentID)
+			}
 		}
 	}
 
