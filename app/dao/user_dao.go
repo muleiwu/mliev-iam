@@ -162,13 +162,43 @@ func (dao *UserDao) List(req *dto.UserQueryRequest) ([]model.User, int64, error)
 		pageSize = 100
 	}
 
+	// 处理排序
+	orderClause := dao.buildOrderClause(req.SortBy, req.SortOrder)
+
+	// 调试日志
+	fmt.Printf("UserDao.List - 排序参数: sortBy=%s, sortOrder=%s, orderClause=%s\n", req.SortBy, req.SortOrder, orderClause)
+
 	// 分页查询
 	offset := (page - 1) * pageSize
-	if err := query.Offset(offset).Limit(pageSize).Order("created_at DESC").Find(&users).Error; err != nil {
+	if err := query.Offset(offset).Limit(pageSize).Order(orderClause).Find(&users).Error; err != nil {
 		return nil, 0, fmt.Errorf("查询用户列表失败: %w", err)
 	}
 
 	return users, total, nil
+}
+
+// buildOrderClause 构建排序子句
+func (dao *UserDao) buildOrderClause(sortBy, sortOrder string) string {
+	// 验证排序字段，防止 SQL 注入
+	validSortFields := map[string]string{
+		"loginCount":  "login_count",
+		"lastLoginAt": "last_login_at",
+		"createdAt":   "created_at",
+	}
+
+	// 如果没有指定排序字段或字段无效，使用默认排序
+	dbField, ok := validSortFields[sortBy]
+	if !ok {
+		return "created_at DESC"
+	}
+
+	// 验证排序方向
+	order := "DESC"
+	if sortOrder == "asc" || sortOrder == "ASC" {
+		order = "ASC"
+	}
+
+	return fmt.Sprintf("%s %s", dbField, order)
 }
 
 // ExistsUsername 检查用户名是否存在

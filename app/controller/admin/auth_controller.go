@@ -48,8 +48,6 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 
 		if strings.Contains(errMsg, "用户账户已禁用") {
 			errCode = constants.ErrCodeUserDisabled
-		} else if strings.Contains(errMsg, "用户账户已被锁定") {
-			errCode = constants.ErrCodeUserLocked
 		} else if strings.Contains(errMsg, "用户账户未激活") {
 			errCode = constants.ErrCodeUserNotActivated
 		}

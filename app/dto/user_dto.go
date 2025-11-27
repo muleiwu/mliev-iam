@@ -37,37 +37,38 @@ type ChangePasswordRequest struct {
 
 // UserQueryRequest 用户查询请求
 type UserQueryRequest struct {
-	Page     int    `form:"page" validate:"min=1" binding:"omitempty,min=1"`
-	PageSize int    `form:"pageSize" validate:"min=1,max=100" binding:"omitempty,min=1,max=100"`
-	Username string `form:"username" binding:"omitempty"`
-	Email    string `form:"email" binding:"omitempty"`
-	Phone    string `form:"phone" binding:"omitempty"`
-	RealName string `form:"realName" binding:"omitempty"`
-	Status   *int   `form:"status" binding:"omitempty"`
-	Keyword  string `form:"keyword" binding:"omitempty"` // 关键词搜索（用户名、邮箱、真实姓名）
+	Page      int    `form:"page" validate:"min=1" binding:"omitempty,min=1"`
+	PageSize  int    `form:"pageSize" validate:"min=1,max=100" binding:"omitempty,min=1,max=100"`
+	Username  string `form:"username" binding:"omitempty"`
+	Email     string `form:"email" binding:"omitempty"`
+	Phone     string `form:"phone" binding:"omitempty"`
+	RealName  string `form:"realName" binding:"omitempty"`
+	Status    *int   `form:"status" binding:"omitempty"`
+	Keyword   string `form:"keyword" binding:"omitempty"`   // 关键词搜索（用户名、邮箱、真实姓名）
+	SortBy    string `form:"sortBy" binding:"omitempty"`    // 排序字段：loginCount, lastLoginAt, createdAt
+	SortOrder string `form:"sortOrder" binding:"omitempty"` // 排序方向：asc, desc
 }
 
 // UserResponse 用户响应信息
 type UserResponse struct {
-	ID           uint                   `json:"id"`
-	Username     string                 `json:"username"`
-	Email        string                 `json:"email"`
-	Phone        string                 `json:"phone"`
-	Nickname     string                 `json:"nickname"`
-	RealName     string                 `json:"realName"`
-	Avatar       string                 `json:"avatar"`
-	Status       model.UserStatus       `json:"status"`
-	StatusText   string                 `json:"statusText"`
-	IsActivated  bool                   `json:"isActivated"`
-	IsVerified   bool                   `json:"isVerified"`
-	LoginCount   int64                  `json:"loginCount"`
-	FailureCount int                    `json:"failureCount"`
-	LastLoginAt  *time.Time             `json:"lastLoginAt"`
-	LastLoginIP  string                 `json:"lastLoginIP"`
-	Attributes   map[string]interface{} `json:"attributes,omitempty"`
-	Remark       string                 `json:"remark"`
-	CreatedAt    time.Time              `json:"createdAt"`
-	UpdatedAt    time.Time              `json:"updatedAt"`
+	ID          uint                   `json:"id"`
+	Username    string                 `json:"username"`
+	Email       string                 `json:"email"`
+	Phone       string                 `json:"phone"`
+	Nickname    string                 `json:"nickname"`
+	RealName    string                 `json:"realName"`
+	Avatar      string                 `json:"avatar"`
+	Status      model.UserStatus       `json:"status"`
+	StatusText  string                 `json:"statusText"`
+	IsActivated bool                   `json:"isActivated"`
+	IsVerified  bool                   `json:"isVerified"`
+	LoginCount  int64                  `json:"loginCount"`
+	LastLoginAt *time.Time             `json:"lastLoginAt"`
+	LastLoginIP string                 `json:"lastLoginIP"`
+	Attributes  map[string]interface{} `json:"attributes,omitempty"`
+	Remark      string                 `json:"remark"`
+	CreatedAt   time.Time              `json:"createdAt"`
+	UpdatedAt   time.Time              `json:"updatedAt"`
 }
 
 // UserListResponse 用户列表响应
@@ -93,26 +94,35 @@ type BatchUserRequest struct {
 
 // ConvertToUserResponse 将用户模型转换为响应DTO
 func ConvertToUserResponse(user *model.User) UserResponse {
+	// 处理指针类型字段
+	email := ""
+	if user.Email != nil {
+		email = *user.Email
+	}
+	phone := ""
+	if user.Phone != nil {
+		phone = *user.Phone
+	}
+
 	return UserResponse{
-		ID:           user.ID,
-		Username:     user.Username,
-		Email:        user.Email,
-		Phone:        user.Phone,
-		Nickname:     user.Nickname,
-		RealName:     user.RealName,
-		Avatar:       user.Avatar,
-		Status:       user.Status,
-		StatusText:   user.Status.String(),
-		IsActivated:  user.IsActivated,
-		IsVerified:   user.IsVerified,
-		LoginCount:   user.LoginCount,
-		FailureCount: user.FailureCount,
-		LastLoginAt:  user.LastLoginAt,
-		LastLoginIP:  user.LastLoginIP,
-		Attributes:   user.Attributes,
-		Remark:       user.Remark,
-		CreatedAt:    user.CreatedAt,
-		UpdatedAt:    user.UpdatedAt,
+		ID:          user.ID,
+		Username:    user.Username,
+		Email:       email,
+		Phone:       phone,
+		Nickname:    user.Nickname,
+		RealName:    user.RealName,
+		Avatar:      user.Avatar,
+		Status:      user.Status,
+		StatusText:  user.Status.String(),
+		IsActivated: user.IsActivated,
+		IsVerified:  user.IsVerified,
+		LoginCount:  user.LoginCount,
+		LastLoginAt: user.LastLoginAt,
+		LastLoginIP: user.LastLoginIP,
+		Attributes:  user.Attributes,
+		Remark:      user.Remark,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
 	}
 }
 

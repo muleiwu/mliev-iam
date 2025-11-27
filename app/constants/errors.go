@@ -24,7 +24,6 @@ const (
 	ErrCodePhoneAlreadyExists   = 1004 // 手机号已存在
 	ErrCodeInvalidPassword      = 1005 // 密码错误
 	ErrCodeUserDisabled         = 1006 // 用户被禁用
-	ErrCodeUserLocked           = 1007 // 用户被锁定
 	ErrCodeUserNotActivated     = 1008 // 用户未激活
 	ErrCodePasswordExpired      = 1009 // 密码已过期
 	ErrCodeInvalidUserStatus    = 1010 // 无效的用户状态
@@ -51,7 +50,6 @@ var ErrMessages = map[int]string{
 	ErrCodePhoneAlreadyExists:   "手机号已存在",
 	ErrCodeInvalidPassword:      "密码错误",
 	ErrCodeUserDisabled:         "用户账户已被禁用",
-	ErrCodeUserLocked:           "用户账户已被锁定",
 	ErrCodeUserNotActivated:     "用户账户未激活",
 	ErrCodePasswordExpired:      "密码已过期",
 	ErrCodeInvalidUserStatus:    "用户状态无效",

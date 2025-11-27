@@ -95,7 +95,19 @@ func (d *PermissionDao) List(req *dto.PermissionQueryRequest) ([]*model.Permissi
 			// 查询根权限
 			query = query.Where("parent_id IS NULL")
 		} else {
-			query = query.Where("parent_id = ?", *req.ParentID)
+			// 如果启用向下检索，递归查询所有子孙权限
+			if req.IncludeChildren {
+				childrenIDs, err := d.GetChildrenIDs(*req.ParentID)
+				if err != nil {
+					return nil, 0, err
+				}
+				// 将父权限ID也加入查询列表
+				allIDs := append([]uint{*req.ParentID}, childrenIDs...)
+				query = query.Where("id IN ?", allIDs)
+			} else {
+				// 只查询直接子权限
+				query = query.Where("parent_id = ?", *req.ParentID)
+			}
 		}
 	}
 
@@ -122,8 +134,8 @@ func (d *PermissionDao) List(req *dto.PermissionQueryRequest) ([]*model.Permissi
 		query = query.Order("level ASC, sort ASC, created_at DESC")
 	}
 
-	// 预加载关联数据
-	if err := query.Preload("Parent").Preload("Children").Find(&permissions).Error; err != nil {
+	// 查询权限列表（不预加载 Children，返回纯扁平列表）
+	if err := query.Find(&permissions).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -132,15 +144,37 @@ func (d *PermissionDao) List(req *dto.PermissionQueryRequest) ([]*model.Permissi
 
 // GetPermissionTree 获取权限树形结构
 func (d *PermissionDao) GetPermissionTree() ([]*model.Permission, error) {
-	var permissions []*model.Permission
-	if err := d.db.Where("parent_id IS NULL").
-		Preload("Children").
-		Preload("Children.Children").
-		Order("level ASC, sort ASC").
-		Find(&permissions).Error; err != nil {
+	// 查询所有权限（不预加载，避免 N+1 问题和深度限制）
+	var allPermissions []*model.Permission
+	if err := d.db.Order("level ASC, sort ASC").Find(&allPermissions).Error; err != nil {
 		return nil, err
 	}
-	return permissions, nil
+
+	// 构建权限映射表，用于快速查找
+	permissionMap := make(map[uint]*model.Permission)
+	for _, perm := range allPermissions {
+		// 创建副本，避免修改原始数据
+		permCopy := *perm
+		permCopy.Children = make([]model.Permission, 0)
+		permissionMap[perm.ID] = &permCopy
+	}
+
+	// 构建树形结构
+	var rootPermissions []*model.Permission
+	for _, perm := range allPermissions {
+		permNode := permissionMap[perm.ID]
+		if perm.ParentID == nil {
+			// 根节点
+			rootPermissions = append(rootPermissions, permNode)
+		} else {
+			// 子节点，添加到父节点的 Children 中
+			if parent, exists := permissionMap[*perm.ParentID]; exists {
+				parent.Children = append(parent.Children, *permNode)
+			}
+		}
+	}
+
+	return rootPermissions, nil
 }
 
 // GetChildrenIDs 获取权限的所有子权限ID（递归）

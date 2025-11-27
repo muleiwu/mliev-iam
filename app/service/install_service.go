@@ -373,11 +373,20 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 		return fmt.Errorf("生成密码哈希失败: %w", err)
 	}
 
+	// 处理可选字段 - 将string转换为*string
+	var email, phone *string
+	if adminInfo.Email != "" {
+		email = &adminInfo.Email
+	}
+	if adminInfo.Phone != "" {
+		phone = &adminInfo.Phone
+	}
+
 	// 创建管理员用户
 	admin := &model.User{
 		Username:     adminInfo.Username,
-		Email:        adminInfo.Email,
-		Phone:        adminInfo.Phone,
+		Email:        email,
+		Phone:        phone,
 		Nickname:     adminInfo.RealName,
 		RealName:     adminInfo.RealName,
 		Salt:         salt,
@@ -386,7 +395,6 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 		IsActivated:  true,
 		IsVerified:   true,
 		LoginCount:   0,
-		FailureCount: 0,
 		Remark:       "系统管理员账户",
 	}
 
