@@ -54,6 +54,15 @@ func (s *DepartmentService) CreateDepartment(req *dto.CreateDepartmentRequest) (
 		}
 	}
 
+	// 如果指定了负责人，验证负责人是否存在
+	if req.ManagerID != nil {
+		userDao := dao.NewUserDao(s.database)
+		_, err := userDao.GetByID(*req.ManagerID)
+		if err != nil {
+			return nil, fmt.Errorf("负责人不存在或已被删除")
+		}
+	}
+
 	// 创建部门对象
 	department := &model.Department{
 		Name:          req.Name,
@@ -160,6 +169,12 @@ func (s *DepartmentService) UpdateDepartment(id uint, req *dto.UpdateDepartmentR
 		department.Sort = *req.Sort
 	}
 	if req.ManagerID != nil {
+		// 验证负责人是否存在
+		userDao := dao.NewUserDao(s.database)
+		_, err := userDao.GetByID(*req.ManagerID)
+		if err != nil {
+			return nil, fmt.Errorf("负责人不存在或已被删除")
+		}
 		department.ManagerID = req.ManagerID
 	}
 	if req.Phone != "" {
