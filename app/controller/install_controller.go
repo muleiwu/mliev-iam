@@ -50,6 +50,31 @@ func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.Hel
 	ic.SuccessWithMessage(c, "数据库连接测试成功", nil)
 }
 
+// TestRedisConnection 测试Redis连接
+// POST /api/install/test-redis
+func (ic InstallController) TestRedisConnection(c *gin.Context, helper interfaces.HelperInterface) {
+	var req dto.RedisConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ic.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	installService := service.NewInstallService(helper.GetDatabase(), helper)
+
+	// 测试Redis连接
+	testRedis, err := installService.TestRedisConnection(req)
+	if err != nil {
+		ic.Error(c, constants.ErrCodeBadRequest, "Redis连接测试失败: "+err.Error())
+		return
+	}
+	// 测试成功后关闭连接
+	if err := testRedis.Close(); err != nil {
+		helper.GetLogger().Warn("关闭Redis测试连接时出错: " + err.Error())
+	}
+
+	ic.SuccessWithMessage(c, "Redis连接测试成功", nil)
+}
+
 // SubmitInstall 提交系统安装
 // POST /api/install/submit
 func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.HelperInterface) {
@@ -81,28 +106,47 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 		}
 	}()
 
-	// 3. 使用测试成功的数据库连接创建新的 service 实例
+	// 3. 测试Redis连接
+	testRedis, err := installService.TestRedisConnection(req.Redis)
+	if err != nil {
+		ic.Error(c, constants.ErrCodeBadRequest, "Redis连接测试失败: "+err.Error())
+		return
+	}
+	// 确保在函数退出时关闭Redis连接
+	defer func() {
+		if err := testRedis.Close(); err != nil {
+			helper.GetLogger().Warn("关闭Redis测试连接时出错: " + err.Error())
+		}
+	}()
+
+	// 4. 使用测试成功的数据库连接创建新的 service 实例
 	newInstallService := service.NewInstallService(testDB, helper)
 
-	// 4. 更新数据库配置到配置文件
+	// 5. 更新数据库配置到配置文件
 	if err := newInstallService.UpdateDatabaseConfig(req.Database); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "更新数据库配置失败: "+err.Error())
 		return
 	}
 
-	// 5. 创建初始数据（部门、角色、权限、管理员）
+	// 6. 更新Redis配置到配置文件
+	if err := newInstallService.UpdateRedisConfig(req.Redis); err != nil {
+		ic.Error(c, constants.ErrCodeInternal, "更新Redis配置失败: "+err.Error())
+		return
+	}
+
+	// 7. 创建初始数据（部门、角色、权限、管理员）
 	if err := newInstallService.CreateInitialData(req.Admin); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "创建初始数据失败: "+err.Error())
 		return
 	}
 
-	// 6. 标记系统为已安装
+	// 8. 标记系统为已安装
 	if err := newInstallService.MarkAsInstalled(); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "标记系统已安装失败: "+err.Error())
 		return
 	}
 
-	// 7. 返回成功响应
+	// 9. 返回成功响应
 	response := dto.InstallSubmitResponse{
 		Success: true,
 		Message: "系统安装成功，服务将自动重启以应用新配置，请稍后使用管理员账户登录",
@@ -110,7 +154,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 
 	ic.SuccessWithMessage(c, "系统安装成功", response)
 
-	// 8. 异步触发配置重载（在响应返回后）
+	// 10. 异步触发配置重载（在响应返回后）
 	go func() {
 		time.Sleep(500 * time.Millisecond) // 短暂延迟，确保响应已发送
 		reload.TriggerReload()

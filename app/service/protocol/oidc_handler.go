@@ -123,8 +123,8 @@ func (h *OIDCProtocolHandler) CreateApplication(app *model.Application) error {
 	// 2. 获取密钥大小
 	keySize := h.getDefaultKeySize(algorithm)
 
-	// 3. 为应用生成签名密钥
-	if err := h.generateKeyForApplication(app.ID, algorithm, keySize); err != nil {
+	// 3. 为应用生成签名密钥（使用当前 db 连接，它可能已经在事务中）
+	if err := h.generateKeyForApplicationWithDB(h.db, app.ID, algorithm, keySize); err != nil {
 		return fmt.Errorf("生成签名密钥失败: %w", err)
 	}
 
@@ -394,8 +394,13 @@ func (h *OIDCProtocolHandler) validateRedirectURIFormat(uri string) error {
 	return nil
 }
 
-// generateKeyForApplication 为应用生成密钥
+// generateKeyForApplication 为应用生成密钥（使用新事务）
 func (h *OIDCProtocolHandler) generateKeyForApplication(appID uint, algorithm string, keySize int) error {
+	return h.generateKeyForApplicationWithDB(h.db, appID, algorithm, keySize)
+}
+
+// generateKeyForApplicationWithDB 为应用生成密钥（可传入事务）
+func (h *OIDCProtocolHandler) generateKeyForApplicationWithDB(db *gorm.DB, appID uint, algorithm string, keySize int) error {
 	// 1. 创建密钥工厂
 	factory := jwt.NewKeyManagerFactory()
 
@@ -442,24 +447,15 @@ func (h *OIDCProtocolHandler) generateKeyForApplication(appID uint, algorithm st
 		IsPrimary:     true, // 默认设为主密钥
 	}
 
-	// 8. 保存到数据库（事务：先取消其他主密钥，再保存新密钥）
-	err = h.db.Transaction(func(tx *gorm.DB) error {
-		// 取消该应用下所有密钥的主密钥状态
-		if err := tx.Model(&model.ApplicationOIDCKey{}).
-			Where("application_id = ?", appID).
-			Update("is_primary", false).Error; err != nil {
-			return err
-		}
+	// 8. 取消该应用下所有密钥的主密钥状态
+	if err := db.Model(&model.ApplicationOIDCKey{}).
+		Where("application_id = ?", appID).
+		Update("is_primary", false).Error; err != nil {
+		return fmt.Errorf("更新主密钥状态失败: %w", err)
+	}
 
-		// 保存新密钥
-		if err := tx.Create(key).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
+	// 9. 保存新密钥
+	if err := db.Create(key).Error; err != nil {
 		return fmt.Errorf("保存密钥失败: %w", err)
 	}
 
@@ -482,4 +478,25 @@ func (h *OIDCProtocolHandler) getDefaultKeySize(algorithm string) int {
 	default:
 		return 2048
 	}
+}
+
+// ResetClientSecret 重置客户端密钥
+func (h *OIDCProtocolHandler) ResetClientSecret(appID uint) (string, error) {
+	// 生成新的客户端密钥（明文）
+	newClientSecret := h.generateClientSecret()
+
+	// 加密密钥
+	hashedSecret, err := bcrypt.GenerateFromPassword([]byte(newClientSecret), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("加密客户端密钥失败: %w", err)
+	}
+
+	// 更新数据库
+	appDAO := dao.NewApplicationDAO(h.db)
+	err = appDAO.UpdateClientSecret(appID, string(hashedSecret))
+	if err != nil {
+		return "", fmt.Errorf("更新客户端密钥失败: %w", err)
+	}
+
+	return newClientSecret, nil
 }

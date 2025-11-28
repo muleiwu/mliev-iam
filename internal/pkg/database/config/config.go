@@ -13,6 +13,7 @@ type DatabaseConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	DBName   string `json:"dbname"`
+	FilePath string `json:"filepath"`
 }
 
 func NewConfig(config configInterface.ConfigInterface) *DatabaseConfig {
@@ -23,6 +24,7 @@ func NewConfig(config configInterface.ConfigInterface) *DatabaseConfig {
 		DBName:   config.GetString("database.database", "test"),
 		Username: config.GetString("database.username", "test"),
 		Password: config.GetString("database.password", "123456"),
+		FilePath: config.GetString("database.filepath", "./config/mliev_iam.db"),
 	}
 }
 
@@ -42,4 +44,11 @@ func (dc *DatabaseConfig) GetPostgreSQLDSN() string {
 		dc.Host,
 		dc.Port,
 		dc.DBName)
+}
+
+func (dc *DatabaseConfig) GetSQLiteDSN() string {
+	if dc.FilePath != "" {
+		return dc.FilePath
+	}
+	return "mliev_iam.db"
 }

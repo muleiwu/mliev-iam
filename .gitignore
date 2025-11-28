@@ -1,5 +1,6 @@
 .idea/
 config.yaml
+config/config.yaml
 /static/admin/
 /static/auth/
 /keys/

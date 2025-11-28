@@ -211,13 +211,17 @@ func (s *OIDCIDTokenService) addProfileClaims(claims *IDTokenClaims, user *model
 
 // addEmailClaims 添加email scope的claims
 func (s *OIDCIDTokenService) addEmailClaims(claims *IDTokenClaims, user *model.User) {
-	claims.Email = user.Email
+	if user.Email != nil {
+		claims.Email = *user.Email
+	}
 	claims.EmailVerified = user.IsVerified
 }
 
 // addPhoneClaims 添加phone scope的claims
 func (s *OIDCIDTokenService) addPhoneClaims(claims *IDTokenClaims, user *model.User) {
-	claims.PhoneNumber = user.Phone
+	if user.Phone != nil {
+		claims.PhoneNumber = *user.Phone
+	}
 
 	// 从扩展属性中获取手机号验证状态
 	if user.Attributes != nil {

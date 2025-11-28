@@ -70,18 +70,27 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		return nil, fmt.Errorf("生成密码哈希失败: %w", err)
 	}
 
+	// 处理可选字段：空字符串转为 nil
+	var email, phone *string
+	if req.Email != "" {
+		email = &req.Email
+	}
+	if req.Phone != "" {
+		phone = &req.Phone
+	}
+
 	// 创建用户对象
 	user := &model.User{
 		Username:     req.Username,
-		Email:        req.Email,
-		Phone:        req.Phone,
+		Email:        email,
+		Phone:        phone,
 		Nickname:     req.Nickname,
 		RealName:     req.RealName,
 		Avatar:       req.Avatar,
 		Salt:         salt,
 		PasswordHash: passwordHash,
-		Status:       model.UserStatusInactive,
-		IsActivated:  false,
+		Status:       model.UserStatusActive,
+		IsActivated:  true,
 		IsVerified:   false,
 		Remark:       req.Remark,
 	}
@@ -126,27 +135,49 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	}
 
 	// 验证邮箱是否已存在（排除自己）
-	if req.Email != "" && req.Email != user.Email {
-		exists, err := s.userDao.ExistsEmail(req.Email, id)
-		if err != nil {
-			return nil, fmt.Errorf("检查邮箱失败: %w", err)
+	if req.Email != "" {
+		// 检查是否与当前值不同
+		needUpdate := true
+		if user.Email != nil && *user.Email == req.Email {
+			needUpdate = false
 		}
-		if exists {
-			return nil, fmt.Errorf("邮箱已存在")
+
+		if needUpdate {
+			exists, err := s.userDao.ExistsEmail(req.Email, id)
+			if err != nil {
+				return nil, fmt.Errorf("检查邮箱失败: %w", err)
+			}
+			if exists {
+				return nil, fmt.Errorf("邮箱已存在")
+			}
+			user.Email = &req.Email
 		}
-		user.Email = req.Email
+	} else {
+		// 空字符串表示清空邮箱
+		user.Email = nil
 	}
 
 	// 验证手机号是否已存在（排除自己）
-	if req.Phone != "" && req.Phone != user.Phone {
-		exists, err := s.userDao.ExistsPhone(req.Phone, id)
-		if err != nil {
-			return nil, fmt.Errorf("检查手机号失败: %w", err)
+	if req.Phone != "" {
+		// 检查是否与当前值不同
+		needUpdate := true
+		if user.Phone != nil && *user.Phone == req.Phone {
+			needUpdate = false
 		}
-		if exists {
-			return nil, fmt.Errorf("手机号已存在")
+
+		if needUpdate {
+			exists, err := s.userDao.ExistsPhone(req.Phone, id)
+			if err != nil {
+				return nil, fmt.Errorf("检查手机号失败: %w", err)
+			}
+			if exists {
+				return nil, fmt.Errorf("手机号已存在")
+			}
+			user.Phone = &req.Phone
 		}
-		user.Phone = req.Phone
+	} else {
+		// 空字符串表示清空手机号
+		user.Phone = nil
 	}
 
 	// 更新字段
@@ -278,12 +309,8 @@ func (s *UserService) BatchOperation(req *dto.BatchUserRequest) error {
 	switch req.Action {
 	case "activate":
 		return s.userDao.BatchUpdateStatus(req.UserIDs, model.UserStatusActive)
-	case "deactivate":
+	case "deactivate", "disable":
 		return s.userDao.BatchUpdateStatus(req.UserIDs, model.UserStatusDisabled)
-	case "lock":
-		return s.userDao.BatchUpdateStatus(req.UserIDs, model.UserStatusLocked)
-	case "unlock":
-		return s.userDao.BatchUpdateStatus(req.UserIDs, model.UserStatusActive)
 	case "delete":
 		return s.userDao.BatchDelete(req.UserIDs)
 	default:
@@ -383,20 +410,11 @@ func (s *UserService) ValidateUserForLogin(username, password string) (*dto.User
 
 	// 检查用户是否可以登录
 	if !user.CanLogin() {
-		return nil, fmt.Errorf("用户账户已禁用或锁定")
+		return nil, fmt.Errorf("用户账户已禁用")
 	}
 
 	// 验证密码
 	if !s.verifyPassword(password, user.Salt, user.PasswordHash) {
-		// 增加失败次数
-		user.IncrementFailureCount()
-
-		// 如果失败次数超过限制，锁定账户
-		if user.FailureCount >= 5 {
-			user.Lock()
-		}
-
-		s.userDao.Update(user)
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 

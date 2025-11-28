@@ -18,15 +18,20 @@ func NewProtocolHandlerFactory(db *gorm.DB) *ProtocolHandlerFactory {
 
 // GetHandler 根据协议类型获取对应的处理器
 func (f *ProtocolHandlerFactory) GetHandler(protocolType string) (ProtocolHandler, error) {
+	return f.GetHandlerWithDB(protocolType, f.db)
+}
+
+// GetHandlerWithDB 根据协议类型和数据库连接获取对应的处理器（支持事务）
+func (f *ProtocolHandlerFactory) GetHandlerWithDB(protocolType string, db *gorm.DB) (ProtocolHandler, error) {
 	switch protocolType {
 	case "oidc":
-		return NewOIDCProtocolHandler(f.db), nil
+		return NewOIDCProtocolHandler(db), nil
 	case "saml":
-		return NewSAMLProtocolHandler(f.db), nil
+		return NewSAMLProtocolHandler(db), nil
 	case "cas":
-		return NewCASProtocolHandler(f.db), nil
+		return NewCASProtocolHandler(db), nil
 	case "oauth2":
-		return NewOAuth2ProtocolHandler(f.db), nil
+		return NewOAuth2ProtocolHandler(db), nil
 	default:
 		return nil, fmt.Errorf("不支持的协议类型: %s", protocolType)
 	}

@@ -117,7 +117,7 @@ func (s *RoleService) GetRoleByID(id uint) (*dto.RoleResponse, error) {
 }
 
 // UpdateRole 更新角色信息
-func (s *RoleService) UpdateRole(id uint, req *dto.UpdateRoleRequest) (*dto.RoleResponse, error) {
+func (s *RoleService) UpdateRole(id uint, req *dto.UpdateRoleRequest, currentUserID uint) (*dto.RoleResponse, error) {
 	// 获取角色
 	role, err := s.roleDao.GetByID(id)
 	if err != nil {
@@ -127,6 +127,20 @@ func (s *RoleService) UpdateRole(id uint, req *dto.UpdateRoleRequest) (*dto.Role
 	// 检查是否是系统角色
 	if role.IsSystem() {
 		return nil, fmt.Errorf("系统角色不允许修改")
+	}
+
+	// 特别保护超级管理员角色
+	if role.Code == "super_admin" {
+		return nil, fmt.Errorf("超级管理员角色不允许修改")
+	}
+
+	// 检查当前用户是否有权限操作此角色
+	hasPermission, err := s.checkRoleOperationPermission(currentUserID, role)
+	if err != nil {
+		return nil, fmt.Errorf("权限检查失败: %w", err)
+	}
+	if !hasPermission {
+		return nil, fmt.Errorf("权限不足，无法操作此角色")
 	}
 
 	// 验证角色名称是否已存在（排除自己）
@@ -139,6 +153,18 @@ func (s *RoleService) UpdateRole(id uint, req *dto.UpdateRoleRequest) (*dto.Role
 			return nil, fmt.Errorf("角色名称已存在")
 		}
 		role.Name = req.Name
+	}
+
+	// 验证角色代码是否已存在（排除自己）
+	if req.Code != "" && req.Code != role.Code {
+		exists, err := s.roleDao.ExistsCode(req.Code, id)
+		if err != nil {
+			return nil, fmt.Errorf("检查角色代码失败: %w", err)
+		}
+		if exists {
+			return nil, fmt.Errorf("角色代码已存在")
+		}
+		role.Code = req.Code
 	}
 
 	// 更新字段
@@ -168,7 +194,7 @@ func (s *RoleService) UpdateRole(id uint, req *dto.UpdateRoleRequest) (*dto.Role
 }
 
 // DeleteRole 删除角色
-func (s *RoleService) DeleteRole(id uint) error {
+func (s *RoleService) DeleteRole(id uint, currentUserID uint) error {
 	// 检查角色是否存在
 	role, err := s.roleDao.GetByID(id)
 	if err != nil {
@@ -178,6 +204,20 @@ func (s *RoleService) DeleteRole(id uint) error {
 	// 检查是否是系统角色
 	if role.IsSystem() {
 		return fmt.Errorf("系统角色不允许删除")
+	}
+
+	// 特别保护超级管理员角色
+	if role.Code == "super_admin" {
+		return fmt.Errorf("超级管理员角色不允许删除")
+	}
+
+	// 检查当前用户是否有权限操作此角色
+	hasPermission, err := s.checkRoleOperationPermission(currentUserID, role)
+	if err != nil {
+		return fmt.Errorf("权限检查失败: %w", err)
+	}
+	if !hasPermission {
+		return fmt.Errorf("权限不足，无法操作此角色")
 	}
 
 	// 检查是否有子角色
@@ -243,7 +283,7 @@ func (s *RoleService) GetRoleTree() (*dto.RoleTreeResponse, error) {
 }
 
 // UpdateRoleStatus 更新角色状态
-func (s *RoleService) UpdateRoleStatus(id uint, req *dto.RoleStatusUpdateRequest) error {
+func (s *RoleService) UpdateRoleStatus(id uint, req *dto.RoleStatusUpdateRequest, currentUserID uint) error {
 	// 检查角色是否存在
 	role, err := s.roleDao.GetByID(id)
 	if err != nil {
@@ -253,6 +293,20 @@ func (s *RoleService) UpdateRoleStatus(id uint, req *dto.RoleStatusUpdateRequest
 	// 检查是否是系统角色
 	if role.IsSystem() {
 		return fmt.Errorf("系统角色不允许修改状态")
+	}
+
+	// 特别保护超级管理员角色
+	if role.Code == "super_admin" {
+		return fmt.Errorf("超级管理员角色不允许修改状态")
+	}
+
+	// 检查当前用户是否有权限操作此角色
+	hasPermission, err := s.checkRoleOperationPermission(currentUserID, role)
+	if err != nil {
+		return fmt.Errorf("权限检查失败: %w", err)
+	}
+	if !hasPermission {
+		return fmt.Errorf("权限不足，无法操作此角色")
 	}
 
 	// 更新状态
@@ -267,12 +321,12 @@ func (s *RoleService) UpdateRoleStatus(id uint, req *dto.RoleStatusUpdateRequest
 }
 
 // BatchOperation 批量操作角色
-func (s *RoleService) BatchOperation(req *dto.BatchRoleRequest) error {
+func (s *RoleService) BatchOperation(req *dto.BatchRoleRequest, currentUserID uint) error {
 	if len(req.RoleIDs) == 0 {
 		return fmt.Errorf("角色ID列表不能为空")
 	}
 
-	// 检查是否包含系统角色
+	// 检查是否包含系统角色和超级管理员角色，并验证权限
 	for _, roleID := range req.RoleIDs {
 		role, err := s.roleDao.GetByID(roleID)
 		if err != nil {
@@ -280,6 +334,18 @@ func (s *RoleService) BatchOperation(req *dto.BatchRoleRequest) error {
 		}
 		if role.IsSystem() {
 			return fmt.Errorf("系统角色不允许批量操作")
+		}
+		if role.Code == "super_admin" {
+			return fmt.Errorf("超级管理员角色不允许批量操作")
+		}
+
+		// 检查当前用户是否有权限操作此角色
+		hasPermission, err := s.checkRoleOperationPermission(currentUserID, role)
+		if err != nil {
+			return fmt.Errorf("权限检查失败: %w", err)
+		}
+		if !hasPermission {
+			return fmt.Errorf("权限不足，无法操作角色 %d", roleID)
 		}
 	}
 
@@ -410,4 +476,83 @@ func (s *RoleService) GetUserRoles(userID uint) ([]*dto.RoleResponse, error) {
 	}
 
 	return dto.ConvertToRoleResponses(roles), nil
+}
+
+// checkRoleOperationPermission 检查用户是否有权限操作目标角色
+func (s *RoleService) checkRoleOperationPermission(currentUserID uint, targetRole *model.Role) (bool, error) {
+	// 获取当前用户的所有有效角色
+	var userRoles []model.UserRole
+	if err := s.database.Where("user_id = ? AND is_active = ? AND approval_status = ? AND deleted_at IS NULL",
+		currentUserID, true, 1).
+		Preload("Role").Find(&userRoles).Error; err != nil {
+		return false, err
+	}
+
+	if len(userRoles) == 0 {
+		return false, nil
+	}
+
+	// 查找当前用户的最大数据权限范围（数值越小，权限越大）
+	minDataScope := 4 // 默认最小权限（仅本人）
+	hasSuperAdmin := false
+
+	for i := range userRoles {
+		userRole := &userRoles[i]
+		if userRole.Role.ID == 0 || !userRole.Role.IsEnabled() {
+			continue
+		}
+
+		// 检查是否是超级管理员
+		if userRole.Role.Code == "super_admin" {
+			hasSuperAdmin = true
+			break
+		}
+
+		// 获取角色的数据权限范围
+		roleDataScope := userRole.DataScope
+		if roleDataScope == 0 && userRole.Role.DataScope != nil {
+			roleDataScope = *userRole.Role.DataScope
+		}
+
+		if roleDataScope > 0 && roleDataScope < minDataScope {
+			minDataScope = roleDataScope
+		}
+	}
+
+	// 超级管理员可以操作所有非系统角色
+	if hasSuperAdmin {
+		return true, nil
+	}
+
+	// 如果用户有全部数据权限（DataScope = 1），可以操作所有自定义角色
+	if minDataScope == 1 {
+		return true, nil
+	}
+
+	// 其他情况下，检查角色层级关系
+	// 如果目标角色是用户当前角色的子级角色，则允许操作
+	for i := range userRoles {
+		userRole := &userRoles[i]
+		if userRole.Role.ID == 0 || !userRole.Role.IsEnabled() {
+			continue
+		}
+
+		// 检查目标角色是否是当前角色的子级
+		if targetRole.ParentID != nil && *targetRole.ParentID == userRole.Role.ID {
+			return true, nil
+		}
+
+		// 如果数据权限是本部门或本部门及下级，还需要检查部门匹配
+		// 这里简化处理，如果有 DataScope = 2 或 3 的权限，允许操作同级别或下级角色
+		if minDataScope <= 3 {
+			// 检查目标角色的层级是否大于等于当前用户角色的层级
+			if targetRole.Level != nil && userRole.Role.Level != nil {
+				if *targetRole.Level >= *userRole.Role.Level {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }

@@ -12,11 +12,14 @@ type InstallCheckResponse struct {
 // InstallSubmitRequest 安装提交请求
 type InstallSubmitRequest struct {
 	Database DatabaseConfig   `json:"database" binding:"required"` // 数据库配置
+	Redis    RedisConfig      `json:"redis" binding:"required"`    // Redis配置
 	Admin    AdminAccountInfo `json:"admin" binding:"required"`    // 管理员账户信息
 }
 
 // DatabaseConfig 数据库配置
 type DatabaseConfig struct {
+	Driver   string `json:"driver"`                                  // 数据库驱动类型：mysql、postgresql、sqlite
+	FilePath string `json:"filePath"`                                // SQLite 数据库文件路径（仅sqlite时使用）
 	Host     string `json:"host" binding:"required"`                 // 数据库主机地址
 	Port     int    `json:"port" binding:"required,min=1,max=65535"` // 数据库端口
 	Username string `json:"username" binding:"required"`             // 数据库用户名
@@ -38,4 +41,12 @@ type AdminAccountInfo struct {
 type InstallSubmitResponse struct {
 	Success bool   `json:"success"` // 是否成功
 	Message string `json:"message"` // 提示信息
+}
+
+// RedisConfig Redis配置
+type RedisConfig struct {
+	Host     string `json:"host"`     // Redis主机地址
+	Port     int    `json:"port"`     // Redis端口
+	Password string `json:"password"` // Redis密码
+	DB       int    `json:"db"`       // Redis数据库编号
 }

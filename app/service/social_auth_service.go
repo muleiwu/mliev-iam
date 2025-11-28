@@ -354,11 +354,17 @@ func (s *SocialAuthService) registerWithSocialAccount(provider *model.SocialProv
 	username := s.generateUsername(socialUser)
 	fmt.Printf("DEBUG: 生成用户名: %s\n", username)
 
+	// 处理可选字段
+	var email *string
+	if socialUser.Email != "" {
+		email = &socialUser.Email
+	}
+
 	user := &model.User{
 		Username:    username,
 		Nickname:    socialUser.Nickname,
 		Avatar:      socialUser.Avatar,
-		Email:       socialUser.Email,
+		Email:       email,
 		Status:      model.UserStatusActive,
 		IsActivated: true,
 	}
@@ -717,10 +723,16 @@ func (s *SocialAuthService) RegisterWithSocial(req *dto.SocialRegisterRequest) (
 		}
 	}()
 
+	// 处理可选字段
+	var email *string
+	if req.Email != "" {
+		email = &req.Email
+	}
+
 	// 创建新用户（使用用户提供的信息）
 	user := &model.User{
 		Username:     req.Username,
-		Email:        req.Email,
+		Email:        email,
 		RealName:     req.RealName,
 		Nickname:     tempUserInfo.Nickname, // 使用社交账号昵称
 		Avatar:       tempUserInfo.Avatar,   // 使用社交账号头像

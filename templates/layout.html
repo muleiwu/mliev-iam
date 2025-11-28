@@ -1,0 +1,40 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Mliev IAM 身份认证管理系统</title>
+    <meta name="description" content="企业级身份认证和访问管理系统，支持OIDC、OAuth2、SAML等标准协议">
+    <meta name="keywords" content="IAM,身份认证,OAuth2,OIDC,SAML,单点登录,企业安全">
+    
+    <!-- Bootstrap CSS -->
+    <link href="/static/css/bootstrap@5.3.0.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="/static/css/font-awesome_6.4.0_css_all.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+    
+    {{block "head" .}}{{end}}
+</head>
+<body>
+    <!-- Navigation -->
+    {{template "navbar" .}}
+    
+    <!-- Main Content -->
+    <main>
+        {{block "content" .}}{{end}}
+    </main>
+    
+    <!-- Footer -->
+    {{template "footer" .}}
+    
+    <!-- Bootstrap JS -->
+    <script src="/static/js/bootstrap@5.3.0.bundle.js"></script>
+    <!-- Custom JS -->
+    <script src="/static/js/main.js"></script>
+    
+    {{block "scripts" .}}{{end}}
+</body>
+</html>
+{{end}}

@@ -36,6 +36,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				{
 					install.GET("/check", deps.WrapHandler(controller.InstallController{}.CheckInstall))              // 检查安装状态
 					install.POST("/test-connection", deps.WrapHandler(controller.InstallController{}.TestConnection)) // 测试数据库连接
+					install.POST("/test-redis", deps.WrapHandler(controller.InstallController{}.TestRedisConnection)) // 测试Redis连接
 					install.POST("/submit", deps.WrapHandler(controller.InstallController{}.SubmitInstall))           // 提交安装
 				}
 
@@ -192,6 +193,13 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						adminApps.PUT("/:id", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplication))    // 更新应用
 						adminApps.DELETE("/:id", deps.WrapHandler(AdminController.ApplicationController{}.DeleteApplication)) // 删除应用
 
+						// 应用密钥管理（管理员）- 仅OIDC应用
+						adminApps.GET("/:id/keys", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationKeys))           // 获取应用密钥列表
+						adminApps.POST("/:id/keys/rotate", deps.WrapHandler(AdminController.ApplicationController{}.RotateApplicationKey)) // 轮转应用密钥
+
+						// 客户端密钥管理（管理员）- 仅OIDC应用
+						adminApps.POST("/:id/secret/reset", deps.WrapHandler(AdminController.ApplicationController{}.ResetClientSecret)) // 重置客户端密钥
+
 						// 批量操作（管理员）
 						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
 
@@ -238,10 +246,19 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					}
 				}
 
+				// 用户认证路由组（JWT令牌管理）
+				auth := api.Group("/auth")
+				{
+					auth.POST("/logout", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.Logout))        // 用户退出登录
+					auth.POST("/refresh", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.RefreshToken)) // 刷新访问令牌
+					auth.GET("/codes", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.GetAccessCodes))  // 获取用户权限码
+				}
+
 				apiOidc := api.Group("/oidc")
 				{
 					// OIDC 授权流程端点
 					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
+					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))    // 注册接口
 					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
 				}
 			}
@@ -271,13 +288,13 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 			{
 				// OIDC 核心端点
 				MethodGetPost := []string{http.MethodGet, http.MethodPost}
-				oidc.Match(MethodGetPost, "/:uuid/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
-				oidc.POST("/:uuid/token", deps.WrapHandler(controller.OIDCController{}.Token))                               // 令牌端点
-				oidc.Match(MethodGetPost, "/:uuid/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))         // 用户信息端点
-				oidc.POST("/:uuid/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect))                     // 令牌内省端点
-				oidc.POST("/:uuid/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))                             // 令牌撤销端点
-				oidc.GET("/:uuid/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))                                  // JSON Web Key Set端点
-				oidc.GET("/:uuid/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
+				oidc.Match(MethodGetPost, "/:client_id/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
+				oidc.Match(MethodGetPost, "/:client_id/token", deps.WrapHandler(controller.OIDCController{}.Token))               // 令牌端点
+				oidc.Match(MethodGetPost, "/:client_id/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))         // 用户信息端点
+				oidc.POST("/:client_id/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect))                     // 令牌内省端点
+				oidc.POST("/:client_id/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))                             // 令牌撤销端点
+				oidc.GET("/:client_id/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))                                  // JSON Web Key Set端点
+				oidc.GET("/:client_id/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
 			}
 
 			webhook := router.Group("/webhook")

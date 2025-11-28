@@ -87,18 +87,27 @@ func (rc RoleController) UpdateRole(c *gin.Context, helper interfaces.HelperInte
 		return
 	}
 
+	// 获取当前用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+
 	roleService := service.NewRoleService(helper.GetDatabase())
-	response, err := roleService.UpdateRole(uint(id), &req)
+	response, err := roleService.UpdateRole(uint(id), &req, userID.(uint))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
 		if strings.Contains(errMsg, "角色不存在") {
 			errCode = constants.ErrCodeNotFound
-		} else if strings.Contains(errMsg, "系统角色不允许修改") {
+		} else if strings.Contains(errMsg, "系统角色不允许修改") || strings.Contains(errMsg, "超级管理员角色不允许修改") {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(errMsg, "角色名称已存在") {
 			errCode = constants.ErrCodeBadRequest
+		} else if strings.Contains(errMsg, "权限不足") {
+			errCode = constants.ErrCodeForbidden
 		}
 
 		rc.Error(c, errCode, errMsg)
@@ -118,20 +127,29 @@ func (rc RoleController) DeleteRole(c *gin.Context, helper interfaces.HelperInte
 		return
 	}
 
+	// 获取当前用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err = roleService.DeleteRole(uint(id))
+	err = roleService.DeleteRole(uint(id), userID.(uint))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
 		if strings.Contains(errMsg, "角色不存在") {
 			errCode = constants.ErrCodeNotFound
-		} else if strings.Contains(errMsg, "系统角色不允许删除") {
+		} else if strings.Contains(errMsg, "系统角色不允许删除") || strings.Contains(errMsg, "超级管理员角色不允许删除") {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(errMsg, "存在子角色") {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(errMsg, "有") && strings.Contains(errMsg, "个用户使用此角色") {
 			errCode = constants.ErrCodeBadRequest
+		} else if strings.Contains(errMsg, "权限不足") {
+			errCode = constants.ErrCodeForbidden
 		}
 
 		rc.Error(c, errCode, errMsg)
@@ -189,16 +207,25 @@ func (rc RoleController) UpdateRoleStatus(c *gin.Context, helper interfaces.Help
 		return
 	}
 
+	// 获取当前用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err = roleService.UpdateRoleStatus(uint(id), &req)
+	err = roleService.UpdateRoleStatus(uint(id), &req, userID.(uint))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
 		if strings.Contains(errMsg, "角色不存在") {
 			errCode = constants.ErrCodeNotFound
-		} else if strings.Contains(errMsg, "系统角色不允许修改状态") {
+		} else if strings.Contains(errMsg, "系统角色不允许修改状态") || strings.Contains(errMsg, "超级管理员角色不允许修改状态") {
 			errCode = constants.ErrCodeBadRequest
+		} else if strings.Contains(errMsg, "权限不足") {
+			errCode = constants.ErrCodeForbidden
 		}
 
 		rc.Error(c, errCode, errMsg)
@@ -217,20 +244,29 @@ func (rc RoleController) BatchOperation(c *gin.Context, helper interfaces.Helper
 		return
 	}
 
+	// 获取当前用户ID
+	userID, exists := c.Get("user_id")
+	if !exists {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err := roleService.BatchOperation(&req)
+	err := roleService.BatchOperation(&req, userID.(uint))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
 		if strings.Contains(errMsg, "不存在") {
 			errCode = constants.ErrCodeNotFound
-		} else if strings.Contains(errMsg, "系统角色不允许批量操作") {
+		} else if strings.Contains(errMsg, "系统角色不允许批量操作") || strings.Contains(errMsg, "超级管理员角色不允许批量操作") {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(errMsg, "有用户关联") {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(errMsg, "不支持的操作类型") {
 			errCode = constants.ErrCodeBadRequest
+		} else if strings.Contains(errMsg, "权限不足") {
+			errCode = constants.ErrCodeForbidden
 		}
 
 		rc.Error(c, errCode, errMsg)

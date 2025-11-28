@@ -246,6 +246,14 @@ func (s *PermissionService) GetPermissionList(req *dto.PermissionQueryRequest) (
 		return nil, err
 	}
 
+	// 调试日志：检查是否加载了 Children
+	for i, p := range permissions {
+		if i < 3 { // 只打印前3条
+			fmt.Printf("[DEBUG] Permission ID=%d, Name=%s, Children count=%d, Parent is nil=%v\n",
+				p.ID, p.Name, len(p.Children), p.Parent == nil)
+		}
+	}
+
 	// 转换为响应DTO
 	permissionResponses := dto.ConvertToPermissionResponses(permissions)
 

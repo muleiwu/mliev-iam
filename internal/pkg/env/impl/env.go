@@ -24,7 +24,6 @@ func NewEnv() *Env {
 	e.initOnce.Do(func() {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
-		viper.AddConfigPath(".")
 		viper.AddConfigPath("./config")
 
 		// 支持读取环境变量

@@ -11,14 +11,18 @@
   services:
     - docker
   env:
-    IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-amd64
+    PRIVATE_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-amd64
   stages:
+    - name: echo CNB_REPO_NAME
+      script: echo ${CNB_REPO_NAME}
+    - name: echo Image Name
+      script: echo ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
     - name: docker login
       script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
-    - name: docker build
-      script: docker build -t ${IMAGE_TAG} .
-    - name: docker push
-      script: docker push ${IMAGE_TAG}
+    - name: docker build Private
+      script: docker build -t ${PRIVATE_IMAGE_TAG} .
+    - name: docker push Private
+      script: docker push ${PRIVATE_IMAGE_TAG}
     - name: resolve
       type: cnb:resolve
       options:
@@ -31,14 +35,18 @@
   services:
     - docker
   env:
-    IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-arm64
+    PRIVATE_IMAGE_TAG: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-arm64
   stages:
+    - name: echo CNB_REPO_NAME
+      script: echo ${CNB_REPO_NAME}
+    - name: echo Image Name
+      script: echo ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
     - name: docker login
       script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
-    - name: docker build
-      script: docker build -t ${IMAGE_TAG} .
-    - name: docker push
-      script: docker push ${IMAGE_TAG}
+    - name: docker build Private
+      script: docker build -t ${PRIVATE_IMAGE_TAG} .
+    - name: docker push Private
+      script: docker push ${PRIVATE_IMAGE_TAG}
     - name: resolve
       type: cnb:resolve
       options:
@@ -71,7 +79,7 @@
       script: |
         docker buildx build --platform linux/loong64 \
           -f Dockerfile.loong64 \
-          -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}-linux-loong64 \
+          -t ${IMAGE_TAG} \
           --push .
     - name: resolve
       type: cnb:resolve
@@ -89,7 +97,7 @@
     - name: build-web
       script:
         - cd ./admin-webui
-        - pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && pnpm install && pnpm run build:antd --filter=\!./docs
+        - pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && pnpm install && pnpm run build:antd && pnpm run build:oidc && pnpm run build:install
         - cd .. && mkdir -p ./static/admin && cp -a ./admin-webui/apps/web-antd/dist ./static/admin
     - name: changelog
       image: cnbcool/changelog
@@ -104,19 +112,36 @@
       script: go mod vendor
     - name: go build
       script: goreleaser release --snapshot --clean
-    - name: release 上传附件
+    - name: release 上传附件 private
       image: cnbcool/attachments:latest
       settings:
         attachments:
-          - ./dist/dwz-server_Darwin_arm64.tar.gz
-          - ./dist/dwz-server_Darwin_x86_64.tar.gz
-          - ./dist/dwz-server_Linux_arm64.tar.gz
-          - ./dist/dwz-server_Linux_armv5.tar.gz
-          - ./dist/dwz-server_Linux_armv6.tar.gz
-          - ./dist/dwz-server_Linux_armv7.tar.gz
-          - ./dist/dwz-server_Linux_loong64.tar.gz
-          - ./dist/dwz-server_Linux_x86_64.tar.gz
+          - ./dist/mliev-iam_Darwin_arm64.tar.gz
+          - ./dist/mliev-iam_Darwin_x86_64.tar.gz
+          - ./dist/mliev-iam_Linux_arm64.tar.gz
+          - ./dist/mliev-iam_Linux_armv5.tar.gz
+          - ./dist/mliev-iam_Linux_armv6.tar.gz
+          - ./dist/mliev-iam_Linux_armv7.tar.gz
+          - ./dist/mliev-iam_Linux_loong64.tar.gz
+          - ./dist/mliev-iam_Linux_x86_64.tar.gz
           - ./dist/checksums.txt
+      exports:
+        FILES: FILES
+    - name: release 上传附件到公开仓库
+      image: cnbcool/attachments:latest
+      settings:
+        attachments:
+          - ./dist/mliev-iam_Darwin_arm64.tar.gz
+          - ./dist/mliev-iam_Darwin_x86_64.tar.gz
+          - ./dist/mliev-iam_Linux_arm64.tar.gz
+          - ./dist/mliev-iam_Linux_armv5.tar.gz
+          - ./dist/mliev-iam_Linux_armv6.tar.gz
+          - ./dist/mliev-iam_Linux_armv7.tar.gz
+          - ./dist/mliev-iam_Linux_loong64.tar.gz
+          - ./dist/mliev-iam_Linux_x86_64.tar.gz
+          - ./dist/checksums.txt
+        # 上传附件到指定仓库
+        slug: mliev/open/mliev-iam
       exports:
         FILES: FILES
     - name: 输出附件
@@ -136,7 +161,8 @@ develop:
         - docker
       name: "push"
       env:
-        IMAGE_NAME: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
+        PRIVATE_IMAGE_NAME: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
+        PUBLIC_IMAGE_NAME: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam
       stages:
         - name: await the amd64
           type: cnb:await
@@ -150,11 +176,20 @@ develop:
 #          type: cnb:await
 #          options:
 #            key: build-loong64
-        - name: manifest
+        - name: manifest private
           image: cnbcool/manifest
           settings:
-            target: ${IMAGE_NAME}:${CNB_BRANCH}
-            template: ${IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            target: ${PRIVATE_IMAGE_NAME}:${CNB_BRANCH}
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+#              - linux/loong64
+        - name: manifest public
+          image: cnbcool/manifest
+          settings:
+            target: ${PUBLIC_IMAGE_NAME}:${CNB_BRANCH}
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
             platforms:
               - linux/amd64
               - linux/arm64
@@ -180,7 +215,8 @@ $:
         - docker
       name: "push"
       env:
-        IMAGE_NAME: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
+        PRIVATE_IMAGE_NAME: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}
+        PUBLIC_IMAGE_NAME: ${CNB_DOCKER_REGISTRY}/mliev/open/mliev-iam
       stages:
         - name: await the amd64
           type: cnb:await
@@ -198,24 +234,42 @@ $:
 #          type: cnb:await
 #          options:
 #            key: build-bin
-        - name: manifest latest
+        - name: manifest latest private
           image: cnbcool/manifest
           settings:
-            target: ${IMAGE_NAME}:latest
-            template: ${IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            target: ${PRIVATE_IMAGE_NAME}:latest
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
             platforms:
               - linux/amd64
               - linux/arm64
 #              - linux/loong64
-        - name: manifest version
+        - name: manifest version private
           image: cnbcool/manifest
           settings:
-            target: ${IMAGE_NAME}:${CNB_BRANCH}
-            template: ${IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            target: ${PRIVATE_IMAGE_NAME}:${CNB_BRANCH}
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
             platforms:
               - linux/amd64
               - linux/arm64
 #              - linux/loong64
+        - name: manifest latest public
+          image: cnbcool/manifest
+          settings:
+            target: ${PUBLIC_IMAGE_NAME}:latest
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+#              - linux/loong64
+        - name: manifest version public
+          image: cnbcool/manifest
+          settings:
+            target: ${PUBLIC_IMAGE_NAME}:${CNB_BRANCH}
+            template: ${PRIVATE_IMAGE_NAME}:${CNB_COMMIT}-OS-ARCH
+            platforms:
+              - linux/amd64
+              - linux/arm64
+        #              - linux/loong64
         - name: remove tag
           type: artifact:remove-tag
           options:

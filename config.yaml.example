@@ -9,18 +9,22 @@ server:
 
 # 数据库配置
 database:
+  driver: mysql  # 数据库驱动类型: mysql, postgresql, sqlite
   halt_on_migration_failure: true
+  # MySQL / PostgreSQL 配置
   host: localhost
   port: 3306
   username: root
   password: password
   database: dwz_db
-  charset: utf8mb4
+  charset: utf8mb4  # 仅 MySQL 使用
   parse_time: true
   loc: Local
   max_idle_conns: 10
   max_open_conns: 100
   conn_max_lifetime: 3600
+  # SQLite 配置（仅在 driver 为 sqlite 时使用）
+  filepath: ""  # SQLite 数据库文件路径，例如: ./config/mliev_iam.db
 
 # PostgreSQL 配置（可选）
 # postgres:

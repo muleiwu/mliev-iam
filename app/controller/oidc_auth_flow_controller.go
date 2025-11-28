@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -22,6 +23,22 @@ type LoginRequest struct {
 	Username  string `json:"username" binding:"required"`
 	Password  string `json:"password" binding:"required"`
 	SessionID string `json:"sessionId" binding:"required"`
+}
+
+// RegisterRequest 注册请求
+type RegisterRequest struct {
+	Username  string `json:"username" binding:"required"`
+	Email     string `json:"email" binding:"required,email"`
+	Password  string `json:"password" binding:"required,min=6"`
+	RealName  string `json:"realName" binding:"required"`
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// RegisterResponse 注册响应
+type RegisterResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	UserID  uint   `json:"userId,omitempty"`
 }
 
 // LoginResponse 登录响应
@@ -117,6 +134,74 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 			Username: user.Username,
 			RealName: user.RealName,
 		},
+	}
+
+	c.Success(ctx, response)
+}
+
+// Register OIDC用户注册接口
+// POST /api/oidc/register
+func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req RegisterRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 1. 如果有sessionId，验证会话是否存在
+	if req.SessionID != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		_, err := sessionService.GetSession(req.SessionID)
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+			return
+		}
+	}
+
+	// 2. 创建用户
+	userService := service.NewUserService(helper.GetDatabase())
+	createUserReq := &dto.CreateUserRequest{
+		Username: req.Username,
+		Email:    req.Email,
+		Password: req.Password,
+		RealName: req.RealName,
+	}
+
+	userResponse, err := userService.CreateUser(createUserReq)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		errMsg := err.Error()
+
+		if strings.Contains(errMsg, "用户名已存在") || strings.Contains(errMsg, "用户已存在") {
+			errCode = constants.ErrCodeUserAlreadyExists
+		} else if strings.Contains(errMsg, "邮箱已存在") {
+			errCode = constants.ErrCodeEmailAlreadyExists
+		}
+
+		c.Error(ctx, errCode, errMsg)
+		return
+	}
+
+	// 3. 如果有会话，标记为已认证
+	if req.SessionID != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		if err := sessionService.MarkAsAuthenticated(req.SessionID, userResponse.ID); err != nil {
+			// 注册成功但更新会话失败，仍返回成功
+			response := RegisterResponse{
+				Success: true,
+				Message: "注册成功，但会话更新失败，请重新登录",
+				UserID:  userResponse.ID,
+			}
+			c.Success(ctx, response)
+			return
+		}
+	}
+
+	// 4. 返回成功响应
+	response := RegisterResponse{
+		Success: true,
+		Message: "注册成功",
+		UserID:  userResponse.ID,
 	}
 
 	c.Success(ctx, response)

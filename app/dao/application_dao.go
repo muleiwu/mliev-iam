@@ -167,3 +167,21 @@ func (dao *ApplicationDAO) CountInactive() (int64, error) {
 	err := dao.db.Model(&model.Application{}).Where("is_active = ?", false).Count(&count).Error
 	return count, err
 }
+
+// UpdateClientSecret 更新 OIDC 应用的客户端密钥
+func (dao *ApplicationDAO) UpdateClientSecret(appID uint, hashedSecret string) error {
+	// 获取现有应用
+	app, err := dao.GetByID(appID)
+	if err != nil {
+		return err
+	}
+
+	// 更新协议配置中的 clientSecret
+	if app.ProtocolConfig == nil {
+		app.ProtocolConfig = make(map[string]interface{})
+	}
+	app.ProtocolConfig["clientSecret"] = hashedSecret
+
+	// 保存更新
+	return dao.Update(app)
+}

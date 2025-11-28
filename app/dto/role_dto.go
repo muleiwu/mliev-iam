@@ -25,6 +25,7 @@ type CreateRoleRequest struct {
 // UpdateRoleRequest 更新角色请求
 type UpdateRoleRequest struct {
 	Name        string         `json:"name" validate:"min=2,max=50"`
+	Code        string         `json:"code" validate:"omitempty,min=2,max=50"`
 	Description string         `json:"description" validate:"max=255"`
 	DataScope   *int           `json:"dataScope" validate:"min=1,max=4"`
 	ScopeDesc   string         `json:"scopeDesc" validate:"max=255"`
@@ -36,16 +37,17 @@ type UpdateRoleRequest struct {
 // RoleQueryRequest 角色查询请求
 type RoleQueryRequest struct {
 	BaseQueryRequest
-	Name     string            `form:"name" json:"name"`
-	Code     string            `form:"code" json:"code"`
-	Type     *model.RoleType   `form:"type" json:"type"`
-	Status   *model.RoleStatus `form:"status" json:"status"`
-	ParentID *uint             `form:"parentId" json:"parentId"`
+	Name            string            `form:"name" json:"name"`
+	Code            string            `form:"code" json:"code"`
+	Type            *model.RoleType   `form:"type" json:"type"`
+	Status          *model.RoleStatus `form:"status" json:"status"`
+	ParentID        *uint             `form:"parentId" json:"parentId"`
+	IncludeChildren bool              `form:"includeChildren" json:"includeChildren"` // 是否递归查询所有子孙角色
 }
 
 // RoleStatusUpdateRequest 角色状态更新请求
 type RoleStatusUpdateRequest struct {
-	Status model.RoleStatus `json:"status" binding:"required"`
+	Status model.RoleStatus `json:"status" binding:"gte=0,lte=1"`
 	Remark string           `json:"remark"`
 }
 

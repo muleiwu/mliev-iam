@@ -19,7 +19,7 @@ var (
 func (receiver *Database) Assembly() error {
 	databaseConfig := config.NewConfig(receiver.Helper.GetConfig())
 
-	database, err := impl.NewDatabase(receiver.Helper, databaseConfig.Driver, databaseConfig.Host, databaseConfig.Port, databaseConfig.DBName, databaseConfig.Username, databaseConfig.Password)
+	database, err := impl.NewDatabase(receiver.Helper, databaseConfig.Driver, databaseConfig.Host, databaseConfig.Port, databaseConfig.DBName, databaseConfig.Username, databaseConfig.Password, databaseConfig.FilePath)
 
 	receiver.Helper.SetDatabase(database)
 

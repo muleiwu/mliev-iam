@@ -256,6 +256,193 @@ func (ac ApplicationController) BatchOperation(c *gin.Context, helper interfaces
 	ac.SuccessWithMessage(c, "批量操作完成", nil)
 }
 
+// GetApplicationKeys 获取应用的密钥列表
+// GET /api/admin/applications/:id/keys
+func (ac ApplicationController) GetApplicationKeys(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "应用ID格式错误")
+		return
+	}
+
+	// 检查应用是否存在
+	appService := service.NewApplicationService(helper.GetDatabase())
+	app, err := appService.GetApplication(uint(id))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
+
+	// 只有 OIDC 协议应用才有密钥
+	if app.ProtocolType != "oidc" {
+		ac.Success(c, []dto.ApplicationKeyResponse{})
+		return
+	}
+
+	// 获取密钥列表
+	keyService := service.NewApplicationKeyService(helper.GetDatabase())
+	keys, err := keyService.ListKeysByApplication(uint(id))
+	if err != nil {
+		ac.Error(c, constants.ErrCodeInternal, "获取密钥列表失败: "+err.Error())
+		return
+	}
+
+	// 转换为响应格式（脱敏处理）
+	response := make([]dto.ApplicationKeyResponse, 0, len(keys))
+	for _, key := range keys {
+		keyResponse := dto.ApplicationKeyResponse{
+			ID:        key.ID,
+			KeyID:     key.KeyID,
+			Algorithm: key.Algorithm,
+			KeyType:   key.KeyType,
+			KeySize:   key.KeySize,
+			IsPrimary: key.IsPrimary,
+			PublicKey: key.PublicKey, // 公钥可以返回
+			CreatedAt: key.CreatedAt.Format("2006-01-02 15:04:05"),
+		}
+
+		// 如果有过期时间
+		if key.ExpiresAt != nil {
+			expiresStr := key.ExpiresAt.Format("2006-01-02 15:04:05")
+			keyResponse.ExpiresAt = &expiresStr
+		}
+
+		response = append(response, keyResponse)
+	}
+
+	ac.Success(c, response)
+}
+
+// RotateApplicationKey 轮转应用密钥
+// POST /api/admin/applications/:id/keys/rotate
+func (ac ApplicationController) RotateApplicationKey(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "应用ID格式错误")
+		return
+	}
+
+	// 解析请求参数
+	var req dto.RotateKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 检查应用是否存在
+	appService := service.NewApplicationService(helper.GetDatabase())
+	app, err := appService.GetApplication(uint(id))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
+
+	// 只有 OIDC 协议应用才可以轮转密钥
+	if app.ProtocolType != "oidc" {
+		ac.Error(c, constants.ErrCodeBadRequest, "只有 OIDC 协议应用支持密钥轮转")
+		return
+	}
+
+	// 设置默认值
+	algorithm := req.Algorithm
+	if algorithm == "" {
+		algorithm = "RS256" // 默认使用 RS256
+	}
+
+	keySize := req.KeySize
+	if keySize == 0 {
+		// 根据算法设置默认密钥大小
+		switch algorithm {
+		case "RS256", "RS384":
+			keySize = 2048
+		case "RS512":
+			keySize = 4096
+		case "HS256":
+			keySize = 256
+		case "HS384":
+			keySize = 384
+		case "HS512":
+			keySize = 512
+		case "ES256":
+			keySize = 256
+		case "ES384":
+			keySize = 384
+		case "ES512":
+			keySize = 521
+		default:
+			keySize = 2048
+		}
+	}
+
+	// 生成新密钥
+	keyService := service.NewApplicationKeyService(helper.GetDatabase())
+	newKey, err := keyService.GenerateKeyForApplication(uint(id), algorithm, keySize)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeInternal, "生成密钥失败: "+err.Error())
+		return
+	}
+
+	// 转换为响应格式
+	response := dto.ApplicationKeyResponse{
+		ID:        newKey.ID,
+		KeyID:     newKey.KeyID,
+		Algorithm: newKey.Algorithm,
+		KeyType:   newKey.KeyType,
+		KeySize:   newKey.KeySize,
+		IsPrimary: newKey.IsPrimary,
+		PublicKey: newKey.PublicKey,
+		CreatedAt: newKey.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
+
+	if newKey.ExpiresAt != nil {
+		expiresStr := newKey.ExpiresAt.Format("2006-01-02 15:04:05")
+		response.ExpiresAt = &expiresStr
+	}
+
+	ac.SuccessWithMessage(c, "密钥轮转成功", response)
+}
+
+// ResetClientSecret 重置应用的客户端密钥
+// POST /api/admin/applications/:id/secret/reset
+func (ac ApplicationController) ResetClientSecret(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "应用ID格式错误")
+		return
+	}
+
+	appService := service.NewApplicationService(helper.GetDatabase())
+	newSecret, err := appService.ResetClientSecret(uint(id))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		} else if strings.Contains(err.Error(), "只有 OIDC") {
+			errCode = constants.ErrCodeBadRequest
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
+
+	response := dto.ResetClientSecretResponse{
+		ClientSecret: newSecret,
+		Message:      "客户端密钥已重置，请妥善保存新密钥",
+	}
+
+	ac.SuccessWithMessage(c, "客户端密钥重置成功", response)
+}
+
 // 辅助函数
 func boolPtr(b bool) *bool {
 	return &b
