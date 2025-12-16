@@ -35,6 +35,9 @@ func (receiver Migration) Get() []any {
 		&model.SocialProvider{},    // 社会化登录提供商配置表
 		&model.UserSocialAccount{}, // 用户社交账号绑定表
 
+		// 系统设置模型
+		&model.Setting{}, // 系统设置表（key-value存储）
+
 		// 测试模型（可选）
 		//&model.TestDemo{},
 	}

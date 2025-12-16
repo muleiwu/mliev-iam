@@ -28,9 +28,11 @@ type LoginRequest struct {
 // RegisterRequest 注册请求
 type RegisterRequest struct {
 	Username  string `json:"username" binding:"required"`
-	Email     string `json:"email" binding:"required,email"`
+	Email     string `json:"email" binding:"omitempty,email"`
+	Phone     string `json:"phone" binding:"omitempty"`
 	Password  string `json:"password" binding:"required,min=6"`
-	RealName  string `json:"realName" binding:"required"`
+	RealName  string `json:"realName" binding:"omitempty"`
+	Nickname  string `json:"nickname" binding:"omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
 }
 
@@ -201,15 +203,24 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		}
 	}
 
-	// 2. 创建用户
-	userService := service.NewUserService(helper.GetDatabase())
+	// 2. 根据配置验证注册字段
+	settingService := service.NewSettingService(helper.GetDatabase())
 	createUserReq := &dto.CreateUserRequest{
 		Username: req.Username,
 		Email:    req.Email,
 		Password: req.Password,
 		RealName: req.RealName,
+		Phone:    req.Phone,
+		Nickname: req.Nickname,
 	}
 
+	if err := settingService.ValidateRegisterFields(createUserReq); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	// 3. 创建用户
+	userService := service.NewUserService(helper.GetDatabase())
 	userResponse, err := userService.CreateUser(createUserReq)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
@@ -225,7 +236,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	// 3. 如果有会话，标记为已认证
+	// 4. 如果有会话，标记为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
 		if err := sessionService.MarkAsAuthenticated(req.SessionID, userResponse.ID); err != nil {
@@ -240,7 +251,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		}
 	}
 
-	// 4. 返回成功响应
+	// 5. 返回成功响应
 	response := RegisterResponse{
 		Success: true,
 		Message: "注册成功",
@@ -557,6 +568,20 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx *gin.Context, helper in
 	}
 
 	c.Success(ctx, response)
+}
+
+// GetRegisterSettings 获取注册字段配置（公开接口）
+// GET /api/oidc/register-settings
+func (c OIDCAuthFlowController) GetRegisterSettings(ctx *gin.Context, helper interfaces.HelperInterface) {
+	settingService := service.NewSettingService(helper.GetDatabase())
+
+	config, err := settingService.GetRegisterFieldsSettings()
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "获取注册字段配置失败: "+err.Error())
+		return
+	}
+
+	c.Success(ctx, config)
 }
 
 // CompleteProfile 完善用户信息接口
