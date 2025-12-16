@@ -29,7 +29,9 @@ type LoginRequest struct {
 type RegisterRequest struct {
 	Username  string `json:"username" binding:"required"`
 	Email     string `json:"email" binding:"omitempty,email"`
+	EmailCode string `json:"emailCode" binding:"omitempty"`
 	Phone     string `json:"phone" binding:"omitempty"`
+	PhoneCode string `json:"phoneCode" binding:"omitempty"`
 	Password  string `json:"password" binding:"required,min=6"`
 	RealName  string `json:"realName" binding:"omitempty"`
 	Nickname  string `json:"nickname" binding:"omitempty"`
@@ -94,6 +96,12 @@ type SendVerificationCodeRequest struct {
 	SessionID string `json:"sessionId" binding:"required"`
 	Type      string `json:"type" binding:"required,oneof=email phone"`
 	Receiver  string `json:"receiver" binding:"required"`
+}
+
+// SendRegisterVerificationCodeRequest 发送注册验证码请求（不需要sessionId和认证）
+type SendRegisterVerificationCodeRequest struct {
+	Type     string `json:"type" binding:"required,oneof=email phone"`
+	Receiver string `json:"receiver" binding:"required"`
 }
 
 // SendVerificationCodeResponse 发送验证码响应
@@ -219,7 +227,31 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	// 3. 创建用户
+	// 3. 验证邮箱和手机验证码
+	config := c.getVerificationCodeConfig(helper)
+	if config != nil {
+		verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+
+		// 验证邮箱验证码（如果提供了邮箱）
+		if req.Email != "" && req.EmailCode != "" {
+			sessionID := "register:" + req.Email
+			if err := verificationService.VerifyCode(ctx.Request.Context(), req.Email, service.VerificationTypeEmail, sessionID, req.EmailCode); err != nil {
+				c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
+				return
+			}
+		}
+
+		// 验证手机验证码（如果提供了手机号）
+		if req.Phone != "" && req.PhoneCode != "" {
+			sessionID := "register:" + req.Phone
+			if err := verificationService.VerifyCode(ctx.Request.Context(), req.Phone, service.VerificationTypePhone, sessionID, req.PhoneCode); err != nil {
+				c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
+				return
+			}
+		}
+	}
+
+	// 4. 创建用户
 	userService := service.NewUserService(helper.GetDatabase())
 	userResponse, err := userService.CreateUser(createUserReq)
 	if err != nil {
@@ -236,7 +268,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	// 4. 如果有会话，标记为已认证
+	// 5. 如果有会话，标记为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
 		if err := sessionService.MarkAsAuthenticated(req.SessionID, userResponse.ID); err != nil {
@@ -251,7 +283,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		}
 	}
 
-	// 5. 返回成功响应
+	// 6. 返回成功响应
 	response := RegisterResponse{
 		Success: true,
 		Message: "注册成功",
@@ -671,6 +703,49 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx *gin.Context, helper interfa
 		Success: true,
 		Message: "信息完善成功",
 		NextURL: "/auth/#/oidc/consent?session_id=" + req.SessionID,
+	}
+
+	c.Success(ctx, response)
+}
+
+// SendRegisterVerificationCode 发送注册验证码接口（无需登录认证）
+// POST /api/oidc/send-register-verification-code
+func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req SendRegisterVerificationCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 1. 获取验证码服务配置
+	config := c.getVerificationCodeConfig(helper)
+	if config == nil {
+		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		return
+	}
+
+	// 2. 创建验证码服务并发送验证码
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+
+	var verificationType service.VerificationType
+	if req.Type == "email" {
+		verificationType = service.VerificationTypeEmail
+	} else {
+		verificationType = service.VerificationTypePhone
+	}
+
+	// 使用接收者作为sessionID（注册场景没有真实的session）
+	// 这样可以保证每个接收者有独立的验证码
+	sessionID := "register:" + req.Receiver
+
+	if err := verificationService.SendCode(ctx.Request.Context(), req.Receiver, verificationType, sessionID); err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	response := SendVerificationCodeResponse{
+		Success: true,
+		Message: "验证码已发送",
 	}
 
 	c.Success(ctx, response)
