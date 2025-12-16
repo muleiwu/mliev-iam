@@ -237,6 +237,10 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 注册字段配置管理（管理员）
 						adminSettings.GET("/register-fields/config", deps.WrapHandler(AdminController.SettingController{}.GetRegisterFieldsSettings))    // 获取注册字段配置
 						adminSettings.PUT("/register-fields/config", deps.WrapHandler(AdminController.SettingController{}.UpdateRegisterFieldsSettings)) // 更新注册字段配置
+
+						// 推送服务配置管理（管理员）
+						adminSettings.GET("/push/config", deps.WrapHandler(AdminController.SettingController{}.GetPushSettings))    // 获取推送服务配置
+						adminSettings.PUT("/push/config", deps.WrapHandler(AdminController.SettingController{}.UpdatePushSettings)) // 更新推送服务配置
 					}
 				}
 

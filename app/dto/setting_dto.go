@@ -51,3 +51,25 @@ type UpdateRegisterFieldsRequest struct {
 	RealName RegisterFieldConfig `json:"realName"`
 	Nickname RegisterFieldConfig `json:"nickname"`
 }
+
+// PushSettings 推送服务配置
+type PushSettings struct {
+	BaseURL        string `json:"baseUrl"`
+	AppID          string `json:"appId"`
+	AppSecret      string `json:"appSecret"`
+	SMSChannelID   int    `json:"smsChannelId"`
+	EmailChannelID int    `json:"emailChannelId"`
+	SMSSignature   string `json:"smsSignature"`
+	EmailSignature string `json:"emailSignature"`
+}
+
+// UpdatePushSettingsRequest 更新推送服务配置请求
+type UpdatePushSettingsRequest struct {
+	BaseURL        string `json:"baseUrl"`
+	AppID          string `json:"appId"`
+	AppSecret      string `json:"appSecret"`
+	SMSChannelID   int    `json:"smsChannelId"`
+	EmailChannelID int    `json:"emailChannelId"`
+	SMSSignature   string `json:"smsSignature"`
+	EmailSignature string `json:"emailSignature"`
+}

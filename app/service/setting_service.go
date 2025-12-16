@@ -16,6 +16,10 @@ const (
 	RegisterFieldsConfigKey = "register_fields_config"
 	// RegisterCategory 注册相关配置分类
 	RegisterCategory = "register"
+	// PushSettingsConfigKey 推送服务配置的key
+	PushSettingsConfigKey = "push_settings_config"
+	// PushCategory 推送相关配置分类
+	PushCategory = "push"
 )
 
 // SettingService 设置服务
@@ -261,4 +265,68 @@ func (s *SettingService) convertToResponses(settings []model.Setting) []dto.Sett
 		responses[i] = *s.convertToResponse(&setting)
 	}
 	return responses
+}
+
+// GetPushSettings 获取推送服务配置
+func (s *SettingService) GetPushSettings() (*dto.PushSettings, error) {
+	setting, err := s.settingDao.GetByKey(PushSettingsConfigKey)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 返回默认配置
+			return s.getDefaultPushSettings(), nil
+		}
+		return nil, fmt.Errorf("获取推送服务配置失败: %w", err)
+	}
+
+	var config dto.PushSettings
+	if err := json.Unmarshal([]byte(setting.Value), &config); err != nil {
+		// 如果解析失败，返回默认配置
+		return s.getDefaultPushSettings(), nil
+	}
+
+	return &config, nil
+}
+
+// UpdatePushSettings 更新推送服务配置
+func (s *SettingService) UpdatePushSettings(req *dto.UpdatePushSettingsRequest) error {
+	config := dto.PushSettings{
+		BaseURL:        req.BaseURL,
+		AppID:          req.AppID,
+		AppSecret:      req.AppSecret,
+		SMSChannelID:   req.SMSChannelID,
+		EmailChannelID: req.EmailChannelID,
+		SMSSignature:   req.SMSSignature,
+		EmailSignature: req.EmailSignature,
+	}
+
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+
+	setting := &model.Setting{
+		Key:      PushSettingsConfigKey,
+		Value:    string(configJSON),
+		Category: PushCategory,
+		Remark:   "推送服务配置",
+	}
+
+	if err := s.settingDao.CreateOrUpdate(setting); err != nil {
+		return fmt.Errorf("保存推送服务配置失败: %w", err)
+	}
+
+	return nil
+}
+
+// getDefaultPushSettings 获取默认的推送服务配置
+func (s *SettingService) getDefaultPushSettings() *dto.PushSettings {
+	return &dto.PushSettings{
+		BaseURL:        "https://push.mliev.com",
+		AppID:          "",
+		AppSecret:      "",
+		SMSChannelID:   1,
+		EmailChannelID: 2,
+		SMSSignature:   "",
+		EmailSignature: "",
+	}
 }

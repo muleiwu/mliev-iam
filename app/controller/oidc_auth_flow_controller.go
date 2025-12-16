@@ -528,25 +528,29 @@ func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []st
 	return scopes
 }
 
-// getVerificationCodeConfig 从配置中获取验证码服务配置
+// getVerificationCodeConfig 从数据库获取验证码服务配置
 func (c OIDCAuthFlowController) getVerificationCodeConfig(helper interfaces.HelperInterface) *service.VerificationCodeConfig {
-	env := helper.GetEnv()
-	baseURL := env.GetString("push.baseUrl", "")
-	appID := env.GetString("push.appId", "")
-	appSecret := env.GetString("push.appSecret", "")
+	// 从数据库获取推送服务配置
+	settingService := service.NewSettingService(helper.GetDatabase())
+	pushSettings, err := settingService.GetPushSettings()
+	if err != nil {
+		// 配置获取失败，返回 nil
+		return nil
+	}
 
-	if baseURL == "" || appID == "" || appSecret == "" {
+	// 检查必填字段
+	if pushSettings.BaseURL == "" || pushSettings.AppID == "" || pushSettings.AppSecret == "" {
 		return nil
 	}
 
 	return &service.VerificationCodeConfig{
-		BaseURL:        baseURL,
-		AppID:          appID,
-		AppSecret:      appSecret,
-		SMSChannelID:   env.GetInt("push.smsChannelId", 1),
-		EmailChannelID: env.GetInt("push.emailChannelId", 2),
-		SMSSignature:   env.GetString("push.smsSignature", ""),
-		EmailSignature: env.GetString("push.emailSignature", ""),
+		BaseURL:        pushSettings.BaseURL,
+		AppID:          pushSettings.AppID,
+		AppSecret:      pushSettings.AppSecret,
+		SMSChannelID:   pushSettings.SMSChannelID,
+		EmailChannelID: pushSettings.EmailChannelID,
+		SMSSignature:   pushSettings.SMSSignature,
+		EmailSignature: pushSettings.EmailSignature,
 	}
 }
 

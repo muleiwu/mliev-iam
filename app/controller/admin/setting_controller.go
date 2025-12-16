@@ -144,3 +144,36 @@ func (c SettingController) UpdateRegisterFieldsSettings(ctx *gin.Context, helper
 
 	c.Success(ctx, gin.H{"message": "更新成功"})
 }
+
+// GetPushSettings 获取推送服务配置
+// GET /api/admin/settings/push/config
+func (c SettingController) GetPushSettings(ctx *gin.Context, helper interfaces.HelperInterface) {
+	settingService := service.NewSettingService(helper.GetDatabase())
+
+	config, err := settingService.GetPushSettings()
+	if err != nil {
+		c.Error(ctx, 500, err.Error())
+		return
+	}
+
+	c.Success(ctx, config)
+}
+
+// UpdatePushSettings 更新推送服务配置
+// PUT /api/admin/settings/push/config
+func (c SettingController) UpdatePushSettings(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req dto.UpdatePushSettingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, 400, "请求参数错误: "+err.Error())
+		return
+	}
+
+	settingService := service.NewSettingService(helper.GetDatabase())
+
+	if err := settingService.UpdatePushSettings(&req); err != nil {
+		c.Error(ctx, 500, err.Error())
+		return
+	}
+
+	c.Success(ctx, gin.H{"message": "更新成功"})
+}
