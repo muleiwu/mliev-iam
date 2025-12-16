@@ -44,6 +44,13 @@ redis:
   pool_size: 10
   min_idle_conns: 5
 
+# 缓存配置
+cache:
+  driver: memory  # 缓存驱动: redis, memory, none
+  # redis: 使用 Redis 作为缓存后端（需要配置 redis 服务）
+  # memory: 使用内存缓存（单机部署推荐）
+  # none: 不使用缓存
+
 # 日志配置
 log:
   level: info    # debug, info, warn, error

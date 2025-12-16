@@ -2,6 +2,7 @@ package config
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	cacheAssembly "cnb.cool/mliev/iam/mliev-iam/internal/pkg/cache/assembly"
 	configAssembly "cnb.cool/mliev/iam/mliev-iam/internal/pkg/config/assembly"
 	databaseAssembly "cnb.cool/mliev/iam/mliev-iam/internal/pkg/database/assembly"
 	envAssembly "cnb.cool/mliev/iam/mliev-iam/internal/pkg/env/assembly"
@@ -25,5 +26,6 @@ func (receiver *Assembly) Get() []interfaces.AssemblyInterface {
 		&loggerAssembly.Logger{Helper: receiver.Helper},     // 日志驱动
 		&databaseAssembly.Database{Helper: receiver.Helper}, // 数据库配置
 		&redisAssembly.Redis{Helper: receiver.Helper},       // redis 配置
+		&cacheAssembly.Cache{Helper: receiver.Helper},       // 缓存驱动
 	}
 }
