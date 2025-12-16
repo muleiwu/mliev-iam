@@ -23,7 +23,7 @@ func (d *SettingDao) Create(setting *model.Setting) error {
 // GetByKey 根据key获取设置
 func (d *SettingDao) GetByKey(key string) (*model.Setting, error) {
 	var setting model.Setting
-	if err := d.db.Where("key = ?", key).First(&setting).Error; err != nil {
+	if err := d.db.Where("`key` = ?", key).First(&setting).Error; err != nil {
 		return nil, err
 	}
 	return &setting, nil
@@ -54,7 +54,7 @@ func (d *SettingDao) Update(setting *model.Setting) error {
 
 // UpdateByKey 根据key更新设置值
 func (d *SettingDao) UpdateByKey(key, value string) error {
-	return d.db.Model(&model.Setting{}).Where("key = ?", key).Update("value", value).Error
+	return d.db.Model(&model.Setting{}).Where("`key` = ?", key).Update("value", value).Error
 }
 
 // Delete 删除设置
@@ -64,13 +64,13 @@ func (d *SettingDao) Delete(id uint) error {
 
 // DeleteByKey 根据key删除设置
 func (d *SettingDao) DeleteByKey(key string) error {
-	return d.db.Where("key = ?", key).Delete(&model.Setting{}).Error
+	return d.db.Where("`key` = ?", key).Delete(&model.Setting{}).Error
 }
 
 // Exists 检查key是否存在
 func (d *SettingDao) Exists(key string) (bool, error) {
 	var count int64
-	if err := d.db.Model(&model.Setting{}).Where("key = ?", key).Count(&count).Error; err != nil {
+	if err := d.db.Model(&model.Setting{}).Where("`key` = ?", key).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -85,7 +85,7 @@ func (d *SettingDao) CreateOrUpdate(setting *model.Setting) error {
 
 	if exists {
 		// 更新现有设置
-		return d.db.Model(&model.Setting{}).Where("key = ?", setting.Key).Updates(map[string]interface{}{
+		return d.db.Model(&model.Setting{}).Where("`key` = ?", setting.Key).Updates(map[string]interface{}{
 			"value":    setting.Value,
 			"category": setting.Category,
 			"remark":   setting.Remark,
