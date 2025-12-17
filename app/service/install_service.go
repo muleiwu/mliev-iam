@@ -160,11 +160,6 @@ func (s *InstallService) TestRedisConnection(config dto.RedisConfig) (*redis.Cli
 
 // CreateInitialData 创建初始数据（部门、角色、权限、管理员）
 func (s *InstallService) CreateInitialData(adminInfo dto.AdminAccountInfo) error {
-	// 0. 先创建数据库表结构
-	if err := s.createDatabaseTables(); err != nil {
-		return fmt.Errorf("创建数据库表结构失败: %w", err)
-	}
-
 	// 开启事务
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		// 1. 创建默认部门
