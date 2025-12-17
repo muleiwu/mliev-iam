@@ -61,8 +61,8 @@ type Permission struct {
 	Name        string           `gorm:"size:100;not null" json:"name" validate:"required,min=2,max=100"`
 	Code        string           `gorm:"uniqueIndex;size:100;not null" json:"code" validate:"required,min=2,max=100"`
 	Description string           `gorm:"size:255" json:"description" validate:"max=255"`
-	Type        PermissionType   `gorm:"type:tinyint;default:0;not null" json:"type"`
-	Status      PermissionStatus `gorm:"type:tinyint;default:1;not null" json:"status"`
+	Type        PermissionType   `gorm:"type:smallint;default:0;not null" json:"type"`
+	Status      PermissionStatus `gorm:"type:smallint;default:1;not null" json:"status"`
 
 	// 层级关系
 	ParentID *uint  `gorm:"index" json:"parentId"`
