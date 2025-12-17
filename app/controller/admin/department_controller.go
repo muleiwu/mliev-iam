@@ -346,19 +346,17 @@ func (adc DepartmentController) GetDepartmentsByManager(c *gin.Context, helper i
 	adc.Success(c, response)
 }
 
-// GetActiveDepartmentsCount 获取启用部门数量统计（管理员操作）
+// GetActiveDepartmentsCount 获取部门统计数据（管理员操作）
 // GET /api/admin/departments/stats/active-count
 func (adc DepartmentController) GetActiveDepartmentsCount(c *gin.Context, helper interfaces.HelperInterface) {
 	departmentService := service.NewDepartmentService(helper.GetDatabase())
-	count, err := departmentService.GetActiveDepartmentsCount()
+	stats, err := departmentService.GetDepartmentStats()
 	if err != nil {
 		adc.Error(c, constants.ErrCodeInternal, err.Error())
 		return
 	}
 
-	adc.Success(c, gin.H{
-		"activeDepartmentsCount": count,
-	})
+	adc.Success(c, stats)
 }
 
 // ValidateHierarchy 验证部门层级结构完整性（管理员操作）

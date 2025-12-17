@@ -458,9 +458,28 @@ func (s *DepartmentService) GetDepartmentsByManager(managerID uint) ([]dto.Depar
 	return dto.ConvertToDepartmentResponses(departments), nil
 }
 
-// GetActiveDepartmentsCount 获取启用部门数量
-func (s *DepartmentService) GetActiveDepartmentsCount() (int64, error) {
-	return s.departmentDao.GetActiveDepartmentsCount()
+// DepartmentStats 部门统计数据
+type DepartmentStats struct {
+	ActiveDepartmentsCount int64 `json:"activeDepartmentsCount"`
+	TotalDepartments       int64 `json:"totalDepartments"`
+}
+
+// GetDepartmentStats 获取部门统计数据
+func (s *DepartmentService) GetDepartmentStats() (*DepartmentStats, error) {
+	activeCount, err := s.departmentDao.GetActiveDepartmentsCount()
+	if err != nil {
+		return nil, err
+	}
+
+	totalCount, err := s.departmentDao.GetTotalDepartmentsCount()
+	if err != nil {
+		return nil, err
+	}
+
+	return &DepartmentStats{
+		ActiveDepartmentsCount: activeCount,
+		TotalDepartments:       totalCount,
+	}, nil
 }
 
 // ValidateDepartmentHierarchy 验证部门层级结构的完整性
