@@ -55,8 +55,8 @@ type Role struct {
 	Name        string      `gorm:"uniqueIndex;size:50;not null" json:"name" validate:"required,min=2,max=50"`
 	Code        string      `gorm:"uniqueIndex;size:50;not null" json:"code" validate:"required,min=2,max=50"`
 	Description string      `gorm:"size:255" json:"description" validate:"max=255"`
-	Type        *RoleType   `gorm:"type:tinyint;default:1;not null" json:"type"`
-	Status      *RoleStatus `gorm:"type:tinyint;default:1;not null" json:"status"`
+	Type        *RoleType   `gorm:"type:smallint;default:1;not null" json:"type"`
+	Status      *RoleStatus `gorm:"type:smallint;default:1;not null" json:"status"`
 
 	// 层级关系
 	ParentID *uint  `gorm:"index" json:"parentId"`

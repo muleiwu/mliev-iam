@@ -57,8 +57,8 @@ type SocialProvider struct {
 	SortOrder int    `gorm:"default:0" json:"sortOrder"`              // 排序（越小越靠前）
 
 	// 状态管理
-	Status    ProviderStatus `gorm:"type:tinyint;default:0;not null" json:"status"` // 状态：0-禁用，1-启用
-	IsDefault bool           `gorm:"default:false" json:"isDefault"`                // 是否为默认推荐
+	Status    ProviderStatus `gorm:"type:smallint;default:0;not null" json:"status"` // 状态：0-禁用，1-启用
+	IsDefault bool           `gorm:"default:false" json:"isDefault"`                 // 是否为默认推荐
 
 	// 扩展属性（用于存储特定平台的额外配置）
 	// 例如：微信的 UnionID 配置、支付宝的特定参数等

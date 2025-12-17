@@ -42,7 +42,7 @@ type User struct {
 	PasswordHash string `gorm:"size:100" json:"-"`
 
 	// 状态管理
-	Status      UserStatus `gorm:"type:tinyint;default:0;not null" json:"status"`
+	Status      UserStatus `gorm:"type:smallint;default:0;not null" json:"status"`
 	IsActivated bool       `gorm:"default:false;not null" json:"isActivated"`
 	IsVerified  bool       `gorm:"default:false;not null" json:"isVerified"`
 	LoginCount  int64      `gorm:"default:0" json:"loginCount"`
