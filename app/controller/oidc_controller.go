@@ -119,7 +119,7 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 	case "refresh_token":
 		response, err = authService.RefreshToken(&req, issuer)
 	case "client_credentials":
-		response, err = authService.ExchangeClientCredentials(&req)
+		response, err = authService.ExchangeClientCredentials(&req, issuer)
 	default:
 		oc.tokenError(c, "unsupported_grant_type", "不支持的授权类型", http.StatusBadRequest)
 		return

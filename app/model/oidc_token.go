@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"gorm.io/gorm"
@@ -17,9 +19,10 @@ const (
 // 用于存储访问令牌、刷新令牌和ID令牌
 type OIDCToken struct {
 	// 基础信息
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	AccessToken string    `gorm:"uniqueIndex;size:255;not null" json:"accessToken"`
-	TokenType   TokenType `gorm:"size:20;default:'Bearer'" json:"tokenType"`
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	AccessToken     string    `gorm:"type:text;not null" json:"accessToken"`
+	AccessTokenHash string    `gorm:"uniqueIndex;size:64;not null" json:"-"` // SHA256 hash of access_token
+	TokenType       TokenType `gorm:"size:20;default:'Bearer'" json:"tokenType"`
 
 	// 关联信息
 	ClientID string `gorm:"size:100;not null;index" json:"clientId"`
@@ -73,7 +76,18 @@ func (t *OIDCToken) BeforeCreate(tx *gorm.DB) error {
 		t.TokenType = TokenTypeBearer
 	}
 
+	// 自动计算 access_token 的 SHA256 hash
+	if t.AccessToken != "" && t.AccessTokenHash == "" {
+		t.AccessTokenHash = hashAccessToken(t.AccessToken)
+	}
+
 	return nil
+}
+
+// hashAccessToken 计算 access_token 的 SHA256 hash
+func hashAccessToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 // IsExpired checks if access token is expired
