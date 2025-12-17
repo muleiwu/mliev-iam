@@ -140,7 +140,7 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 }
 
 // ExchangeClientCredentials 客户端凭据流程
-func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenRequest) (*dto.TokenResponse, error) {
+func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenRequest, issuer string) (*dto.TokenResponse, error) {
 	// 1. 验证授权类型
 	if req.GrantType != string(model.GrantTypeClientCredentials) {
 		return nil, constants.ErrUnsupportedGrantType
@@ -178,8 +178,11 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		}
 	}
 
-	// 6. 生成访问令牌（不含refresh_token和id_token）
-	accessToken := s.generateAccessToken()
+	// 6. 生成 JWT 格式的访问令牌（不含refresh_token和id_token）
+	accessToken, err := s.generateClientCredentialsJWTAccessToken(app, scopes, issuer)
+	if err != nil {
+		return nil, constants.ErrServerError
+	}
 	clientID := s.getClientIDFromApp(app)
 	tokenLifetime := s.getTokenLifetimeFromApp(app)
 
@@ -466,8 +469,11 @@ func (s *OIDCAuthorizationService) validateRefreshScopes(originalScopes, request
 
 // generateTokens 生成令牌
 func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
-	// 生成访问令牌
-	accessToken := s.generateAccessToken()
+	// 生成 JWT 格式的访问令牌
+	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer)
+	if err != nil {
+		return nil, fmt.Errorf("生成访问令牌失败: %w", err)
+	}
 	refreshToken := s.generateRefreshToken()
 
 	clientID := s.getClientIDFromApp(app)
@@ -577,6 +583,138 @@ func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user 
 	}
 
 	return idToken, nil
+}
+
+// generateJWTAccessToken 生成 JWT 格式的 Access Token
+func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string) (string, error) {
+	// 获取全局配置
+	env := helper.GetHelper().GetEnv()
+	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
+	if accessTokenLifetime <= 0 {
+		accessTokenLifetime = env.GetInt("oidc.token_lifetime.access_token", 3600)
+	}
+
+	// 1. 获取客户端ID
+	clientID := s.getClientIDFromApp(app)
+	if clientID == "" {
+		return "", fmt.Errorf("无法获取客户端ID")
+	}
+
+	// 2. 从数据库获取应用的主密钥管理器
+	keyService := NewApplicationKeyService(s.db)
+	keyManager, err := keyService.GetPrimaryKeyManagerForApplication(app.ID)
+	if err != nil {
+		return "", fmt.Errorf("获取应用签名密钥失败: %w", err)
+	}
+
+	// 3. 验证密钥是否已初始化
+	if !keyManager.IsInitialized() {
+		return "", fmt.Errorf("应用签名密钥未正确初始化")
+	}
+
+	// 4. 获取用户信息
+	user, err := s.userService.GetUserModelByID(userID)
+	if err != nil {
+		return "", fmt.Errorf("获取用户信息失败: %w", err)
+	}
+
+	// 5. 根据密钥类型创建 Token 服务
+	var tokenService *OIDCIDTokenService
+
+	switch keyManager.GetKeyType() {
+	case jwt.KeyTypeRSA:
+		rsaKeyManager, ok := keyManager.(*jwt.RSAKeyManager)
+		if !ok {
+			return "", fmt.Errorf("密钥管理器类型转换失败")
+		}
+		tokenService = NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, accessTokenLifetime)
+
+	case jwt.KeyTypeHMAC:
+		hmacKeyManager, ok := keyManager.(*jwt.HMACKeyManager)
+		if !ok {
+			return "", fmt.Errorf("密钥管理器类型转换失败")
+		}
+		tokenService = NewOIDCIDTokenServiceWithHMAC(
+			hmacKeyManager.GetSecret(),
+			keyManager.GetKeyID(),
+			issuer,
+			accessTokenLifetime,
+		)
+
+	default:
+		return "", fmt.Errorf("不支持的密钥类型: %s", keyManager.GetKeyType())
+	}
+
+	// 6. 生成 JWT Access Token
+	accessToken, err := tokenService.GenerateAccessToken(user, clientID, scopes)
+	if err != nil {
+		return "", fmt.Errorf("生成 Access Token 失败: %w", err)
+	}
+
+	return accessToken, nil
+}
+
+// generateClientCredentialsJWTAccessToken 生成客户端凭据流程的 JWT Access Token
+func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string) (string, error) {
+	// 获取全局配置
+	env := helper.GetHelper().GetEnv()
+	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
+	if accessTokenLifetime <= 0 {
+		accessTokenLifetime = env.GetInt("oidc.token_lifetime.access_token", 3600)
+	}
+
+	// 1. 获取客户端ID
+	clientID := s.getClientIDFromApp(app)
+	if clientID == "" {
+		return "", fmt.Errorf("无法获取客户端ID")
+	}
+
+	// 2. 从数据库获取应用的主密钥管理器
+	keyService := NewApplicationKeyService(s.db)
+	keyManager, err := keyService.GetPrimaryKeyManagerForApplication(app.ID)
+	if err != nil {
+		return "", fmt.Errorf("获取应用签名密钥失败: %w", err)
+	}
+
+	// 3. 验证密钥是否已初始化
+	if !keyManager.IsInitialized() {
+		return "", fmt.Errorf("应用签名密钥未正确初始化")
+	}
+
+	// 4. 根据密钥类型创建 Token 服务
+	var tokenService *OIDCIDTokenService
+
+	switch keyManager.GetKeyType() {
+	case jwt.KeyTypeRSA:
+		rsaKeyManager, ok := keyManager.(*jwt.RSAKeyManager)
+		if !ok {
+			return "", fmt.Errorf("密钥管理器类型转换失败")
+		}
+		tokenService = NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, accessTokenLifetime)
+
+	case jwt.KeyTypeHMAC:
+		hmacKeyManager, ok := keyManager.(*jwt.HMACKeyManager)
+		if !ok {
+			return "", fmt.Errorf("密钥管理器类型转换失败")
+		}
+		tokenService = NewOIDCIDTokenServiceWithHMAC(
+			hmacKeyManager.GetSecret(),
+			keyManager.GetKeyID(),
+			issuer,
+			accessTokenLifetime,
+		)
+
+	default:
+		return "", fmt.Errorf("不支持的密钥类型: %s", keyManager.GetKeyType())
+	}
+
+	// 5. 生成客户端凭据的 JWT Access Token
+	accessToken, err := tokenService.GenerateClientCredentialsAccessToken(clientID, scopes)
+	if err != nil {
+		return "", fmt.Errorf("生成 Access Token 失败: %w", err)
+	}
+
+	return accessToken, nil
 }
 
 // 辅助方法

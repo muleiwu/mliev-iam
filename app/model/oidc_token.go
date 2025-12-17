@@ -18,7 +18,7 @@ const (
 type OIDCToken struct {
 	// 基础信息
 	ID          uint      `gorm:"primaryKey" json:"id"`
-	AccessToken string    `gorm:"uniqueIndex;size:255;not null" json:"accessToken"`
+	AccessToken string    `gorm:"uniqueIndex;type:text;not null" json:"accessToken"`
 	TokenType   TokenType `gorm:"size:20;default:'Bearer'" json:"tokenType"`
 
 	// 关联信息

@@ -51,6 +51,28 @@ type IDTokenClaims struct {
 	jwtLib.RegisteredClaims
 }
 
+// AccessTokenClaims Access Token的JWT声明 (符合 RFC 9068)
+type AccessTokenClaims struct {
+	// 标准JWT Claims (必需)
+	Iss string `json:"iss"`           // Issuer - 颁发者
+	Sub string `json:"sub"`           // Subject - 用户唯一标识符
+	Aud string `json:"aud"`           // Audience - 接收者(客户端ID)
+	Exp int64  `json:"exp"`           // Expiration Time - 过期时间
+	Iat int64  `json:"iat"`           // Issued At - 颁发时间
+	Jti string `json:"jti,omitempty"` // JWT ID - 唯一标识符
+
+	// OAuth 2.0 Access Token 专用 Claims
+	ClientID string `json:"client_id,omitempty"` // 客户端ID
+	Scope    string `json:"scope,omitempty"`     // 授权范围（空格分隔）
+
+	// 用户信息 Claims（可选，便于第三方系统解析）
+	Name              string `json:"name,omitempty"`
+	PreferredUsername string `json:"preferred_username,omitempty"`
+	Email             string `json:"email,omitempty"`
+
+	jwtLib.RegisteredClaims
+}
+
 // OIDCIDTokenService ID Token生成服务
 type OIDCIDTokenService struct {
 	algorithm     string             // 签名算法: "RS256" 或 "HS256"
@@ -167,6 +189,111 @@ func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, 
 	}
 
 	return tokenString, nil
+}
+
+// GenerateAccessToken 生成 JWT 格式的 Access Token (符合 RFC 9068)
+func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID string, scopes []string) (string, error) {
+	now := time.Now()
+	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
+
+	// 生成唯一标识符
+	jti := generateUUID()
+
+	// 构建 Access Token Claims
+	claims := &AccessTokenClaims{
+		Iss:      s.issuer,
+		Sub:      strconv.FormatUint(uint64(user.ID), 10),
+		Aud:      clientID,
+		Exp:      exp.Unix(),
+		Iat:      now.Unix(),
+		Jti:      jti,
+		ClientID: clientID,
+		Scope:    joinScopes(scopes),
+	}
+
+	// 添加用户基本信息（便于第三方系统解析）
+	claims.Name = user.RealName
+	claims.PreferredUsername = user.Username
+	if user.Email != nil {
+		claims.Email = *user.Email
+	}
+
+	// 根据算法类型签名token
+	return s.signToken(claims)
+}
+
+// GenerateClientCredentialsAccessToken 生成客户端凭据流程的 JWT Access Token
+func (s *OIDCIDTokenService) GenerateClientCredentialsAccessToken(clientID string, scopes []string) (string, error) {
+	now := time.Now()
+	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
+
+	// 生成唯一标识符
+	jti := generateUUID()
+
+	// 客户端凭据流程：sub 为客户端ID
+	claims := &AccessTokenClaims{
+		Iss:      s.issuer,
+		Sub:      clientID, // 客户端凭据流程，sub 为客户端ID
+		Aud:      clientID,
+		Exp:      exp.Unix(),
+		Iat:      now.Unix(),
+		Jti:      jti,
+		ClientID: clientID,
+		Scope:    joinScopes(scopes),
+	}
+
+	// 根据算法类型签名token
+	return s.signToken(claims)
+}
+
+// signToken 使用配置的算法签名 token
+func (s *OIDCIDTokenService) signToken(claims jwtLib.Claims) (string, error) {
+	var tokenString string
+	var err error
+
+	switch s.algorithm {
+	case "RS256":
+		if s.rsaKeyManager == nil || !s.rsaKeyManager.IsInitialized() {
+			return "", fmt.Errorf("RS256算法需要初始化RSA密钥管理器")
+		}
+		tokenString, err = s.rsaKeyManager.SignToken(claims)
+		if err != nil {
+			return "", fmt.Errorf("使用RSA签名Token失败: %w", err)
+		}
+
+	case "HS256":
+		if len(s.hmacSecret) == 0 {
+			return "", fmt.Errorf("HS256算法需要HMAC密钥")
+		}
+		token := jwtLib.NewWithClaims(jwtLib.SigningMethodHS256, claims)
+		token.Header["kid"] = s.keyID
+		tokenString, err = token.SignedString(s.hmacSecret)
+		if err != nil {
+			return "", fmt.Errorf("使用HMAC签名Token失败: %w", err)
+		}
+
+	default:
+		return "", fmt.Errorf("不支持的签名算法: %s", s.algorithm)
+	}
+
+	return tokenString, nil
+}
+
+// generateUUID 生成UUID
+func generateUUID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// joinScopes 将 scopes 数组连接为空格分隔的字符串
+func joinScopes(scopes []string) string {
+	result := ""
+	for i, scope := range scopes {
+		if i > 0 {
+			result += " "
+		}
+		result += scope
+	}
+	return result
 }
 
 // addProfileClaims 添加profile scope的claims
