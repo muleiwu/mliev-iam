@@ -123,6 +123,18 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 	if err != nil {
 		// 添加调试日志
 		fmt.Printf("[DEBUG] 授权码验证失败 - Code: %s, Error: %v\n", req.Code, err)
+
+		// 尝试查询授权码是否存在（不管是否过期或已使用）
+		existingCode, _ := s.authCodeDAO.GetByCode(req.Code)
+		if existingCode != nil {
+			fmt.Printf("[DEBUG] 授权码存在但无效 - IsUsed: %v, Expired: %v, ExpiresAt: %s, Now: %s\n",
+				existingCode.IsUsed, existingCode.IsExpired(),
+				existingCode.ExpiresAt.Format("2006-01-02 15:04:05"),
+				time.Now().Format("2006-01-02 15:04:05"))
+		} else {
+			fmt.Printf("[DEBUG] 授权码不存在于数据库中\n")
+		}
+
 		return nil, constants.ErrInvalidGrant
 	}
 
@@ -366,8 +378,12 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 	}
 
 	if err := s.authCodeDAO.Create(authCode); err != nil {
+		fmt.Printf("[DEBUG] 创建授权码失败 - Code: %s, Error: %v\n", code, err)
 		return s.errorResponse("server_error", "创建授权码失败: "+err.Error(), req.State), nil
 	}
+
+	fmt.Printf("[DEBUG] 授权码创建成功 - Code: %s, ClientID: %s, UserID: %d, RedirectURI: %s, ExpiresAt: %s\n",
+		code, clientID, user.ID, req.RedirectURI, authCode.ExpiresAt.Format("2006-01-02 15:04:05"))
 
 	return &dto.AuthorizeResponse{
 		Code:  code,
