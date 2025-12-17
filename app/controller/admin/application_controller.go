@@ -443,6 +443,60 @@ func (ac ApplicationController) ResetClientSecret(c *gin.Context, helper interfa
 	ac.SuccessWithMessage(c, "客户端密钥重置成功", response)
 }
 
+// GetApplicationAccessScope 获取应用的授权范围
+// GET /api/admin/applications/:id/access-scope
+func (ac ApplicationController) GetApplicationAccessScope(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "应用ID格式错误")
+		return
+	}
+
+	appService := service.NewApplicationService(helper.GetDatabase())
+	response, err := appService.GetAccessScope(uint(id))
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
+
+	ac.Success(c, response)
+}
+
+// UpdateApplicationAccessScope 更新应用的授权范围
+// PUT /api/admin/applications/:id/access-scope
+func (ac ApplicationController) UpdateApplicationAccessScope(c *gin.Context, helper interfaces.HelperInterface) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "应用ID格式错误")
+		return
+	}
+
+	var req dto.ApplicationAccessScopeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	appService := service.NewApplicationService(helper.GetDatabase())
+	err = appService.UpdateAccessScope(uint(id), &req)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
+
+	ac.SuccessWithMessage(c, "授权范围更新成功", nil)
+}
+
 // 辅助函数
 func boolPtr(b bool) *bool {
 	return &b

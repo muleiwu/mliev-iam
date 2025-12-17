@@ -347,3 +347,202 @@ func (s *ApplicationService) ResetClientSecret(appID uint) (string, error) {
 	// 重置密钥
 	return oidcHandler.ResetClientSecret(appID)
 }
+
+// GetAccessScope 获取应用的授权范围
+func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessScopeResponse, error) {
+	// 1. 获取应用
+	app, err := s.appDAO.GetByID(appID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrApplicationNotFound
+		}
+		return nil, fmt.Errorf("获取应用失败: %w", err)
+	}
+
+	// 2. 准备响应
+	response := &dto.ApplicationAccessScopeResponse{
+		UserIDs:               []uint{},
+		DepartmentIDs:         []uint{},
+		RoleIDs:               []uint{},
+		IncludeSubDepartments: false,
+		Users:                 []dto.AccessScopeUserInfo{},
+		Departments:           []dto.AccessScopeDeptInfo{},
+		Roles:                 []dto.AccessScopeRoleInfo{},
+	}
+
+	// 3. 如果未设置授权范围，返回空配置
+	if app.AccessScope == nil || app.AccessScope.IsEmpty() {
+		return response, nil
+	}
+
+	// 4. 填充基础数据
+	response.UserIDs = app.AccessScope.UserIDs
+	response.DepartmentIDs = app.AccessScope.DepartmentIDs
+	response.RoleIDs = app.AccessScope.RoleIDs
+	response.IncludeSubDepartments = app.AccessScope.IncludeSubDepartments
+
+	// 5. 获取用户详细信息
+	if len(app.AccessScope.UserIDs) > 0 {
+		userDAO := dao.NewUserDao(s.db)
+		for _, userID := range app.AccessScope.UserIDs {
+			user, err := userDAO.GetByID(userID)
+			if err != nil {
+				// 如果用户不存在，跳过
+				continue
+			}
+			email := ""
+			if user.Email != nil {
+				email = *user.Email
+			}
+			response.Users = append(response.Users, dto.AccessScopeUserInfo{
+				ID:       user.ID,
+				Username: user.Username,
+				RealName: user.RealName,
+				Email:    email,
+			})
+		}
+	}
+
+	// 6. 获取部门详细信息
+	if len(app.AccessScope.DepartmentIDs) > 0 {
+		deptDAO := dao.NewDepartmentDao(s.db)
+		for _, deptID := range app.AccessScope.DepartmentIDs {
+			dept, err := deptDAO.GetByID(deptID)
+			if err != nil {
+				// 如果部门不存在，跳过
+				continue
+			}
+			response.Departments = append(response.Departments, dto.AccessScopeDeptInfo{
+				ID:   dept.ID,
+				Name: dept.Name,
+				Code: dept.Code,
+				Path: dept.Path,
+			})
+		}
+	}
+
+	// 7. 获取角色详细信息
+	if len(app.AccessScope.RoleIDs) > 0 {
+		roleDAO := dao.NewRoleDao(s.db)
+		for _, roleID := range app.AccessScope.RoleIDs {
+			role, err := roleDAO.GetByID(roleID)
+			if err != nil {
+				// 如果角色不存在，跳过
+				continue
+			}
+			response.Roles = append(response.Roles, dto.AccessScopeRoleInfo{
+				ID:   role.ID,
+				Name: role.Name,
+				Code: role.Code,
+			})
+		}
+	}
+
+	return response, nil
+}
+
+// UpdateAccessScope 更新应用的授权范围
+func (s *ApplicationService) UpdateAccessScope(appID uint, req *dto.ApplicationAccessScopeRequest) error {
+	// 1. 获取应用
+	app, err := s.appDAO.GetByID(appID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrApplicationNotFound
+		}
+		return fmt.Errorf("获取应用失败: %w", err)
+	}
+
+	// 2. 更新授权范围
+	if req.UserIDs == nil {
+		req.UserIDs = []uint{}
+	}
+	if req.DepartmentIDs == nil {
+		req.DepartmentIDs = []uint{}
+	}
+	if req.RoleIDs == nil {
+		req.RoleIDs = []uint{}
+	}
+
+	app.AccessScope = &model.ApplicationAccessScope{
+		UserIDs:               req.UserIDs,
+		DepartmentIDs:         req.DepartmentIDs,
+		RoleIDs:               req.RoleIDs,
+		IncludeSubDepartments: req.IncludeSubDepartments,
+	}
+
+	// 3. 保存到数据库
+	if err := s.appDAO.Update(app); err != nil {
+		return fmt.Errorf("更新授权范围失败: %w", err)
+	}
+
+	return nil
+}
+
+// CheckUserAccess 检查用户是否有访问应用的权限
+func (s *ApplicationService) CheckUserAccess(appID uint, userID uint) bool {
+	// 1. 获取应用
+	app, err := s.appDAO.GetByID(appID)
+	if err != nil {
+		return false
+	}
+
+	// 2. 如果未设置授权范围，允许所有用户访问
+	if app.AccessScope == nil || app.AccessScope.IsEmpty() {
+		return true
+	}
+
+	// 3. 检查用户是否在授权列表中
+	if app.AccessScope.HasUserID(userID) {
+		return true
+	}
+
+	// 4. 检查用户的部门是否在授权列表中
+	if len(app.AccessScope.DepartmentIDs) > 0 {
+		userDeptDAO := dao.NewUserDepartmentDao(s.db)
+		userDepts, err := userDeptDAO.FindActiveDepartmentsByUser(userID)
+		if err == nil && len(userDepts) > 0 {
+			for _, userDept := range userDepts {
+				// 检查用户的直接部门
+				if app.AccessScope.HasDepartmentID(userDept.DepartmentID) {
+					return true
+				}
+
+				// 如果设置了包含子部门，检查父级部门
+				if app.AccessScope.IncludeSubDepartments {
+					// 获取部门详情以检查路径
+					deptDAO := dao.NewDepartmentDao(s.db)
+					dept, err := deptDAO.GetByID(userDept.DepartmentID)
+					if err == nil {
+						// 检查用户部门的所有祖先部门
+						for _, authDeptID := range app.AccessScope.DepartmentIDs {
+							authDept, err := deptDAO.GetByID(authDeptID)
+							if err == nil {
+								// 如果用户部门路径包含授权部门路径，则用户属于该部门的子部门
+								if len(dept.Path) >= len(authDept.Path) &&
+									dept.Path[:len(authDept.Path)] == authDept.Path {
+									return true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 5. 检查用户的角色是否在授权列表中
+	if len(app.AccessScope.RoleIDs) > 0 {
+		userRoleDAO := dao.NewUserRoleDao(s.db)
+		userRoles, err := userRoleDAO.GetByUserID(userID)
+		if err == nil && len(userRoles) > 0 {
+			for _, userRole := range userRoles {
+				if app.AccessScope.HasRoleID(userRole.RoleID) {
+					return true
+				}
+			}
+		}
+	}
+
+	// 6. 如果所有检查都不通过，拒绝访问
+	return false
+}

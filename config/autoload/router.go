@@ -200,6 +200,10 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 客户端密钥管理（管理员）- 仅OIDC应用
 						adminApps.POST("/:id/secret/reset", deps.WrapHandler(AdminController.ApplicationController{}.ResetClientSecret)) // 重置客户端密钥
 
+						// 应用授权范围管理（管理员）
+						adminApps.GET("/:id/access-scope", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationAccessScope))    // 获取应用授权范围
+						adminApps.PUT("/:id/access-scope", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplicationAccessScope)) // 更新应用授权范围
+
 						// 批量操作（管理员）
 						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
 
