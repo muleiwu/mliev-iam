@@ -1,6 +1,8 @@
 package dao
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -25,7 +27,8 @@ func (dao *OIDCTokenDAO) Create(token *model.OIDCToken) error {
 // GetByAccessToken 根据访问令牌获取记录
 func (dao *OIDCTokenDAO) GetByAccessToken(accessToken string) (*model.OIDCToken, error) {
 	var token model.OIDCToken
-	err := dao.db.Where("access_token = ?", accessToken).First(&token).Error
+	tokenHash := hashAccessToken(accessToken)
+	err := dao.db.Where("access_token_hash = ?", tokenHash).First(&token).Error
 	if err != nil {
 		return nil, err
 	}
@@ -45,8 +48,9 @@ func (dao *OIDCTokenDAO) GetByRefreshToken(refreshToken string) (*model.OIDCToke
 // GetValidByAccessToken 获取有效的访问令牌（未撤销且未过期）
 func (dao *OIDCTokenDAO) GetValidByAccessToken(accessToken string) (*model.OIDCToken, error) {
 	var token model.OIDCToken
-	err := dao.db.Where("access_token = ? AND is_revoked = ? AND expires_at > ?",
-		accessToken, false, time.Now()).First(&token).Error
+	tokenHash := hashAccessToken(accessToken)
+	err := dao.db.Where("access_token_hash = ? AND is_revoked = ? AND expires_at > ?",
+		tokenHash, false, time.Now()).First(&token).Error
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +75,9 @@ func (dao *OIDCTokenDAO) Update(token *model.OIDCToken) error {
 
 // RevokeToken 撤销令牌
 func (dao *OIDCTokenDAO) RevokeToken(accessToken string) error {
+	tokenHash := hashAccessToken(accessToken)
 	return dao.db.Model(&model.OIDCToken{}).
-		Where("access_token = ?", accessToken).
+		Where("access_token_hash = ?", tokenHash).
 		Update("is_revoked", true).Error
 }
 
@@ -210,4 +215,10 @@ func (dao *OIDCTokenDAO) List(offset, limit int, clientID string, userID *uint, 
 // Delete 删除令牌
 func (dao *OIDCTokenDAO) Delete(id uint) error {
 	return dao.db.Delete(&model.OIDCToken{}, id).Error
+}
+
+// hashAccessToken 计算 access_token 的 SHA256 hash
+func hashAccessToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
