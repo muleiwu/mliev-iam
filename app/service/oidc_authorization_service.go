@@ -121,6 +121,8 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 	// 3. 获取授权码
 	authCode, err := s.authCodeDAO.GetValidByCode(req.Code)
 	if err != nil {
+		// 添加调试日志
+		fmt.Printf("[DEBUG] 授权码验证失败 - Code: %s, Error: %v\n", req.Code, err)
 		return nil, constants.ErrInvalidGrant
 	}
 
@@ -408,11 +410,13 @@ func (s *OIDCAuthorizationService) validateAuthorizationCode(authCode *model.Aut
 
 	// 验证客户端ID
 	if authCode.ClientID != clientID {
+		fmt.Printf("[DEBUG] ClientID 不匹配 - 授权码: %s, 请求: %s\n", authCode.ClientID, clientID)
 		return constants.ErrInvalidGrant
 	}
 
 	// 验证重定向URI
 	if authCode.RedirectURI != req.RedirectURI {
+		fmt.Printf("[DEBUG] RedirectURI 不匹配 - 授权码: %s, 请求: %s\n", authCode.RedirectURI, req.RedirectURI)
 		return constants.ErrInvalidGrant
 	}
 
