@@ -97,3 +97,47 @@ type ResetClientSecretResponse struct {
 	ClientSecret string `json:"clientSecret"`
 	Message      string `json:"message"`
 }
+
+// ============== Application Access Scope DTOs ==============
+
+// ApplicationAccessScopeRequest 应用授权范围请求
+type ApplicationAccessScopeRequest struct {
+	UserIDs               []uint `json:"userIds"`
+	DepartmentIDs         []uint `json:"departmentIds"`
+	RoleIDs               []uint `json:"roleIds"`
+	IncludeSubDepartments bool   `json:"includeSubDepartments"`
+}
+
+// ApplicationAccessScopeResponse 应用授权范围响应
+type ApplicationAccessScopeResponse struct {
+	UserIDs               []uint                `json:"userIds"`
+	DepartmentIDs         []uint                `json:"departmentIds"`
+	RoleIDs               []uint                `json:"roleIds"`
+	IncludeSubDepartments bool                  `json:"includeSubDepartments"`
+	Users                 []AccessScopeUserInfo `json:"users"`       // 用户详细信息
+	Departments           []AccessScopeDeptInfo `json:"departments"` // 部门详细信息
+	Roles                 []AccessScopeRoleInfo `json:"roles"`       // 角色详细信息
+}
+
+// AccessScopeUserInfo 授权范围用户信息
+type AccessScopeUserInfo struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	RealName string `json:"realName"`
+	Email    string `json:"email"`
+}
+
+// AccessScopeDeptInfo 授权范围部门信息
+type AccessScopeDeptInfo struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Code string `json:"code"`
+	Path string `json:"path"`
+}
+
+// AccessScopeRoleInfo 授权范围角色信息
+type AccessScopeRoleInfo struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+	Code string `json:"code"`
+}

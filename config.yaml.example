@@ -44,6 +44,13 @@ redis:
   pool_size: 10
   min_idle_conns: 5
 
+# 缓存配置
+cache:
+  driver: memory  # 缓存驱动: redis, memory, none
+  # redis: 使用 Redis 作为缓存后端（需要配置 redis 服务）
+  # memory: 使用内存缓存（单机部署推荐）
+  # none: 不使用缓存
+
 # 日志配置
 log:
   level: info    # debug, info, warn, error
@@ -149,4 +156,19 @@ oidc:
     # 令牌最大刷新次数
     max_token_refresh_attempts: 100
     # 是否启用速率限制
-    rate_limit_enabled: true 
+    rate_limit_enabled: true
+
+# 消息推送服务配置（用于发送验证码）
+push:
+  # 推送服务基础URL
+  baseUrl: "https://push.mliev.com"
+  # 应用ID
+  appId: "your_app_id"
+  # 应用密钥
+  appSecret: "your_app_secret"
+  # 短信通道ID
+  smsChannelId: 1
+  # 邮件通道ID
+  emailChannelId: 2
+  # 短信签名
+  smsSignature: "【您的签名】"

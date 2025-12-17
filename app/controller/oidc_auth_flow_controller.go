@@ -28,9 +28,13 @@ type LoginRequest struct {
 // RegisterRequest 注册请求
 type RegisterRequest struct {
 	Username  string `json:"username" binding:"required"`
-	Email     string `json:"email" binding:"required,email"`
+	Email     string `json:"email" binding:"omitempty,email"`
+	EmailCode string `json:"emailCode" binding:"omitempty"`
+	Phone     string `json:"phone" binding:"omitempty"`
+	PhoneCode string `json:"phoneCode" binding:"omitempty"`
 	Password  string `json:"password" binding:"required,min=6"`
-	RealName  string `json:"realName" binding:"required"`
+	RealName  string `json:"realName" binding:"omitempty"`
+	Nickname  string `json:"nickname" binding:"omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
 }
 
@@ -43,10 +47,12 @@ type RegisterResponse struct {
 
 // LoginResponse 登录响应
 type LoginResponse struct {
-	Success  bool   `json:"success"`
-	Message  string `json:"message"`
-	NextURL  string `json:"nextUrl,omitempty"`
-	UserInfo *struct {
+	Success                   bool     `json:"success"`
+	Message                   string   `json:"message"`
+	NextURL                   string   `json:"nextUrl,omitempty"`
+	RequiresProfileCompletion bool     `json:"requiresProfileCompletion,omitempty"`
+	MissingFields             []string `json:"missingFields,omitempty"`
+	UserInfo                  *struct {
 		ID       uint   `json:"id"`
 		Username string `json:"username"`
 		RealName string `json:"realName"`
@@ -85,6 +91,41 @@ type AuthInfoResponse struct {
 	} `json:"user"`
 }
 
+// SendVerificationCodeRequest 发送验证码请求
+type SendVerificationCodeRequest struct {
+	SessionID string `json:"sessionId" binding:"required"`
+	Type      string `json:"type" binding:"required,oneof=email phone"`
+	Receiver  string `json:"receiver" binding:"required"`
+}
+
+// SendRegisterVerificationCodeRequest 发送注册验证码请求（不需要sessionId和认证）
+type SendRegisterVerificationCodeRequest struct {
+	Type     string `json:"type" binding:"required,oneof=email phone"`
+	Receiver string `json:"receiver" binding:"required"`
+}
+
+// SendVerificationCodeResponse 发送验证码响应
+type SendVerificationCodeResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// CompleteProfileRequest 完善信息请求
+type CompleteProfileRequest struct {
+	SessionID string `json:"sessionId" binding:"required"`
+	Email     string `json:"email,omitempty" binding:"omitempty,email"`
+	EmailCode string `json:"emailCode,omitempty"`
+	Phone     string `json:"phone,omitempty"`
+	PhoneCode string `json:"phoneCode,omitempty"`
+}
+
+// CompleteProfileResponse 完善信息响应
+type CompleteProfileResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	NextURL string `json:"nextUrl,omitempty"`
+}
+
 // Login OIDC登录接口
 // POST /api/oidc/login
 func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.HelperInterface) {
@@ -96,7 +137,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 
 	// 1. 验证会话是否存在
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	_, err := sessionService.GetSession(req.SessionID)
+	session, err := sessionService.GetSession(req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -120,11 +161,13 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 		return
 	}
 
-	// 4. 返回成功响应，引导用户到授权确认页面
+	// 4. 检查 scope 是否需要用户完善信息
+	missingFields := c.checkMissingUserInfo(session.Scope, user)
+
+	// 5. 返回成功响应
 	response := LoginResponse{
 		Success: true,
 		Message: "登录成功",
-		NextURL: "/auth/#/oidc/consent?session_id=" + req.SessionID,
 		UserInfo: &struct {
 			ID       uint   `json:"id"`
 			Username string `json:"username"`
@@ -134,6 +177,16 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 			Username: user.Username,
 			RealName: user.RealName,
 		},
+	}
+
+	if len(missingFields) > 0 {
+		// 需要完善信息，跳转到信息完善页面
+		response.RequiresProfileCompletion = true
+		response.MissingFields = missingFields
+		response.NextURL = "/auth/#/oidc/complete-profile?session_id=" + req.SessionID + "&missing_fields=" + strings.Join(missingFields, ",")
+	} else {
+		// 信息完整，直接跳转到授权确认页面
+		response.NextURL = "/auth/#/oidc/consent?session_id=" + req.SessionID
 	}
 
 	c.Success(ctx, response)
@@ -158,15 +211,48 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		}
 	}
 
-	// 2. 创建用户
-	userService := service.NewUserService(helper.GetDatabase())
+	// 2. 根据配置验证注册字段
+	settingService := service.NewSettingService(helper.GetDatabase())
 	createUserReq := &dto.CreateUserRequest{
 		Username: req.Username,
 		Email:    req.Email,
 		Password: req.Password,
 		RealName: req.RealName,
+		Phone:    req.Phone,
+		Nickname: req.Nickname,
 	}
 
+	if err := settingService.ValidateRegisterFields(createUserReq); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	// 3. 验证邮箱和手机验证码
+	config := c.getVerificationCodeConfig(helper)
+	if config != nil {
+		verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+
+		// 验证邮箱验证码（如果提供了邮箱）
+		if req.Email != "" && req.EmailCode != "" {
+			sessionID := "register:" + req.Email
+			if err := verificationService.VerifyCode(ctx.Request.Context(), req.Email, service.VerificationTypeEmail, sessionID, req.EmailCode); err != nil {
+				c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
+				return
+			}
+		}
+
+		// 验证手机验证码（如果提供了手机号）
+		if req.Phone != "" && req.PhoneCode != "" {
+			sessionID := "register:" + req.Phone
+			if err := verificationService.VerifyCode(ctx.Request.Context(), req.Phone, service.VerificationTypePhone, sessionID, req.PhoneCode); err != nil {
+				c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
+				return
+			}
+		}
+	}
+
+	// 4. 创建用户
+	userService := service.NewUserService(helper.GetDatabase())
 	userResponse, err := userService.CreateUser(createUserReq)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
@@ -182,7 +268,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	// 3. 如果有会话，标记为已认证
+	// 5. 如果有会话，标记为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
 		if err := sessionService.MarkAsAuthenticated(req.SessionID, userResponse.ID); err != nil {
@@ -197,7 +283,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 		}
 	}
 
-	// 4. 返回成功响应
+	// 6. 返回成功响应
 	response := RegisterResponse{
 		Success: true,
 		Message: "注册成功",
@@ -381,6 +467,29 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx *gin.Context, helper interfaces.
 
 // 私有方法
 
+// checkMissingUserInfo 检查用户是否缺少 scope 所需的信息
+func (c OIDCAuthFlowController) checkMissingUserInfo(scopeStr string, user *dto.UserResponse) []string {
+	var missingFields []string
+
+	// 解析 scope
+	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
+
+	for _, scope := range scopeList {
+		switch scope {
+		case "email":
+			if user.Email == "" {
+				missingFields = append(missingFields, "email")
+			}
+		case "phone":
+			if user.Phone == "" {
+				missingFields = append(missingFields, "phone")
+			}
+		}
+	}
+
+	return missingFields
+}
+
 // parseScopesWithDescription 解析scopes并返回带描述的列表
 func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []struct {
 	Name        string `json:"name"`
@@ -417,4 +526,231 @@ func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []st
 	}
 
 	return scopes
+}
+
+// getVerificationCodeConfig 从数据库获取验证码服务配置
+func (c OIDCAuthFlowController) getVerificationCodeConfig(helper interfaces.HelperInterface) *service.VerificationCodeConfig {
+	// 从数据库获取推送服务配置
+	settingService := service.NewSettingService(helper.GetDatabase())
+	pushSettings, err := settingService.GetPushSettings()
+	if err != nil {
+		// 配置获取失败，返回 nil
+		return nil
+	}
+
+	// 检查必填字段
+	if pushSettings.BaseURL == "" || pushSettings.AppID == "" || pushSettings.AppSecret == "" {
+		return nil
+	}
+
+	return &service.VerificationCodeConfig{
+		BaseURL:        pushSettings.BaseURL,
+		AppID:          pushSettings.AppID,
+		AppSecret:      pushSettings.AppSecret,
+		SMSChannelID:   pushSettings.SMSChannelID,
+		EmailChannelID: pushSettings.EmailChannelID,
+		SMSSignature:   pushSettings.SMSSignature,
+		EmailSignature: pushSettings.EmailSignature,
+	}
+}
+
+// SendVerificationCode 发送验证码接口
+// POST /api/oidc/send-verification-code
+func (c OIDCAuthFlowController) SendVerificationCode(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req SendVerificationCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 1. 验证会话是否存在且已认证
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+
+	if !session.IsAuthenticated || session.UserID == nil {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
+		return
+	}
+
+	// 2. 获取验证码服务配置
+	config := c.getVerificationCodeConfig(helper)
+	if config == nil {
+		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		return
+	}
+
+	// 3. 创建验证码服务并发送验证码
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+
+	var verificationType service.VerificationType
+	if req.Type == "email" {
+		verificationType = service.VerificationTypeEmail
+	} else {
+		verificationType = service.VerificationTypePhone
+	}
+
+	if err := verificationService.SendCode(ctx.Request.Context(), req.Receiver, verificationType, req.SessionID); err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	response := SendVerificationCodeResponse{
+		Success: true,
+		Message: "验证码已发送",
+	}
+
+	c.Success(ctx, response)
+}
+
+// GetRegisterSettings 获取注册字段配置（公开接口）
+// GET /api/oidc/register-settings
+func (c OIDCAuthFlowController) GetRegisterSettings(ctx *gin.Context, helper interfaces.HelperInterface) {
+	settingService := service.NewSettingService(helper.GetDatabase())
+
+	config, err := settingService.GetRegisterFieldsSettings()
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "获取注册字段配置失败: "+err.Error())
+		return
+	}
+
+	c.Success(ctx, config)
+}
+
+// CompleteProfile 完善用户信息接口
+// POST /api/oidc/complete-profile
+func (c OIDCAuthFlowController) CompleteProfile(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req CompleteProfileRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 1. 验证会话是否存在且已认证
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+
+	if !session.IsAuthenticated || session.UserID == nil {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
+		return
+	}
+
+	// 2. 获取验证码服务配置
+	config := c.getVerificationCodeConfig(helper)
+	if config == nil {
+		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		return
+	}
+
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+
+	// 3. 验证邮箱验证码（如果提供了邮箱）
+	if req.Email != "" {
+		if req.EmailCode == "" {
+			c.Error(ctx, constants.ErrCodeBadRequest, "请输入邮箱验证码")
+			return
+		}
+		if err := verificationService.VerifyCode(ctx.Request.Context(), req.Email, service.VerificationTypeEmail, req.SessionID, req.EmailCode); err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
+			return
+		}
+	}
+
+	// 4. 验证手机验证码（如果提供了手机号）
+	if req.Phone != "" {
+		if req.PhoneCode == "" {
+			c.Error(ctx, constants.ErrCodeBadRequest, "请输入手机验证码")
+			return
+		}
+		if err := verificationService.VerifyCode(ctx.Request.Context(), req.Phone, service.VerificationTypePhone, req.SessionID, req.PhoneCode); err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
+			return
+		}
+	}
+
+	// 5. 更新用户信息
+	userService := service.NewUserService(helper.GetDatabase())
+	updateReq := &dto.UpdateUserRequest{}
+
+	if req.Email != "" {
+		updateReq.Email = req.Email
+	}
+	if req.Phone != "" {
+		updateReq.Phone = req.Phone
+	}
+
+	_, err = userService.UpdateUser(*session.UserID, updateReq)
+	if err != nil {
+		// 检查是否是邮箱或手机号已存在的错误
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "邮箱已存在") || strings.Contains(errMsg, "email") {
+			c.Error(ctx, constants.ErrCodeEmailAlreadyExists, "该邮箱已被其他用户使用")
+			return
+		}
+		if strings.Contains(errMsg, "手机号已存在") || strings.Contains(errMsg, "phone") {
+			c.Error(ctx, constants.ErrCodeBadRequest, "该手机号已被其他用户使用")
+			return
+		}
+		c.Error(ctx, constants.ErrCodeInternal, "更新用户信息失败: "+err.Error())
+		return
+	}
+
+	// 6. 返回成功响应，跳转到授权确认页面
+	response := CompleteProfileResponse{
+		Success: true,
+		Message: "信息完善成功",
+		NextURL: "/auth/#/oidc/consent?session_id=" + req.SessionID,
+	}
+
+	c.Success(ctx, response)
+}
+
+// SendRegisterVerificationCode 发送注册验证码接口（无需登录认证）
+// POST /api/oidc/send-register-verification-code
+func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req SendRegisterVerificationCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 1. 获取验证码服务配置
+	config := c.getVerificationCodeConfig(helper)
+	if config == nil {
+		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		return
+	}
+
+	// 2. 创建验证码服务并发送验证码
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+
+	var verificationType service.VerificationType
+	if req.Type == "email" {
+		verificationType = service.VerificationTypeEmail
+	} else {
+		verificationType = service.VerificationTypePhone
+	}
+
+	// 使用接收者作为sessionID（注册场景没有真实的session）
+	// 这样可以保证每个接收者有独立的验证码
+	sessionID := "register:" + req.Receiver
+
+	if err := verificationService.SendCode(ctx.Request.Context(), req.Receiver, verificationType, sessionID); err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	response := SendVerificationCodeResponse{
+		Success: true,
+		Message: "验证码已发送",
+	}
+
+	c.Success(ctx, response)
 }

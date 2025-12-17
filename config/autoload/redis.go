@@ -2,11 +2,11 @@ package autoload
 
 import (
 	envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/muleiwu/gsr/env_interface"
+	"github.com/muleiwu/gsr"
 )
 
 type Redis struct {
-	env env_interface.EnvInterface
+	env gsr.Enver
 }
 
 func (receiver Redis) InitConfig(helper envInterface.HelperInterface) map[string]any {

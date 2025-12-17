@@ -15,6 +15,7 @@ func (receiver Config) Get() []interfaces.InitConfig {
 		autoload.StaticFs{},
 		autoload.Database{},
 		autoload.Redis{},
+		autoload.Push{},
 		autoload.Middleware{},
 		autoload.Router{},
 		autoload.Migration{},

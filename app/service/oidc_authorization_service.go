@@ -86,6 +86,11 @@ func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, u
 		return s.errorResponse("access_denied", "用户无法登录", req.State), nil
 	}
 
+	// 6.5 检查应用授权范围
+	if !s.appService.CheckUserAccess(app.ID, userID) {
+		return s.errorResponse("access_denied", "您没有访问此应用的权限", req.State), nil
+	}
+
 	// 7. 处理不同的响应类型
 	responseType := model.ResponseType(req.ResponseType)
 	switch responseType {

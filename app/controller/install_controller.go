@@ -8,6 +8,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/reload"
+	"cnb.cool/mliev/iam/mliev-iam/internal/service/migration"
+	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"github.com/gin-gonic/gin"
 )
 
@@ -134,19 +136,40 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 		return
 	}
 
-	// 7. 创建初始数据（部门、角色、权限、管理员）
+	// 7. 执行数据库迁移（使用 goose 版本化迁移）
+	sqlDB, err := testDB.DB()
+	if err != nil {
+		ic.Error(c, constants.ErrCodeInternal, "获取数据库连接失败: "+err.Error())
+		return
+	}
+
+	// 设置外部数据库连接供 initial_schema 迁移使用
+	migrations.SetExternalDB(testDB)
+	defer migrations.ClearExternalDB()
+
+	// 执行 goose 迁移，使用用户选择的数据库驱动作为方言
+	dialect := req.Database.Driver
+	if dialect == "" {
+		dialect = "mysql" // 默认 MySQL
+	}
+	if err := migration.RunGooseMigrations(sqlDB, dialect, nil); err != nil {
+		ic.Error(c, constants.ErrCodeInternal, "数据库迁移失败: "+err.Error())
+		return
+	}
+
+	// 8. 创建初始数据（部门、角色、权限、管理员）
 	if err := newInstallService.CreateInitialData(req.Admin); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "创建初始数据失败: "+err.Error())
 		return
 	}
 
-	// 8. 标记系统为已安装
+	// 9. 标记系统为已安装
 	if err := newInstallService.MarkAsInstalled(); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "标记系统已安装失败: "+err.Error())
 		return
 	}
 
-	// 9. 返回成功响应
+	// 10. 返回成功响应
 	response := dto.InstallSubmitResponse{
 		Success: true,
 		Message: "系统安装成功，服务将自动重启以应用新配置，请稍后使用管理员账户登录",
@@ -154,7 +177,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 
 	ic.SuccessWithMessage(c, "系统安装成功", response)
 
-	// 10. 异步触发配置重载（在响应返回后）
+	// 11. 异步触发配置重载（在响应返回后）
 	go func() {
 		time.Sleep(500 * time.Millisecond) // 短暂延迟，确保响应已发送
 		reload.TriggerReload()

@@ -497,3 +497,12 @@ func (dao *DepartmentDao) GetActiveDepartmentsCount() (int64, error) {
 	}
 	return count, nil
 }
+
+// GetTotalDepartmentsCount 获取总部门数量
+func (dao *DepartmentDao) GetTotalDepartmentsCount() (int64, error) {
+	var count int64
+	if err := dao.database.Model(&model.Department{}).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("查询总部门数量失败: %w", err)
+	}
+	return count, nil
+}

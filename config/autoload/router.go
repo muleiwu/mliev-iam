@@ -200,6 +200,10 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 客户端密钥管理（管理员）- 仅OIDC应用
 						adminApps.POST("/:id/secret/reset", deps.WrapHandler(AdminController.ApplicationController{}.ResetClientSecret)) // 重置客户端密钥
 
+						// 应用授权范围管理（管理员）
+						adminApps.GET("/:id/access-scope", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationAccessScope))    // 获取应用授权范围
+						adminApps.PUT("/:id/access-scope", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplicationAccessScope)) // 更新应用授权范围
+
 						// 批量操作（管理员）
 						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
 
@@ -222,6 +226,25 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 
 						// 统计信息（管理员）
 						adminSocialProviders.GET("/stats", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderStats)) // 获取提供商统计信息
+					}
+
+					// 系统设置管理路由（管理员）
+					adminSettings := admin.Group("/settings", middleware.AdminAuthMiddleware(helper))
+					{
+						// 设置基础CRUD操作（管理员）
+						adminSettings.GET("", deps.WrapHandler(AdminController.SettingController{}.GetAllSettings))        // 获取所有设置
+						adminSettings.GET("/:key", deps.WrapHandler(AdminController.SettingController{}.GetSettingByKey))  // 获取单个设置
+						adminSettings.POST("", deps.WrapHandler(AdminController.SettingController{}.CreateSetting))        // 创建设置
+						adminSettings.PUT("/:key", deps.WrapHandler(AdminController.SettingController{}.UpdateSetting))    // 更新设置
+						adminSettings.DELETE("/:key", deps.WrapHandler(AdminController.SettingController{}.DeleteSetting)) // 删除设置
+
+						// 注册字段配置管理（管理员）
+						adminSettings.GET("/register-fields/config", deps.WrapHandler(AdminController.SettingController{}.GetRegisterFieldsSettings))    // 获取注册字段配置
+						adminSettings.PUT("/register-fields/config", deps.WrapHandler(AdminController.SettingController{}.UpdateRegisterFieldsSettings)) // 更新注册字段配置
+
+						// 推送服务配置管理（管理员）
+						adminSettings.GET("/push/config", deps.WrapHandler(AdminController.SettingController{}.GetPushSettings))    // 获取推送服务配置
+						adminSettings.PUT("/push/config", deps.WrapHandler(AdminController.SettingController{}.UpdatePushSettings)) // 更新推送服务配置
 					}
 				}
 
@@ -257,9 +280,13 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				apiOidc := api.Group("/oidc")
 				{
 					// OIDC 授权流程端点
-					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))          // 登录接口
-					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))    // 注册接口
-					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo)) // 获取授权信息接口
+					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))                                                  // 登录接口
+					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))                                            // 注册接口
+					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo))                                         // 获取授权信息接口
+					apiOidc.POST("/send-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendVerificationCode))                  // 发送验证码接口（需要认证）
+					apiOidc.POST("/send-register-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)) // 发送注册验证码接口（公开）
+					apiOidc.POST("/complete-profile", deps.WrapHandler(controller.OIDCAuthFlowController{}.CompleteProfile))                             // 完善信息接口
+					apiOidc.GET("/register-settings", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetRegisterSettings))                         // 获取注册字段配置（公开接口）
 				}
 			}
 

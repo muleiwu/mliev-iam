@@ -32,6 +32,9 @@ type Application struct {
 	IsActive   bool `gorm:"default:true" json:"isActive"`
 	IsVerified bool `gorm:"default:false" json:"isVerified"`
 
+	// 授权范围配置
+	AccessScope *ApplicationAccessScope `gorm:"type:json;serializer:json" json:"accessScope"`
+
 	// 时间信息
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
@@ -98,3 +101,62 @@ const (
 	ResponseTypeToken   ResponseType = "token"
 	ResponseTypeIDToken ResponseType = "id_token"
 )
+
+// ============== Application Access Scope ==============
+
+// ApplicationAccessScope 应用访问授权范围
+// 用于控制哪些用户可以访问应用
+// 默认为空表示所有用户都可以访问
+type ApplicationAccessScope struct {
+	UserIDs               []uint `json:"userIds"`               // 授权用户ID列表
+	DepartmentIDs         []uint `json:"departmentIds"`         // 授权部门ID列表
+	RoleIDs               []uint `json:"roleIds"`               // 授权角色ID列表
+	IncludeSubDepartments bool   `json:"includeSubDepartments"` // 是否包含子部门
+}
+
+// IsEmpty 检查授权范围是否为空（即允许所有用户访问）
+func (a *ApplicationAccessScope) IsEmpty() bool {
+	if a == nil {
+		return true
+	}
+	return len(a.UserIDs) == 0 && len(a.DepartmentIDs) == 0 && len(a.RoleIDs) == 0
+}
+
+// HasUserID 检查指定用户ID是否在授权列表中
+func (a *ApplicationAccessScope) HasUserID(userID uint) bool {
+	if a == nil {
+		return false
+	}
+	for _, id := range a.UserIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
+// HasDepartmentID 检查指定部门ID是否在授权列表中
+func (a *ApplicationAccessScope) HasDepartmentID(deptID uint) bool {
+	if a == nil {
+		return false
+	}
+	for _, id := range a.DepartmentIDs {
+		if id == deptID {
+			return true
+		}
+	}
+	return false
+}
+
+// HasRoleID 检查指定角色ID是否在授权列表中
+func (a *ApplicationAccessScope) HasRoleID(roleID uint) bool {
+	if a == nil {
+		return false
+	}
+	for _, id := range a.RoleIDs {
+		if id == roleID {
+			return true
+		}
+	}
+	return false
+}
