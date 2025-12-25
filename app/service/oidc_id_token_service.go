@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -124,9 +123,9 @@ func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, 
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
 
-	// 构建基础claims
+	// 构建基础claims - 使用 UUID 作为 sub claim
 	claims := &IDTokenClaims{
-		Sub: strconv.FormatUint(uint64(user.ID), 10),
+		Sub: user.UUID,
 		Iss: s.issuer,
 		Aud: clientID,
 		Exp: exp.Unix(),
@@ -199,10 +198,10 @@ func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID stri
 	// 生成唯一标识符
 	jti := generateUUID()
 
-	// 构建 Access Token Claims
+	// 构建 Access Token Claims - 使用 UUID 作为 sub claim
 	claims := &AccessTokenClaims{
 		Iss:      s.issuer,
-		Sub:      strconv.FormatUint(uint64(user.ID), 10),
+		Sub:      user.UUID,
 		Aud:      clientID,
 		Exp:      exp.Unix(),
 		Iat:      now.Unix(),

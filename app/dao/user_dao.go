@@ -41,6 +41,18 @@ func (dao *UserDao) GetByID(id uint) (*model.User, error) {
 	return &user, nil
 }
 
+// GetByUUID 根据UUID获取用户
+func (dao *UserDao) GetByUUID(uuid string) (*model.User, error) {
+	var user model.User
+	if err := dao.database.Where("uuid = ?", uuid).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("用户不存在")
+		}
+		return nil, fmt.Errorf("查询用户失败: %w", err)
+	}
+	return &user, nil
+}
+
 // GetByUsername 根据用户名获取用户
 func (dao *UserDao) GetByUsername(username string) (*model.User, error) {
 	var user model.User

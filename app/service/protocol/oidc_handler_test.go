@@ -23,7 +23,8 @@ func TestOIDCProtocolHandler_PrepareConfig(t *testing.T) {
 		"clientType":    "confidential",
 	}
 
-	preparedConfig, err := handler.PrepareConfig(config)
+	testUUID := "test-uuid-12345"
+	preparedConfig, err := handler.PrepareConfig(testUUID, config)
 	assert.NoError(t, err)
 
 	// 验证生成了 clientId
@@ -113,7 +114,8 @@ func TestOIDCProtocolHandler_PrepareAndEncrypt_Integration(t *testing.T) {
 	}
 
 	// 1. 准备配置（生成明文凭据）
-	preparedConfig, err := handler.PrepareConfig(config)
+	testUUID := "test-uuid-67890"
+	preparedConfig, err := handler.PrepareConfig(testUUID, config)
 	assert.NoError(t, err)
 
 	// 2. 保存明文副本（模拟创建应用流程）
