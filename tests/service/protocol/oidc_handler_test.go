@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -13,13 +14,13 @@ func TestOIDCProtocolHandler_PrepareConfig(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	handler := NewOIDCProtocolHandler(db)
+	handler := protocol.NewOIDCProtocolHandler(db)
 
-	config := map[string]interface{}{
-		"redirectUris":  []interface{}{"http://localhost:3000/callback"},
-		"grantTypes":    []interface{}{"authorization_code"},
-		"responseTypes": []interface{}{"code"},
-		"scopes":        []interface{}{"openid", "profile"},
+	config := map[string]any{
+		"redirectUris":  []any{"http://localhost:3000/callback"},
+		"grantTypes":    []any{"authorization_code"},
+		"responseTypes": []any{"code"},
+		"scopes":        []any{"openid", "profile"},
 		"clientType":    "confidential",
 	}
 
@@ -44,10 +45,10 @@ func TestOIDCProtocolHandler_EncryptSensitiveFields(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	handler := NewOIDCProtocolHandler(db)
+	handler := protocol.NewOIDCProtocolHandler(db)
 
 	plainSecret := "test-plain-secret"
-	config := map[string]interface{}{
+	config := map[string]any{
 		"clientId":     "test-client-id",
 		"clientSecret": plainSecret,
 	}
@@ -76,9 +77,9 @@ func TestOIDCProtocolHandler_EncryptSensitiveFields_Idempotent(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	handler := NewOIDCProtocolHandler(db)
+	handler := protocol.NewOIDCProtocolHandler(db)
 
-	config := map[string]interface{}{
+	config := map[string]any{
 		"clientId":     "test-client-id",
 		"clientSecret": "test-plain-secret",
 	}
@@ -103,13 +104,13 @@ func TestOIDCProtocolHandler_PrepareAndEncrypt_Integration(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	assert.NoError(t, err)
 
-	handler := NewOIDCProtocolHandler(db)
+	handler := protocol.NewOIDCProtocolHandler(db)
 
-	config := map[string]interface{}{
-		"redirectUris":  []interface{}{"http://localhost:3000/callback"},
-		"grantTypes":    []interface{}{"authorization_code"},
-		"responseTypes": []interface{}{"code"},
-		"scopes":        []interface{}{"openid", "profile"},
+	config := map[string]any{
+		"redirectUris":  []any{"http://localhost:3000/callback"},
+		"grantTypes":    []any{"authorization_code"},
+		"responseTypes": []any{"code"},
+		"scopes":        []any{"openid", "profile"},
 		"clientType":    "confidential",
 	}
 
@@ -134,6 +135,6 @@ func TestOIDCProtocolHandler_PrepareAndEncrypt_Integration(t *testing.T) {
 	assert.True(t, strings.HasPrefix(hashedSecret, "$2a$") || strings.HasPrefix(hashedSecret, "$2b$"))
 
 	// 5. 验证可以通过验证函数验证明文密钥
-	isValid := handler.verifyClientSecret(plainSecret, hashedSecret)
+	isValid := handler.VerifyClientSecret(plainSecret, hashedSecret)
 	assert.True(t, isValid)
 }

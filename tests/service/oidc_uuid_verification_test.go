@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	jwtLib "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,11 +30,11 @@ func TestIDTokenSubClaimUsesUUID(t *testing.T) {
 
 	// Create OIDC ID Token service with HMAC for testing
 	hmacSecret := []byte("test-secret-key-for-testing-only")
-	service := NewOIDCIDTokenServiceWithHMAC(hmacSecret, "test-key-id", "https://test-issuer.com", 3600)
+	svc := service.NewOIDCIDTokenServiceWithHMAC(hmacSecret, "test-key-id", "https://test-issuer.com", 3600)
 
 	// Generate ID Token
 	authTime := time.Now()
-	idToken, err := service.GenerateIDToken(user, "test-client-id", []string{"openid", "profile"}, "test-nonce", &authTime)
+	idToken, err := svc.GenerateIDToken(user, "test-client-id", []string{"openid", "profile"}, "test-nonce", &authTime)
 	require.NoError(t, err)
 	assert.NotEmpty(t, idToken)
 
@@ -66,10 +67,10 @@ func TestAccessTokenSubClaimUsesUUID(t *testing.T) {
 
 	// Create OIDC ID Token service with HMAC for testing
 	hmacSecret := []byte("test-secret-key-for-testing-only")
-	service := NewOIDCIDTokenServiceWithHMAC(hmacSecret, "test-key-id", "https://test-issuer.com", 3600)
+	svc := service.NewOIDCIDTokenServiceWithHMAC(hmacSecret, "test-key-id", "https://test-issuer.com", 3600)
 
 	// Generate Access Token
-	accessToken, err := service.GenerateAccessToken(user, "test-client-id", []string{"openid", "profile", "email"})
+	accessToken, err := svc.GenerateAccessToken(user, "test-client-id", []string{"openid", "profile", "email"})
 	require.NoError(t, err)
 	assert.NotEmpty(t, accessToken)
 
@@ -101,12 +102,12 @@ func TestUserInfoResponseUsesUUID(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 
-	// Create a mock OIDCUserInfoService and test buildUserInfoResponse directly
-	service := &OIDCUserInfoService{}
+	// Create OIDCUserInfoService and test BuildUserInfoResponse
+	svc := &service.OIDCUserInfoService{}
 
 	// Build UserInfo response
 	scopes := []string{"openid", "profile", "email"}
-	response := service.buildUserInfoResponse(user, scopes)
+	response := svc.BuildUserInfoResponse(user, scopes)
 
 	// Verify sub field equals user UUID
 	assert.Equal(t, testUUID, response.Sub, "UserInfo sub field should be user UUID")
@@ -122,8 +123,8 @@ func TestUserInfoResponseUsesUUID(t *testing.T) {
 }
 
 // parseJWTClaims parses JWT token and returns claims map
-func parseJWTClaims(tokenString string, secret []byte) (map[string]interface{}, error) {
-	token, err := jwtLib.Parse(tokenString, func(token *jwtLib.Token) (interface{}, error) {
+func parseJWTClaims(tokenString string, secret []byte) (map[string]any, error) {
+	token, err := jwtLib.Parse(tokenString, func(token *jwtLib.Token) (any, error) {
 		return secret, nil
 	})
 	if err != nil {
