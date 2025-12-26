@@ -65,8 +65,8 @@ type Department struct {
 	Code        string           `gorm:"uniqueIndex;size:50;not null" json:"code" validate:"required,min=2,max=50"`
 	ShortName   string           `gorm:"size:50" json:"shortName" validate:"max=50"`
 	Description string           `gorm:"size:255" json:"description" validate:"max=255"`
-	Type        DepartmentType   `gorm:"type:smallint;default:2;not null" json:"type"`
-	Status      DepartmentStatus `gorm:"type:smallint;default:1;not null" json:"status"`
+	Type        DepartmentType   `gorm:"default:2;not null" json:"type"`
+	Status      DepartmentStatus `gorm:"default:1;not null" json:"status"`
 
 	// 层级关系
 	ParentID *uint  `gorm:"index" json:"parentId"`

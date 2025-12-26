@@ -52,6 +52,7 @@ type UserQueryRequest struct {
 // UserResponse 用户响应信息
 type UserResponse struct {
 	ID          uint                   `json:"id"`
+	UUID        string                 `json:"uuid"`
 	Username    string                 `json:"username"`
 	Email       string                 `json:"email"`
 	Phone       string                 `json:"phone"`
@@ -106,6 +107,7 @@ func ConvertToUserResponse(user *model.User) UserResponse {
 
 	return UserResponse{
 		ID:          user.ID,
+		UUID:        user.UUID,
 		Username:    user.Username,
 		Email:       email,
 		Phone:       phone,

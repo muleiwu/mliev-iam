@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
@@ -49,14 +48,15 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResp
 	}
 
 	// 4. 构建用户信息响应
-	return s.buildUserInfoResponse(user, token.Scopes), nil
+	return s.BuildUserInfoResponse(user, token.Scopes), nil
 }
 
-// buildUserInfoResponse 构建用户信息响应
-func (s *OIDCUserInfoService) buildUserInfoResponse(user *model.User, scopes []string) *dto.UserInfoResponse {
+// BuildUserInfoResponse 构建用户信息响应
+func (s *OIDCUserInfoService) BuildUserInfoResponse(user *model.User, scopes []string) *dto.UserInfoResponse {
+	// 使用 UUID 作为 sub 和 id 字段
 	response := &dto.UserInfoResponse{
-		Sub: strconv.FormatUint(uint64(user.ID), 10),
-		Id:  strconv.FormatUint(uint64(user.ID), 10),
+		Sub: user.UUID,
+		Id:  user.UUID,
 	}
 
 	// 根据作用域返回相应的信息

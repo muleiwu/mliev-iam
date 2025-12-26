@@ -40,7 +40,7 @@ type UserDepartment struct {
 	// 职位信息
 	Position string             `gorm:"size:100" json:"position"` // 职位
 	Title    string             `gorm:"size:100" json:"title"`    // 职称
-	Type     UserDepartmentType `gorm:"type:smallint;default:0;not null" json:"type"`
+	Type     UserDepartmentType `gorm:"default:0;not null" json:"type"`
 
 	// 状态信息
 	IsActive  bool `gorm:"default:true;not null" json:"isActive"` // 是否激活

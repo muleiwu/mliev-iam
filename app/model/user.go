@@ -3,6 +3,7 @@ package model
 import (
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"gorm.io/gorm"
 )
 
@@ -31,6 +32,7 @@ func (s UserStatus) String() string {
 type User struct {
 	// 基础信息
 	ID       uint    `gorm:"primaryKey" json:"id"`
+	UUID     string  `gorm:"uniqueIndex;size:36;not null" json:"uuid"`
 	Username string  `gorm:"uniqueIndex;size:50;not null" json:"username" validate:"required,min=3,max=50"`
 	Email    *string `gorm:"uniqueIndex;size:100" json:"email" validate:"email,max=100"`
 	Phone    *string `gorm:"uniqueIndex;size:20" json:"phone" validate:"max=20"`
@@ -42,7 +44,7 @@ type User struct {
 	PasswordHash string `gorm:"size:100" json:"-"`
 
 	// 状态管理
-	Status      UserStatus `gorm:"type:smallint;default:0;not null" json:"status"`
+	Status      UserStatus `gorm:"default:0;not null" json:"status"`
 	IsActivated bool       `gorm:"default:false;not null" json:"isActivated"`
 	IsVerified  bool       `gorm:"default:false;not null" json:"isVerified"`
 	LoginCount  int64      `gorm:"default:0" json:"loginCount"`
@@ -71,6 +73,15 @@ func (*User) TableName() string {
 
 // BeforeCreate hook to set default values before creating
 func (u *User) BeforeCreate(tx *gorm.DB) error {
+	// Generate UUIDv7 if not already set
+	if u.UUID == "" {
+		uuid, err := utils.GenerateUUIDv7()
+		if err != nil {
+			return err
+		}
+		u.UUID = uuid
+	}
+
 	if u.Status == 0 {
 		u.Status = UserStatusActive
 	}

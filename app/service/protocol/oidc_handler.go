@@ -217,7 +217,7 @@ func (h *OIDCProtocolHandler) ValidateClient(app *model.Application, clientSecre
 		return errors.New("客户端密钥配置错误")
 	}
 
-	if !h.verifyClientSecret(clientSecret, storedSecret) {
+	if !h.VerifyClientSecret(clientSecret, storedSecret) {
 		return errors.New("客户端密钥错误")
 	}
 
@@ -345,8 +345,8 @@ func (h *OIDCProtocolHandler) hashClientSecret(secret string) string {
 	return string(hash)
 }
 
-// verifyClientSecret 验证客户端密钥
-func (h *OIDCProtocolHandler) verifyClientSecret(secret, hashedSecret string) bool {
+// VerifyClientSecret 验证客户端密钥
+func (h *OIDCProtocolHandler) VerifyClientSecret(secret, hashedSecret string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedSecret), []byte(secret))
 	return err == nil
 }

@@ -6,6 +6,7 @@
     "vue": "html",
     "typescript": "javascript"
   },
-  "tailwindCSS.validate": true
+  "tailwindCSS.validate": true,
+  "kiroAgent.configureMCP": "Disabled"
 }
 

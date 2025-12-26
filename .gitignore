@@ -7,3 +7,4 @@ config/config.yaml
 /dist/
 /mliev-iam
 /static/install/
+/.kiro/
