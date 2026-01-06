@@ -176,7 +176,7 @@ func (s *ApplicationService) UpdateApplication(id uint, req *dto.UpdateApplicati
 
 	// 更新协议配置
 	if req.ProtocolConfig != nil {
-		updates["protocolConfig"] = req.ProtocolConfig
+		updates["protocolConfig"] = *req.ProtocolConfig
 		if err := handler.UpdateApplication(app, updates); err != nil {
 			return nil, fmt.Errorf("更新应用失败: %w", err)
 		}
