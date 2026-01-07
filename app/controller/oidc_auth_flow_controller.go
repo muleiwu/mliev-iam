@@ -677,13 +677,27 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx *gin.Context, helper interfa
 
 	// 5. 更新用户信息
 	userService := service.NewUserService(helper.GetDatabase())
+
+	// 先获取当前用户信息，以保留未修改的字段
+	currentUser, err := userService.GetUserModelByID(*session.UserID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "获取用户信息失败: "+err.Error())
+		return
+	}
+
 	updateReq := &dto.UpdateUserRequest{}
 
+	// 只更新用户提供的字段，未提供的保留原值
 	if req.Email != "" {
 		updateReq.Email = req.Email
+	} else if currentUser.Email != nil {
+		updateReq.Email = *currentUser.Email
 	}
+
 	if req.Phone != "" {
 		updateReq.Phone = req.Phone
+	} else if currentUser.Phone != nil {
+		updateReq.Phone = *currentUser.Phone
 	}
 
 	_, err = userService.UpdateUser(*session.UserID, updateReq)
