@@ -17,9 +17,7 @@ RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
     cd /app/frontend-oidc && \
     pnpm install && \
     pnpm build && \
-    mkdir -p /app/static/oidc && \
-    cp -r /app/frontend-oidc/dist/* /app/static/oidc/ && \
-    ls /app && ls /app/static && ls /app/static/oidc
+    ls /app && ls /app/static && ls /app/static/auth
 
 
 # 构建阶段
