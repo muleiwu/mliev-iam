@@ -42,8 +42,15 @@ func CorsWithConfig(config CorsConfig) gin.HandlerFunc {
 		origin := c.Request.Header.Get("Origin")
 
 		// 设置允许的源
+		// 注意：当 AllowCredentials 为 true 时，不能使用通配符 "*"
+		// 必须返回具体的 origin 值
 		if len(config.AllowOrigins) == 0 || config.AllowOrigins[0] == "*" {
-			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			if config.AllowCredentials && origin != "" {
+				// 当启用凭证时，返回请求的 origin 而不是 *
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			} else {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 		} else if origin != "" {
 			for _, allowOrigin := range config.AllowOrigins {
 				if allowOrigin == origin {
