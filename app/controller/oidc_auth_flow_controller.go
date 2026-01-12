@@ -334,7 +334,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 			RedirectURL: redirectURL,
 		}
 
-		ctx.JSON(http.StatusOK, response)
+		c.Success(ctx, response)
 		return
 	}
 
@@ -385,7 +385,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 			RedirectURL: redirectURL,
 		}
 
-		ctx.JSON(http.StatusOK, response)
+		c.Success(ctx, response)
 		return
 	}
 
