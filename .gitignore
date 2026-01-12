@@ -8,3 +8,4 @@ config/config.yaml
 /mliev-iam
 /static/install/
 /.kiro/
+.pnpm-store/
