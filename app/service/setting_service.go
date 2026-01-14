@@ -20,6 +20,10 @@ const (
 	PushSettingsConfigKey = "push_settings_config"
 	// PushCategory 推送相关配置分类
 	PushCategory = "push"
+	// CaptchaSceneBindingsKey 验证码场景绑定配置的key
+	CaptchaSceneBindingsKey = "captcha_scene_bindings"
+	// CaptchaCategory 验证码相关配置分类
+	CaptchaCategory = "captcha"
 )
 
 // SettingService 设置服务
@@ -328,5 +332,65 @@ func (s *SettingService) getDefaultPushSettings() *dto.PushSettings {
 		EmailChannelID: 2,
 		SMSSignature:   "",
 		EmailSignature: "",
+	}
+}
+
+// GetCaptchaSceneBindings 获取验证码场景绑定配置
+func (s *SettingService) GetCaptchaSceneBindings() (*dto.CaptchaSceneBindings, error) {
+	setting, err := s.settingDao.GetByKey(CaptchaSceneBindingsKey)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 返回默认配置（全部不启用）
+			return s.getDefaultCaptchaSceneBindings(), nil
+		}
+		return nil, fmt.Errorf("获取验证码场景绑定配置失败: %w", err)
+	}
+
+	var bindings dto.CaptchaSceneBindings
+	if err := json.Unmarshal([]byte(setting.Value), &bindings); err != nil {
+		// 如果解析失败，返回默认配置
+		return s.getDefaultCaptchaSceneBindings(), nil
+	}
+
+	return &bindings, nil
+}
+
+// UpdateCaptchaSceneBindings 更新验证码场景绑定配置
+func (s *SettingService) UpdateCaptchaSceneBindings(req *dto.UpdateCaptchaSceneBindingsRequest) error {
+	bindings := dto.CaptchaSceneBindings{
+		Login:         req.Login,
+		Register:      req.Register,
+		ResetPassword: req.ResetPassword,
+		SendSms:       req.SendSms,
+		SendEmail:     req.SendEmail,
+	}
+
+	bindingsJSON, err := json.Marshal(bindings)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+
+	setting := &model.Setting{
+		Key:      CaptchaSceneBindingsKey,
+		Value:    string(bindingsJSON),
+		Category: CaptchaCategory,
+		Remark:   "验证码场景绑定配置",
+	}
+
+	if err := s.settingDao.CreateOrUpdate(setting); err != nil {
+		return fmt.Errorf("保存验证码场景绑定配置失败: %w", err)
+	}
+
+	return nil
+}
+
+// getDefaultCaptchaSceneBindings 获取默认的验证码场景绑定配置
+func (s *SettingService) getDefaultCaptchaSceneBindings() *dto.CaptchaSceneBindings {
+	return &dto.CaptchaSceneBindings{
+		Login:         0, // 0 表示不启用
+		Register:      0,
+		ResetPassword: 0,
+		SendSms:       0,
+		SendEmail:     0,
 	}
 }

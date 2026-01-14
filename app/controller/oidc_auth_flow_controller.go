@@ -8,6 +8,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 	"github.com/gin-gonic/gin"
@@ -20,22 +21,24 @@ type OIDCAuthFlowController struct {
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username  string `json:"username" binding:"required"`
-	Password  string `json:"password" binding:"required"`
-	SessionID string `json:"sessionId" binding:"required"`
+	Username      string             `json:"username" binding:"required"`
+	Password      string             `json:"password" binding:"required"`
+	SessionID     string             `json:"sessionId" binding:"required"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // RegisterRequest 注册请求
 type RegisterRequest struct {
-	Username  string `json:"username" binding:"required"`
-	Email     string `json:"email" binding:"omitempty,email"`
-	EmailCode string `json:"emailCode" binding:"omitempty"`
-	Phone     string `json:"phone" binding:"omitempty"`
-	PhoneCode string `json:"phoneCode" binding:"omitempty"`
-	Password  string `json:"password" binding:"required,min=6"`
-	RealName  string `json:"realName" binding:"omitempty"`
-	Nickname  string `json:"nickname" binding:"omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
+	Username      string             `json:"username" binding:"required"`
+	Email         string             `json:"email" binding:"omitempty,email"`
+	EmailCode     string             `json:"emailCode" binding:"omitempty"`
+	Phone         string             `json:"phone" binding:"omitempty"`
+	PhoneCode     string             `json:"phoneCode" binding:"omitempty"`
+	Password      string             `json:"password" binding:"required,min=6"`
+	RealName      string             `json:"realName" binding:"omitempty"`
+	Nickname      string             `json:"nickname" binding:"omitempty"`
+	SessionID     string             `json:"sessionId,omitempty"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // RegisterResponse 注册响应
@@ -93,15 +96,17 @@ type AuthInfoResponse struct {
 
 // SendVerificationCodeRequest 发送验证码请求
 type SendVerificationCodeRequest struct {
-	SessionID string `json:"sessionId" binding:"required"`
-	Type      string `json:"type" binding:"required,oneof=email phone"`
-	Receiver  string `json:"receiver" binding:"required"`
+	SessionID     string             `json:"sessionId" binding:"required"`
+	Type          string             `json:"type" binding:"required,oneof=email phone"`
+	Receiver      string             `json:"receiver" binding:"required"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // SendRegisterVerificationCodeRequest 发送注册验证码请求（不需要sessionId和认证）
 type SendRegisterVerificationCodeRequest struct {
-	Type     string `json:"type" binding:"required,oneof=email phone"`
-	Receiver string `json:"receiver" binding:"required"`
+	Type          string             `json:"type" binding:"required,oneof=email phone"`
+	Receiver      string             `json:"receiver" binding:"required"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // SendVerificationCodeResponse 发送验证码响应
@@ -132,6 +137,13 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 	var req LoginRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 0. 验证码校验
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 
@@ -198,6 +210,13 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 	var req RegisterRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 0. 验证码校验
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene("register", req.CaptchaTicket); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 
@@ -563,6 +582,17 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx *gin.Context, helper in
 		return
 	}
 
+	// 0. 验证码校验（根据类型决定场景）
+	captchaScene := "sendSms"
+	if req.Type == "email" {
+		captchaScene = "sendEmail"
+	}
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.GetSession(req.SessionID)
@@ -732,6 +762,17 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx *gin.Context, h
 	var req SendRegisterVerificationCodeRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 0. 验证码校验（根据类型决定场景）
+	captchaScene := "sendSms"
+	if req.Type == "email" {
+		captchaScene = "sendEmail"
+	}
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 

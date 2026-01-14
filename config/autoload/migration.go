@@ -25,7 +25,12 @@ func (receiver Migration) Get() []any {
 
 		// 应用管理模型（支持多协议）
 		&model.Application{},
-		&model.ApplicationOIDCKey{}, // OIDC应用密钥表
+
+		// OIDC应用密钥表
+		&model.ApplicationOIDCKey{},
+
+		// 验证码
+		&model.CaptchaConfig{},
 
 		// OIDC协议相关模型
 		&model.AuthorizationCode{},

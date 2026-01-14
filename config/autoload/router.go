@@ -245,6 +245,21 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 推送服务配置管理（管理员）
 						adminSettings.GET("/push/config", deps.WrapHandler(AdminController.SettingController{}.GetPushSettings))    // 获取推送服务配置
 						adminSettings.PUT("/push/config", deps.WrapHandler(AdminController.SettingController{}.UpdatePushSettings)) // 更新推送服务配置
+
+						// 验证码场景绑定配置（管理员）
+						adminSettings.GET("/captcha/bindings", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings))    // 获取场景绑定配置
+						adminSettings.PUT("/captcha/bindings", deps.WrapHandler(AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)) // 更新场景绑定配置
+					}
+
+					// 验证码配置管理路由（管理员）
+					adminCaptchaConfigs := admin.Group("/captcha-configs", middleware.AdminAuthMiddleware(helper))
+					{
+						adminCaptchaConfigs.GET("", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaConfigs))             // 获取配置列表
+						adminCaptchaConfigs.GET("/providers", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaProviders)) // 获取支持的提供商
+						adminCaptchaConfigs.GET("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaConfig))          // 获取单个配置
+						adminCaptchaConfigs.POST("", deps.WrapHandler(AdminController.CaptchaConfigController{}.CreateCaptchaConfig))          // 创建配置
+						adminCaptchaConfigs.PUT("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.UpdateCaptchaConfig))       // 更新配置
+						adminCaptchaConfigs.DELETE("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.DeleteCaptchaConfig))    // 删除配置
 					}
 				}
 
@@ -275,6 +290,12 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					auth.POST("/logout", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.Logout))        // 用户退出登录
 					auth.POST("/refresh", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.RefreshToken)) // 刷新访问令牌
 					auth.GET("/codes", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.GetAccessCodes))  // 获取用户权限码
+				}
+
+				// 验证码公开路由组
+				captcha := api.Group("/captcha")
+				{
+					captcha.GET("/params", deps.WrapHandler(controller.CaptchaController{}.GetCaptchaParams)) // 获取验证码前端参数
 				}
 
 				apiOidc := api.Group("/oidc")
