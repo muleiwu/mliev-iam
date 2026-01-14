@@ -4,10 +4,21 @@ import "time"
 
 // ============== 验证码配置 DTOs ==============
 
+// CaptchaParamsRequest 获取验证码参数请求
+type CaptchaParamsRequest struct {
+	Scene       string `json:"scene" binding:"required"`       // 场景
+	Fingerprint string `json:"fingerprint" binding:"required"` // 设备指纹
+	UserAgent   string `json:"userAgent"`                      // 浏览器UA
+	Platform    string `json:"platform"`                       // 平台
+	Language    string `json:"language"`                       // 语言
+	Timezone    string `json:"timezone"`                       // 时区
+}
+
 // CaptchaTicket 验证码凭证（业务接口中使用）
 type CaptchaTicket struct {
-	Provider string            `json:"provider"` // 提供商类型
-	Data     map[string]string `json:"data"`     // 凭证数据（各提供商字段不同）
+	Provider    string            `json:"provider"`    // 提供商类型
+	Data        map[string]string `json:"data"`        // 凭证数据（各提供商字段不同）
+	SessionUuid string            `json:"sessionUuid"` // 会话UUID
 }
 
 // CaptchaConfigResponse 验证码配置响应
@@ -76,7 +87,8 @@ type UpdateCaptchaSceneBindingsRequest struct {
 
 // CaptchaClientParamsResponse 前端初始化参数响应
 type CaptchaClientParamsResponse struct {
-	Enabled  bool                   `json:"enabled"`  // 是否启用验证码
-	Provider string                 `json:"provider"` // 提供商类型
-	Params   map[string]interface{} `json:"params"`   // 前端初始化参数
+	Enabled     bool                   `json:"enabled"`     // 是否启用验证码
+	Provider    string                 `json:"provider"`    // 提供商类型
+	Params      map[string]interface{} `json:"params"`      // 前端初始化参数
+	SessionUuid string                 `json:"sessionUuid"` // 会话UUID
 }

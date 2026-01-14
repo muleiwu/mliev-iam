@@ -6,6 +6,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -97,7 +98,7 @@ func (m *CaptchaManager) GetClientParamsForScene(scene string) (*dto.CaptchaClie
 // ValidateForScene 根据场景验证ticket
 // 业务接口调用此方法进行验证码校验
 // 返回 nil 表示验证通过或无需验证
-func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicket) error {
+func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicket, userIP string, redisClient *redis.Client) error {
 	// 获取场景绑定配置
 	bindings, err := m.settingService.GetCaptchaSceneBindings()
 	if err != nil {
@@ -132,14 +133,28 @@ func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicke
 		return fmt.Errorf("验证码提供商类型不匹配")
 	}
 
+	// 验证会话（设备指纹验证）
+	if ticket.SessionUuid != "" && redisClient != nil {
+		sessionService := NewCaptchaSessionService(redisClient)
+		fingerprint, ok := ticket.Data["fingerprint"]
+		if !ok || fingerprint == "" {
+			return fmt.Errorf("缺少设备指纹信息")
+		}
+		if err := sessionService.ValidateSession(ticket.SessionUuid, fingerprint); err != nil {
+			return fmt.Errorf("验证码会话验证失败: %w", err)
+		}
+		// 验证后删除会话（一次性使用）
+		sessionService.DeleteSession(ticket.SessionUuid)
+	}
+
 	// 获取提供商
 	provider, err := m.GetProvider(config.Provider)
 	if err != nil {
 		return err
 	}
 
-	// 调用提供商验证
-	result, err := provider.Verify(config, ticket.Data)
+	// 调用提供商验证，传入用户IP
+	result, err := provider.Verify(config, ticket.Data, userIP)
 	if err != nil {
 		return fmt.Errorf("验证码验证失败: %w", err)
 	}

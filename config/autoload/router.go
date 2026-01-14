@@ -295,7 +295,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 				// 验证码公开路由组
 				captcha := api.Group("/captcha")
 				{
-					captcha.GET("/params", deps.WrapHandler(controller.CaptchaController{}.GetCaptchaParams)) // 获取验证码前端参数
+					captcha.POST("/params", deps.WrapHandler(controller.CaptchaController{}.GetCaptchaParams)) // 获取验证码前端参数
 				}
 
 				apiOidc := api.Group("/oidc")

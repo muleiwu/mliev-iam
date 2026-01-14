@@ -1,18 +1,12 @@
 package captcha
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"sort"
 	"strconv"
-	"strings"
-	"time"
+
+	captcha "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha/v20190722"
+	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
+	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -23,10 +17,6 @@ const (
 	TencentProviderType = "tencent"
 	// TencentAPIHost 腾讯云验证码API域名
 	TencentAPIHost = "captcha.tencentcloudapi.com"
-	// TencentAPIVersion 腾讯云API版本
-	TencentAPIVersion = "2019-07-22"
-	// TencentAPIAction 腾讯云验证码验证接口
-	TencentAPIAction = "DescribeCaptchaResult"
 )
 
 // TencentCaptchaProvider 腾讯云验证码提供商实现
@@ -93,7 +83,7 @@ func (t *TencentCaptchaProvider) GetClientParams(config *model.CaptchaConfig) ma
 }
 
 // Verify 验证腾讯云验证码ticket
-func (t *TencentCaptchaProvider) Verify(config *model.CaptchaConfig, ticketData map[string]string) (*VerifyResult, error) {
+func (t *TencentCaptchaProvider) Verify(config *model.CaptchaConfig, ticketData map[string]string, userIP string) (*VerifyResult, error) {
 	// 从配置中获取必要参数
 	secretID, secretKey, appSecretKey, captchaAppID, err := t.getConfigParams(config)
 	if err != nil {
@@ -111,7 +101,7 @@ func (t *TencentCaptchaProvider) Verify(config *model.CaptchaConfig, ticketData 
 		return &VerifyResult{Success: false, Message: "randstr不能为空"}, fmt.Errorf("randstr不能为空")
 	}
 
-	userIP := ticketData["userIp"]
+	// userIP 由调用方传入，如果为空则使用默认值
 	if userIP == "" {
 		userIP = "127.0.0.1" // 默认值
 	}
@@ -145,123 +135,58 @@ func (t *TencentCaptchaProvider) getConfigParams(config *model.CaptchaConfig) (s
 
 // callTencentAPI 调用腾讯云API进行验证
 func (t *TencentCaptchaProvider) callTencentAPI(secretID, secretKey, appSecretKey, captchaAppID, ticket, randstr, userIP string) (bool, string, error) {
-	timestamp := time.Now().Unix()
+	// 创建腾讯云凭证
+	credential := common.NewCredential(secretID, secretKey)
 
-	// 构建请求参数
-	params := map[string]string{
-		"CaptchaType":  "9",
-		"Ticket":       ticket,
-		"Randstr":      randstr,
-		"UserIp":       userIP,
-		"CaptchaAppId": captchaAppID,
-		"AppSecretKey": appSecretKey,
-	}
+	// 配置客户端
+	cpf := profile.NewClientProfile()
+	cpf.HttpProfile.Endpoint = TencentAPIHost
 
-	// 构建规范请求字符串
-	canonicalQueryString := t.buildCanonicalQueryString(params)
-	canonicalHeaders := "content-type:application/x-www-form-urlencoded\nhost:" + TencentAPIHost + "\n"
-	signedHeaders := "content-type;host"
-	payload := canonicalQueryString
-	canonicalRequest := fmt.Sprintf("POST\n/\n\n%s\n%s\n%s", canonicalHeaders, signedHeaders, t.sha256hex(payload))
-
-	// 构建待签名字符串
-	date := time.Unix(timestamp, 0).UTC().Format("2006-01-02")
-	credentialScope := fmt.Sprintf("%s/captcha/tc3_request", date)
-	hashedCanonicalRequest := t.sha256hex(canonicalRequest)
-	stringToSign := fmt.Sprintf("TC3-HMAC-SHA256\n%d\n%s\n%s", timestamp, credentialScope, hashedCanonicalRequest)
-
-	// 计算签名
-	secretDate := t.hmacSHA256([]byte("TC3"+secretKey), []byte(date))
-	secretService := t.hmacSHA256(secretDate, []byte("captcha"))
-	secretSigning := t.hmacSHA256(secretService, []byte("tc3_request"))
-	signature := hex.EncodeToString(t.hmacSHA256(secretSigning, []byte(stringToSign)))
-
-	// 构建Authorization
-	authorization := fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		secretID, credentialScope, signedHeaders, signature)
-
-	// 发送HTTP请求
-	apiURL := "https://" + TencentAPIHost
-	req, err := http.NewRequest("POST", apiURL, strings.NewReader(canonicalQueryString))
+	// 创建验证码客户端
+	client, err := captcha.NewClient(credential, "", cpf)
 	if err != nil {
-		return false, "创建请求失败", err
+		return false, "创建客户端失败", err
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Authorization", authorization)
-	req.Header.Set("Host", TencentAPIHost)
-	req.Header.Set("X-TC-Action", TencentAPIAction)
-	req.Header.Set("X-TC-Timestamp", strconv.FormatInt(timestamp, 10))
-	req.Header.Set("X-TC-Version", TencentAPIVersion)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	// 将captchaAppID转换为uint64
+	appIDInt, err := strconv.ParseUint(captchaAppID, 10, 64)
 	if err != nil {
-		return false, "请求腾讯云API失败", err
+		return false, "验证码AppId格式错误", err
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// 构建验证请求
+	request := captcha.NewDescribeCaptchaResultRequest()
+	request.CaptchaType = common.Uint64Ptr(9)
+	request.CaptchaAppId = common.Uint64Ptr(appIDInt)
+	request.AppSecretKey = common.StringPtr(appSecretKey)
+	request.Randstr = common.StringPtr(randstr)
+	request.Ticket = common.StringPtr(ticket)
+	request.UserIp = common.StringPtr(userIP)
+
+	// 发送验证请求
+	response, err := client.DescribeCaptchaResult(request)
 	if err != nil {
-		return false, "读取响应失败", err
+		return false, "验证码验证失败", err
 	}
 
-	// 解析响应
-	var result struct {
-		Response struct {
-			CaptchaCode int    `json:"CaptchaCode"`
-			CaptchaMsg  string `json:"CaptchaMsg"`
-			EvilLevel   int    `json:"EvilLevel"`
-			RequestID   string `json:"RequestId"`
-			Error       struct {
-				Code    string `json:"Code"`
-				Message string `json:"Message"`
-			} `json:"Error"`
-		} `json:"Response"`
+	// 检查响应是否为空
+	if response == nil || response.Response == nil {
+		return false, "验证响应为空", fmt.Errorf("验证响应为空")
 	}
 
-	if err := json.Unmarshal(body, &result); err != nil {
-		return false, "解析响应失败", err
+	// 验证码验证成功判断: CaptchaCode为1表示验证成功
+	if response.Response.CaptchaCode == nil || *response.Response.CaptchaCode != 1 {
+		msg := "验证码验证失败"
+		if response.Response.CaptchaMsg != nil {
+			msg = *response.Response.CaptchaMsg
+		}
+		return false, msg, nil
 	}
 
-	// 检查是否有错误
-	if result.Response.Error.Code != "" {
-		return false, result.Response.Error.Message, fmt.Errorf("腾讯云API错误: %s", result.Response.Error.Message)
+	// EvilLevel检查：参考实现的安全检查，EvilLevel大于0表示可能存在安全风险
+	if response.Response.EvilLevel != nil && *response.Response.EvilLevel > 0 {
+		return false, "可能存在安全风险", nil
 	}
 
-	// CaptchaCode为1表示验证成功
-	if result.Response.CaptchaCode == 1 {
-		return true, "验证成功", nil
-	}
-
-	return false, result.Response.CaptchaMsg, nil
-}
-
-// buildCanonicalQueryString 构建规范查询字符串
-func (t *TencentCaptchaProvider) buildCanonicalQueryString(params map[string]string) string {
-	keys := make([]string, 0, len(params))
-	for k := range params {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	var queryParts []string
-	for _, k := range keys {
-		queryParts = append(queryParts, url.QueryEscape(k)+"="+url.QueryEscape(params[k]))
-	}
-	return strings.Join(queryParts, "&")
-}
-
-// sha256hex 计算SHA256哈希并返回十六进制字符串
-func (t *TencentCaptchaProvider) sha256hex(s string) string {
-	h := sha256.New()
-	h.Write([]byte(s))
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-// hmacSHA256 计算HMAC-SHA256
-func (t *TencentCaptchaProvider) hmacSHA256(key, data []byte) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write(data)
-	return h.Sum(nil)
+	return true, "验证成功", nil
 }

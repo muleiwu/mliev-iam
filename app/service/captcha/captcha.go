@@ -23,8 +23,9 @@ type CaptchaProvider interface {
 	// Verify 验证前端提交的ticket
 	// config: 验证码配置
 	// ticketData: 前端验证成功后返回的凭证数据（各提供商字段不同）
+	// userIP: 用户客户端IP地址
 	// 返回: 验证结果
-	Verify(config *model.CaptchaConfig, ticketData map[string]string) (*VerifyResult, error)
+	Verify(config *model.CaptchaConfig, ticketData map[string]string, userIP string) (*VerifyResult, error)
 }
 
 // VerifyResult 验证结果

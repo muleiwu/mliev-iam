@@ -142,7 +142,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 
 	// 0. 验证码校验
 	captchaManager := captcha.NewManager(helper.GetDatabase())
-	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket); err != nil {
+	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
@@ -215,7 +215,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 
 	// 0. 验证码校验
 	captchaManager := captcha.NewManager(helper.GetDatabase())
-	if err := captchaManager.ValidateForScene("register", req.CaptchaTicket); err != nil {
+	if err := captchaManager.ValidateForScene("register", req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
@@ -588,7 +588,7 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx *gin.Context, helper in
 		captchaScene = "sendEmail"
 	}
 	captchaManager := captcha.NewManager(helper.GetDatabase())
-	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket); err != nil {
+	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
@@ -771,7 +771,7 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx *gin.Context, h
 		captchaScene = "sendEmail"
 	}
 	captchaManager := captcha.NewManager(helper.GetDatabase())
-	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket); err != nil {
+	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
