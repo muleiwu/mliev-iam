@@ -55,6 +55,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		req.CodeChallengeMethod,
 	)
 	if err != nil {
+		helper.GetLogger().Error(fmt.Sprintf("创建会话失败 %s -> %v", err.Error(), err))
 		oc.redirectWithError(c, req.RedirectURI, "server_error", "创建会话失败", req.State)
 		return
 	}
