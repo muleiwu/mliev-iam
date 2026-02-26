@@ -123,6 +123,7 @@ func (s *OIDCSessionService) MarkAsAuthenticated(sessionID string, userID uint) 
 	session.UserID = &userID
 	session.IsAuthenticated = true
 	session.AuthTime = time.Now()
+	session.ExpiresAt = time.Now().Add(30 * time.Minute) // 延长会话时间到30分钟
 
 	return s.UpdateSession(session)
 }

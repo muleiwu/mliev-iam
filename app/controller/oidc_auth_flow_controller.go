@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
@@ -25,6 +26,7 @@ type LoginRequest struct {
 	Password      string             `json:"password" binding:"required"`
 	SessionID     string             `json:"sessionId" binding:"required"`
 	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
+	RememberMe    bool               `json:"rememberMe"`              // 记住我
 }
 
 // RegisterRequest 注册请求
@@ -60,6 +62,8 @@ type LoginResponse struct {
 		Username string `json:"username"`
 		RealName string `json:"realName"`
 	} `json:"userInfo,omitempty"`
+	AccessToken string `json:"accessToken,omitempty"` // 访问令牌
+	ExpiresIn   int64  `json:"expiresIn,omitempty"`   // 过期时间（秒）
 }
 
 // ConsentRequest 授权确认请求
@@ -173,10 +177,52 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 		return
 	}
 
-	// 4. 检查 scope 是否需要用户完善信息
+	// 4. 立即生成 OIDC Token
+	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
+	appService := service.NewApplicationService(helper.GetDatabase())
+	app, err := appService.GetApplicationByClientID(session.ClientID)
+	if err != nil {
+		helper.GetLogger().Error(fmt.Sprintf("获取应用信息失败: %v", err))
+		// 不阻塞登录流程，继续执行
+	}
+
+	var accessToken string
+	var expiresIn int64
+
+	if app != nil {
+		issuer := utils.GetBaseURL(ctx, helper, "/oidc")
+		scopes := authService.ParseScopes(session.Scope)
+		tokenResponse, err := authService.GenerateTokens(app, user.ID, scopes, session.Nonce, issuer)
+		if err != nil {
+			helper.GetLogger().Error(fmt.Sprintf("生成 Token 失败: %v", err))
+			// 不阻塞登录流程，继续执行
+		} else {
+			accessToken = tokenResponse.AccessToken
+			expiresIn = tokenResponse.ExpiresIn
+
+			// 5. 设置 Refresh Token 到 HttpOnly Cookie
+			maxAge := 0 // 默认会话期
+			if req.RememberMe {
+				maxAge = 7 * 24 * 60 * 60 // 7天
+			}
+
+			ctx.SetCookie(
+				"refresh_token",
+				tokenResponse.RefreshToken,
+				maxAge,
+				"/",
+				"",
+				ctx.Request.TLS != nil, // Secure
+				true,                   // HttpOnly
+			)
+			ctx.SetSameSite(http.SameSiteStrictMode)
+		}
+	}
+
+	// 6. 检查 scope 是否需要用户完善信息
 	missingFields := c.checkMissingUserInfo(session.Scope, user)
 
-	// 5. 返回成功响应
+	// 7. 返回成功响应
 	response := LoginResponse{
 		Success: true,
 		Message: "登录成功",
@@ -189,6 +235,8 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 			Username: user.Username,
 			RealName: user.RealName,
 		},
+		AccessToken: accessToken, // 返回访问令牌
+		ExpiresIn:   expiresIn,   // 返回过期时间
 	}
 
 	if len(missingFields) > 0 {
@@ -808,4 +856,79 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx *gin.Context, h
 	}
 
 	c.Success(ctx, response)
+}
+
+// RefreshTokenResponse Token 刷新响应
+type RefreshTokenResponse struct {
+	AccessToken string `json:"accessToken"`
+	ExpiresIn   int64  `json:"expiresIn"`
+	TokenType   string `json:"tokenType"`
+}
+
+// RefreshToken 刷新访问令牌
+// POST /api/auth/refresh
+func (c OIDCAuthFlowController) RefreshToken(ctx *gin.Context, helper interfaces.HelperInterface) {
+	// 1. 从 Cookie 获取 Refresh Token
+	refreshToken, err := ctx.Cookie("refresh_token")
+	if err != nil || refreshToken == "" {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "未找到刷新令牌")
+		return
+	}
+
+	// 2. 验证 Refresh Token
+	tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
+	oldToken, err := tokenDAO.GetValidByRefreshToken(refreshToken)
+	if err != nil {
+		// Token 无效，清除 Cookie
+		ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
+		c.Error(ctx, constants.ErrCodeUnauthorized, "刷新令牌无效或已过期")
+		return
+	}
+
+	// 3. 生成新 Token
+	appService := service.NewApplicationService(helper.GetDatabase())
+	app, err := appService.GetApplicationByClientID(oldToken.ClientID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "获取应用信息失败: "+err.Error())
+		return
+	}
+
+	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
+	issuer := utils.GetBaseURL(ctx, helper, "/oidc")
+	newTokenResponse, err := authService.GenerateTokens(app, oldToken.UserID, oldToken.Scopes, "", issuer)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "生成新令牌失败: "+err.Error())
+		return
+	}
+
+	// 4. 撤销旧 Token
+	if err := tokenDAO.RevokeByRefreshToken(oldToken.RefreshToken); err != nil {
+		helper.GetLogger().Error(fmt.Sprintf("撤销旧令牌失败: %v", err))
+		// 不阻塞流程，继续执行
+	}
+
+	// 5. 更新 Cookie
+	ctx.SetCookie("refresh_token", newTokenResponse.RefreshToken, 7*24*60*60, "/", "", ctx.Request.TLS != nil, true)
+	ctx.SetSameSite(http.SameSiteStrictMode)
+
+	// 6. 返回新 Access Token
+	c.Success(ctx, RefreshTokenResponse{
+		AccessToken: newTokenResponse.AccessToken,
+		ExpiresIn:   newTokenResponse.ExpiresIn,
+		TokenType:   newTokenResponse.TokenType,
+	})
+}
+
+// Logout 登出接口
+// POST /api/auth/logout
+func (c OIDCAuthFlowController) Logout(ctx *gin.Context, helper interfaces.HelperInterface) {
+	refreshToken, err := ctx.Cookie("refresh_token")
+	if err == nil && refreshToken != "" {
+		tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
+		if err := tokenDAO.RevokeByRefreshToken(refreshToken); err != nil {
+			helper.GetLogger().Error(fmt.Sprintf("撤销令牌失败: %v", err))
+		}
+	}
+	ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
+	c.Success(ctx, gin.H{"success": true, "message": "登出成功"})
 }

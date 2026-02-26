@@ -150,7 +150,7 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 	}
 
 	// 6. 生成令牌
-	return s.generateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer)
+	return s.GenerateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer)
 }
 
 // ExchangeClientCredentials 客户端凭据流程
@@ -272,7 +272,7 @@ func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest, issuer st
 	}
 
 	// 7. 生成新令牌
-	return s.generateTokens(app, token.UserID, scopes, "", issuer)
+	return s.GenerateTokens(app, token.UserID, scopes, "", issuer)
 }
 
 // IntrospectToken 令牌内省
@@ -394,7 +394,7 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 // handleImplicitFlow 处理隐式流程
 func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string, issuer string) (*dto.AuthorizeResponse, error) {
 	// 隐式流程直接生成访问令牌
-	tokenResponse, err := s.generateTokens(app, user.ID, scopes, req.Nonce, issuer)
+	tokenResponse, err := s.GenerateTokens(app, user.ID, scopes, req.Nonce, issuer)
 	if err != nil {
 		return s.errorResponse("server_error", "服务器错误", req.State), nil
 	}
@@ -488,7 +488,8 @@ func (s *OIDCAuthorizationService) validateRefreshScopes(originalScopes, request
 }
 
 // generateTokens 生成令牌
-func (s *OIDCAuthorizationService) generateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
+// GenerateTokens 生成访问令牌和刷新令牌（导出以供登录接口使用）
+func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
 	// 生成 JWT 格式的访问令牌
 	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer)
 	if err != nil {
