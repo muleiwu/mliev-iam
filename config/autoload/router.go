@@ -309,13 +309,6 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					apiOidc.POST("/complete-profile", deps.WrapHandler(controller.OIDCAuthFlowController{}.CompleteProfile))                             // 完善信息接口
 					apiOidc.GET("/register-settings", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetRegisterSettings))                         // 获取注册字段配置（公开接口）
 				}
-
-				// 认证路由组（Token 刷新和登出）
-				apiAuth := api.Group("/auth")
-				{
-					apiAuth.POST("/refresh", deps.WrapHandler(controller.OIDCAuthFlowController{}.RefreshToken)) // 刷新访问令牌
-					apiAuth.POST("/logout", deps.WrapHandler(controller.OIDCAuthFlowController{}.Logout))        // 登出
-				}
 			}
 
 			// 社会化登录路由组
