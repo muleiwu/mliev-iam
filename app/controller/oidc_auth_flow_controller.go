@@ -988,7 +988,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.GetSession(sessionID)
 	if err != nil {
-		ctx.JSON(200, FlowStatusResponse{
+		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
 			Status:    "error",
 			Error: &FlowStatusError{
@@ -1003,7 +1003,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 	appService := service.NewApplicationService(helper.GetDatabase())
 	app, err := appService.GetApplicationByClientID(session.ClientID)
 	if err != nil {
-		ctx.JSON(200, FlowStatusResponse{
+		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
 			Status:    "error",
 			Error: &FlowStatusError{
@@ -1022,7 +1022,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 
 	// 3. 如果未认证，返回 needs_login
 	if !session.IsAuthenticated || session.UserID == nil {
-		ctx.JSON(200, FlowStatusResponse{
+		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
 			Status:    "needs_login",
 			Prompt:    session.Prompt,
@@ -1035,7 +1035,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 	userService := service.NewUserService(helper.GetDatabase())
 	user, err := userService.GetUserByID(*session.UserID)
 	if err != nil {
-		ctx.JSON(200, FlowStatusResponse{
+		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
 			Status:    "error",
 			Error: &FlowStatusError{
@@ -1055,7 +1055,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 	// 5. 检查是否需要补充信息
 	missingFields := c.checkMissingUserInfo(session.Scope, user)
 	if len(missingFields) > 0 {
-		ctx.JSON(200, FlowStatusResponse{
+		c.Success(ctx, FlowStatusResponse{
 			SessionID:     sessionID,
 			Status:        "needs_profile",
 			Prompt:        session.Prompt,
@@ -1068,7 +1068,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 
 	// 6. 信息完整，需要授权确认
 	scopes := c.parseScopesForFlow(session.Scope)
-	ctx.JSON(200, FlowStatusResponse{
+	c.Success(ctx, FlowStatusResponse{
 		SessionID: sessionID,
 		Status:    "needs_consent",
 		Prompt:    session.Prompt,
