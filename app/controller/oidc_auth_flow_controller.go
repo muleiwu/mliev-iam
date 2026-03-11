@@ -936,6 +936,171 @@ func (c OIDCAuthFlowController) Logout(ctx *gin.Context, helper interfaces.Helpe
 	c.Success(ctx, gin.H{"success": true, "message": "登出成功"})
 }
 
+// FlowStatusResponse 流程状态响应
+type FlowStatusResponse struct {
+	SessionID     string            `json:"sessionId"`
+	Status        string            `json:"status"` // needs_login | needs_consent | needs_profile | error
+	Prompt        string            `json:"prompt,omitempty"`
+	Client        *FlowStatusClient `json:"client,omitempty"`
+	User          *FlowStatusUser   `json:"user,omitempty"`
+	Scopes        []FlowStatusScope `json:"scopes,omitempty"`
+	MissingFields []string          `json:"missingFields,omitempty"`
+	Error         *FlowStatusError  `json:"error,omitempty"`
+}
+
+// FlowStatusClient 流程状态中的客户端信息
+type FlowStatusClient struct {
+	ClientID    string `json:"clientId"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Logo        string `json:"logo,omitempty"`
+}
+
+// FlowStatusUser 流程状态中的用户信息
+type FlowStatusUser struct {
+	ID       uint   `json:"id"`
+	Username string `json:"username"`
+	RealName string `json:"realName"`
+}
+
+// FlowStatusScope 流程状态中的授权范围信息
+type FlowStatusScope struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// FlowStatusError 流程错误信息
+type FlowStatusError struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+}
+
+// GetFlowStatus 获取 OIDC 授权流程当前状态
+// GET /api/oidc/flow-status
+func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interfaces.HelperInterface) {
+	sessionID := ctx.Query("session_id")
+	if sessionID == "" {
+		c.Error(ctx, constants.ErrCodeBadRequest, "缺少session_id参数")
+		return
+	}
+
+	// 1. 获取会话
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(sessionID)
+	if err != nil {
+		ctx.JSON(200, FlowStatusResponse{
+			SessionID: sessionID,
+			Status:    "error",
+			Error: &FlowStatusError{
+				Code:        "session_expired",
+				Description: "会话已过期或不存在，请重新发起授权",
+			},
+		})
+		return
+	}
+
+	// 2. 获取客户端信息（所有状态都需要）
+	appService := service.NewApplicationService(helper.GetDatabase())
+	app, err := appService.GetApplicationByClientID(session.ClientID)
+	if err != nil {
+		ctx.JSON(200, FlowStatusResponse{
+			SessionID: sessionID,
+			Status:    "error",
+			Error: &FlowStatusError{
+				Code:        "invalid_client",
+				Description: "客户端配置错误",
+			},
+		})
+		return
+	}
+
+	clientInfo := &FlowStatusClient{
+		ClientID:    session.ClientID,
+		Name:        app.Name,
+		Description: app.Description,
+	}
+
+	// 3. 如果未认证，返回 needs_login
+	if !session.IsAuthenticated || session.UserID == nil {
+		ctx.JSON(200, FlowStatusResponse{
+			SessionID: sessionID,
+			Status:    "needs_login",
+			Prompt:    session.Prompt,
+			Client:    clientInfo,
+		})
+		return
+	}
+
+	// 4. 已认证，获取用户信息
+	userService := service.NewUserService(helper.GetDatabase())
+	user, err := userService.GetUserByID(*session.UserID)
+	if err != nil {
+		ctx.JSON(200, FlowStatusResponse{
+			SessionID: sessionID,
+			Status:    "error",
+			Error: &FlowStatusError{
+				Code:        "user_not_found",
+				Description: "用户不存在或已被禁用",
+			},
+		})
+		return
+	}
+
+	userInfo := &FlowStatusUser{
+		ID:       user.ID,
+		Username: user.Username,
+		RealName: user.RealName,
+	}
+
+	// 5. 检查是否需要补充信息
+	missingFields := c.checkMissingUserInfo(session.Scope, user)
+	if len(missingFields) > 0 {
+		ctx.JSON(200, FlowStatusResponse{
+			SessionID:     sessionID,
+			Status:        "needs_profile",
+			Prompt:        session.Prompt,
+			Client:        clientInfo,
+			User:          userInfo,
+			MissingFields: missingFields,
+		})
+		return
+	}
+
+	// 6. 信息完整，需要授权确认
+	scopes := c.parseScopesForFlow(session.Scope)
+	ctx.JSON(200, FlowStatusResponse{
+		SessionID: sessionID,
+		Status:    "needs_consent",
+		Prompt:    session.Prompt,
+		Client:    clientInfo,
+		User:      userInfo,
+		Scopes:    scopes,
+	})
+}
+
+// parseScopesForFlow 解析 scope 并返回流程状态所需的描述列表
+func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string) []FlowStatusScope {
+	scopeDescriptions := map[string]string{
+		"openid":         "验证您的身份",
+		"profile":        "访问您的基本资料（昵称、头像等）",
+		"email":          "访问您的电子邮件地址",
+		"phone":          "访问您的手机号码",
+		"address":        "访问您的地址信息",
+		"offline_access": "在您离线时访问您的数据",
+	}
+
+	var result []FlowStatusScope
+	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
+	for _, scope := range scopeList {
+		desc, ok := scopeDescriptions[scope]
+		if !ok {
+			desc = "访问 " + scope + " 权限"
+		}
+		result = append(result, FlowStatusScope{Name: scope, Description: desc})
+	}
+	return result
+}
+
 // InitSessionRequest 初始化OIDC会话请求（用于iframe嵌入方式，无需浏览器跳转）
 type InitSessionRequest struct {
 	ClientID            string `json:"clientId" binding:"required"`
@@ -982,6 +1147,7 @@ func (c OIDCAuthFlowController) InitSession(ctx *gin.Context, helper interfaces.
 		req.ResponseType,
 		req.CodeChallenge,
 		req.CodeChallengeMethod,
+		"",
 	)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "创建会话失败: "+err.Error())
@@ -989,7 +1155,7 @@ func (c OIDCAuthFlowController) InitSession(ctx *gin.Context, helper interfaces.
 	}
 
 	// 3. 构建登录表单URL（供iframe src使用）
-	loginURL := "/auth/#/oidc/login-form?session_id=" + session.SessionID
+	loginURL := "/auth/#/oidc/authorize?session_id=" + session.SessionID
 
 	c.Success(ctx, InitSessionResponse{
 		SessionID: session.SessionID,

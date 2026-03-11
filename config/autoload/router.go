@@ -304,6 +304,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))                                                  // 登录接口
 					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))                                            // 注册接口
 					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo))                                         // 获取授权信息接口
+					apiOidc.GET("/flow-status", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetFlowStatus))                                     // 获取授权流程状态（统一入口编排器使用）
 					apiOidc.POST("/send-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendVerificationCode))                  // 发送验证码接口（需要认证）
 					apiOidc.POST("/send-register-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)) // 发送注册验证码接口（公开）
 					apiOidc.POST("/complete-profile", deps.WrapHandler(controller.OIDCAuthFlowController{}.CompleteProfile))                             // 完善信息接口

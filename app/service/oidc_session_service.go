@@ -22,6 +22,7 @@ type OIDCSession struct {
 	ResponseType        string    `json:"response_type"`
 	CodeChallenge       string    `json:"code_challenge,omitempty"`
 	CodeChallengeMethod string    `json:"code_challenge_method,omitempty"`
+	Prompt              string    `json:"prompt,omitempty"`
 	UserID              *uint     `json:"user_id,omitempty"`
 	IsAuthenticated     bool      `json:"is_authenticated"`
 	IsConsentGranted    bool      `json:"is_consent_granted"`
@@ -50,6 +51,7 @@ func NewOIDCSessionService(redisClient *redis.Client) *OIDCSessionService {
 func (s *OIDCSessionService) CreateSession(
 	clientID, redirectURI, scope, state, nonce, responseType string,
 	codeChallenge, codeChallengeMethod string,
+	prompt string,
 ) (*OIDCSession, error) {
 	sessionID, err := s.generateSessionID()
 	if err != nil {
@@ -67,6 +69,7 @@ func (s *OIDCSessionService) CreateSession(
 		ResponseType:        responseType,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		Prompt:              prompt,
 		IsAuthenticated:     false,
 		IsConsentGranted:    false,
 		CreatedAt:           now,

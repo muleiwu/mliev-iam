@@ -25,7 +25,6 @@ type OIDCController struct {
 func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInterface) {
 	var req dto.AuthorizeRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		// 对于授权端点的错误，需要重定向到客户端
 		if req.RedirectURI == "" {
 			oc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 			return
@@ -42,7 +41,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		return
 	}
 
-	// 2. 创建OIDC会话
+	// 2. 创建 OIDC 会话（携带 prompt 参数）
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.CreateSession(
 		req.ClientID,
@@ -53,6 +52,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		req.ResponseType,
 		req.CodeChallenge,
 		req.CodeChallengeMethod,
+		req.Prompt,
 	)
 	if err != nil {
 		helper.GetLogger().Error(fmt.Sprintf("创建会话失败 %s -> %v", err.Error(), err))
@@ -60,53 +60,95 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		return
 	}
 
-	// 3. 检查 OIDC prompt 参数
-	if req.Prompt == "login" {
-		// prompt=login 要求强制重新认证
-		loginURL := "/auth/#/oidc/login?session_id=" + session.SessionID
-		c.Redirect(http.StatusFound, loginURL)
-		return
-	}
+	// 3. prompt=none：不允许显示任何 UI
+	if req.Prompt == "none" {
+		refreshToken, cookieErr := c.Cookie("refresh_token")
+		if cookieErr == nil && refreshToken != "" {
+			tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
+			oldToken, tokenErr := tokenDAO.GetValidByRefreshToken(refreshToken)
+			if tokenErr == nil && oldToken != nil {
+				userService := service.NewUserService(helper.GetDatabase())
+				user, userErr := userService.GetUserByID(oldToken.UserID)
+				if userErr == nil && user != nil {
+					// 检查是否需要补充信息：需要 UI 则返回 interaction_required
+					authFlowCtrl := OIDCAuthFlowController{}
+					missingFields := authFlowCtrl.checkMissingUserInfo(req.Scope, user)
+					if len(missingFields) > 0 {
+						sessionService.DeleteSession(session.SessionID)
+						oc.redirectWithError(c, req.RedirectURI, "interaction_required", "需要用户补充信息", req.State)
+						return
+					}
 
-	// 4. 检查 refresh_token cookie，实现 SSO 会话持久化
-	refreshToken, cookieErr := c.Cookie("refresh_token")
-	if cookieErr == nil && refreshToken != "" {
-		tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
-		oldToken, tokenErr := tokenDAO.GetValidByRefreshToken(refreshToken)
-		if tokenErr == nil && oldToken != nil {
-			userService := service.NewUserService(helper.GetDatabase())
-			user, userErr := userService.GetUserByID(oldToken.UserID)
-			if userErr == nil && user != nil {
-				// 预标记 OIDC 会话为已认证
-				sessionService.MarkAsAuthenticated(session.SessionID, oldToken.UserID)
-				helper.GetLogger().Info(fmt.Sprintf("SSO: 用户 %d 通过 refresh_token 自动认证", oldToken.UserID))
+					// 静默完成授权：标记认证 + 授权 + 生成授权码
+					if err := sessionService.MarkAsAuthenticated(session.SessionID, oldToken.UserID); err != nil {
+						sessionService.DeleteSession(session.SessionID)
+						oc.redirectWithError(c, req.RedirectURI, "server_error", "更新会话失败", req.State)
+						return
+					}
+					if err := sessionService.MarkAsConsentGranted(session.SessionID); err != nil {
+						sessionService.DeleteSession(session.SessionID)
+						oc.redirectWithError(c, req.RedirectURI, "server_error", "更新会话失败", req.State)
+						return
+					}
 
-				// 检查是否需要补充信息
-				authFlowCtrl := OIDCAuthFlowController{}
-				missingFields := authFlowCtrl.checkMissingUserInfo(req.Scope, user)
-				if len(missingFields) > 0 {
-					completeURL := "/auth/#/oidc/complete-profile?session_id=" + session.SessionID
-					c.Redirect(http.StatusFound, completeURL)
+					authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
+					issuer := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", session.ClientID))
+					authReq := &dto.AuthorizeRequest{
+						ResponseType:        session.ResponseType,
+						ClientID:            session.ClientID,
+						RedirectURI:         session.RedirectURI,
+						Scope:               session.Scope,
+						State:               session.State,
+						Nonce:               session.Nonce,
+						CodeChallenge:       session.CodeChallenge,
+						CodeChallengeMethod: session.CodeChallengeMethod,
+					}
+					authResponse, authErr := authService.ProcessAuthorize(authReq, oldToken.UserID, issuer)
+					sessionService.DeleteSession(session.SessionID)
+					if authErr != nil {
+						oc.redirectWithError(c, req.RedirectURI, "server_error", "处理授权失败", req.State)
+						return
+					}
+					if authResponse.Error != "" {
+						oc.redirectWithError(c, req.RedirectURI, authResponse.Error, authResponse.ErrorDescription, req.State)
+						return
+					}
+
+					redirectURL := session.RedirectURI + "?code=" + authResponse.Code
+					if session.State != "" {
+						redirectURL += "&state=" + session.State
+					}
+					c.Redirect(http.StatusFound, redirectURL)
 					return
 				}
-
-				// 直接跳转授权确认页
-				consentURL := "/auth/#/oidc/consent?session_id=" + session.SessionID
-				c.Redirect(http.StatusFound, consentURL)
-				return
 			}
 		}
-	}
-
-	// 5. prompt=none: 无法静默认证则返回错误
-	if req.Prompt == "none" {
+		// 无有效 SSO 会话
+		sessionService.DeleteSession(session.SessionID)
 		oc.redirectWithError(c, req.RedirectURI, "login_required", "用户未登录", req.State)
 		return
 	}
 
-	// 6. 用户未登录，重定向到登录页面
-	loginURL := "/auth/#/oidc/login?session_id=" + session.SessionID
-	c.Redirect(http.StatusFound, loginURL)
+	// 4. 非 prompt=login 时尝试 SSO 自动认证
+	if req.Prompt != "login" {
+		refreshToken, cookieErr := c.Cookie("refresh_token")
+		if cookieErr == nil && refreshToken != "" {
+			tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
+			oldToken, tokenErr := tokenDAO.GetValidByRefreshToken(refreshToken)
+			if tokenErr == nil && oldToken != nil {
+				userService := service.NewUserService(helper.GetDatabase())
+				user, userErr := userService.GetUserByID(oldToken.UserID)
+				if userErr == nil && user != nil {
+					sessionService.MarkAsAuthenticated(session.SessionID, oldToken.UserID)
+					helper.GetLogger().Info(fmt.Sprintf("SSO: 用户 %d 通过 refresh_token 自动认证", oldToken.UserID))
+				}
+			}
+		}
+	}
+
+	// 5. 重定向到统一的前端授权入口（编排器）
+	authorizeURL := "/auth/#/oidc/authorize?session_id=" + session.SessionID
+	c.Redirect(http.StatusFound, authorizeURL)
 }
 
 // Token OIDC令牌端点
