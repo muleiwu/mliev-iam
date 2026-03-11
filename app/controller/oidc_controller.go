@@ -3,10 +3,10 @@ package controller
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
@@ -60,22 +60,51 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 		return
 	}
 
-	// 3. 检查用户是否已登录（从session或cookie中获取）
-	// 这里简化处理，检查是否有userId的查询参数（用于测试）
-	userIDStr := c.Query("userId")
-	if userIDStr != "" {
-		// 用户已提供ID（测试用途），直接标记为已认证
-		userID, err := strconv.ParseUint(userIDStr, 10, 32)
-		if err == nil {
-			sessionService.MarkAsAuthenticated(session.SessionID, uint(userID))
-			// 重定向到授权确认页面
-			consentURL := "/auth/#/oidc/consent?session_id=" + session.SessionID
-			c.Redirect(http.StatusFound, consentURL)
-			return
+	// 3. 检查 OIDC prompt 参数
+	if req.Prompt == "login" {
+		// prompt=login 要求强制重新认证
+		loginURL := "/auth/#/oidc/login?session_id=" + session.SessionID
+		c.Redirect(http.StatusFound, loginURL)
+		return
+	}
+
+	// 4. 检查 refresh_token cookie，实现 SSO 会话持久化
+	refreshToken, cookieErr := c.Cookie("refresh_token")
+	if cookieErr == nil && refreshToken != "" {
+		tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
+		oldToken, tokenErr := tokenDAO.GetValidByRefreshToken(refreshToken)
+		if tokenErr == nil && oldToken != nil {
+			userService := service.NewUserService(helper.GetDatabase())
+			user, userErr := userService.GetUserByID(oldToken.UserID)
+			if userErr == nil && user != nil {
+				// 预标记 OIDC 会话为已认证
+				sessionService.MarkAsAuthenticated(session.SessionID, oldToken.UserID)
+				helper.GetLogger().Info(fmt.Sprintf("SSO: 用户 %d 通过 refresh_token 自动认证", oldToken.UserID))
+
+				// 检查是否需要补充信息
+				authFlowCtrl := OIDCAuthFlowController{}
+				missingFields := authFlowCtrl.checkMissingUserInfo(req.Scope, user)
+				if len(missingFields) > 0 {
+					completeURL := "/auth/#/oidc/complete-profile?session_id=" + session.SessionID
+					c.Redirect(http.StatusFound, completeURL)
+					return
+				}
+
+				// 直接跳转授权确认页
+				consentURL := "/auth/#/oidc/consent?session_id=" + session.SessionID
+				c.Redirect(http.StatusFound, consentURL)
+				return
+			}
 		}
 	}
 
-	// 4. 用户未登录，重定向到登录页面
+	// 5. prompt=none: 无法静默认证则返回错误
+	if req.Prompt == "none" {
+		oc.redirectWithError(c, req.RedirectURI, "login_required", "用户未登录", req.State)
+		return
+	}
+
+	// 6. 用户未登录，重定向到登录页面
 	loginURL := "/auth/#/oidc/login?session_id=" + session.SessionID
 	c.Redirect(http.StatusFound, loginURL)
 }
