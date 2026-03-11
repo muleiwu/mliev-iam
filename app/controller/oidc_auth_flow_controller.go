@@ -206,16 +206,15 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 				maxAge = 7 * 24 * 60 * 60 // 7天
 			}
 
-			ctx.SetCookie(
-				"refresh_token",
-				tokenResponse.RefreshToken,
-				maxAge,
-				"/",
-				"",
-				ctx.Request.TLS != nil, // Secure
-				true,                   // HttpOnly
-			)
-			ctx.SetSameSite(http.SameSiteStrictMode)
+			isSecure := ctx.Request.TLS != nil
+			// SameSite 必须在 SetCookie 之前调用才能生效
+			// HTTPS 使用 None 支持 iframe 跨域场景；HTTP 使用 Lax（开发环境兼容）
+			if isSecure {
+				ctx.SetSameSite(http.SameSiteNoneMode)
+			} else {
+				ctx.SetSameSite(http.SameSiteLaxMode)
+			}
+			ctx.SetCookie("refresh_token", tokenResponse.RefreshToken, maxAge, "/", "", isSecure, true)
 		}
 	}
 
@@ -361,9 +360,8 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 }
 
 // Consent OIDC授权确认接口
-// POST /api/oidc/consent
+// POST /webhook/oidc/consent
 func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.HelperInterface) {
-	appUuid := ctx.Param("uuid")
 	var req ConsentRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -424,8 +422,8 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 		CodeChallengeMethod: session.CodeChallengeMethod,
 	}
 
-	// 获取issuer，确保与Discovery端点一致
-	issuer := utils.GetBaseURL(ctx, helper, fmt.Sprintf("/oidc/%s", appUuid))
+	// 获取issuer，确保与Discovery端点一致（从session中获取clientID，而非URL参数）
+	issuer := utils.GetBaseURL(ctx, helper, fmt.Sprintf("/oidc/%s", session.ClientID))
 
 	authResponse, err := authService.ProcessAuthorize(authReq, *session.UserID, issuer)
 	if err != nil {
@@ -908,8 +906,13 @@ func (c OIDCAuthFlowController) RefreshToken(ctx *gin.Context, helper interfaces
 	}
 
 	// 5. 更新 Cookie
-	ctx.SetCookie("refresh_token", newTokenResponse.RefreshToken, 7*24*60*60, "/", "", ctx.Request.TLS != nil, true)
-	ctx.SetSameSite(http.SameSiteStrictMode)
+	isSecure := ctx.Request.TLS != nil
+	if isSecure {
+		ctx.SetSameSite(http.SameSiteNoneMode)
+	} else {
+		ctx.SetSameSite(http.SameSiteLaxMode)
+	}
+	ctx.SetCookie("refresh_token", newTokenResponse.RefreshToken, 7*24*60*60, "/", "", isSecure, true)
 
 	// 6. 返回新 Access Token
 	c.Success(ctx, RefreshTokenResponse{
@@ -931,4 +934,65 @@ func (c OIDCAuthFlowController) Logout(ctx *gin.Context, helper interfaces.Helpe
 	}
 	ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
 	c.Success(ctx, gin.H{"success": true, "message": "登出成功"})
+}
+
+// InitSessionRequest 初始化OIDC会话请求（用于iframe嵌入方式，无需浏览器跳转）
+type InitSessionRequest struct {
+	ClientID            string `json:"clientId" binding:"required"`
+	RedirectURI         string `json:"redirectUri" binding:"required"`
+	Scope               string `json:"scope" binding:"required"`
+	ResponseType        string `json:"responseType" binding:"required"`
+	State               string `json:"state"`
+	Nonce               string `json:"nonce"`
+	CodeChallenge       string `json:"codeChallenge"`
+	CodeChallengeMethod string `json:"codeChallengeMethod"`
+}
+
+// InitSessionResponse 初始化OIDC会话响应
+type InitSessionResponse struct {
+	SessionID string `json:"sessionId"`
+	LoginURL  string `json:"loginUrl"` // 供 iframe src 使用的登录表单 URL
+}
+
+// InitSession 初始化OIDC会话
+// POST /api/oidc/init-session
+// 用于iframe嵌入方式：第三方调用此接口获取session_id，然后将loginUrl赋给iframe src
+func (c OIDCAuthFlowController) InitSession(ctx *gin.Context, helper interfaces.HelperInterface) {
+	var req InitSessionRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	// 1. 验证客户端应用是否存在
+	appService := service.NewApplicationService(helper.GetDatabase())
+	if _, err := appService.GetApplicationByClientID(req.ClientID); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的客户端ID")
+		return
+	}
+
+	// 2. 创建OIDC会话
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.CreateSession(
+		req.ClientID,
+		req.RedirectURI,
+		req.Scope,
+		req.State,
+		req.Nonce,
+		req.ResponseType,
+		req.CodeChallenge,
+		req.CodeChallengeMethod,
+	)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "创建会话失败: "+err.Error())
+		return
+	}
+
+	// 3. 构建登录表单URL（供iframe src使用）
+	loginURL := "/auth/#/oidc/login-form?session_id=" + session.SessionID
+
+	c.Success(ctx, InitSessionResponse{
+		SessionID: session.SessionID,
+		LoginURL:  loginURL,
+	})
 }

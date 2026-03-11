@@ -308,6 +308,7 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					apiOidc.POST("/send-register-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)) // 发送注册验证码接口（公开）
 					apiOidc.POST("/complete-profile", deps.WrapHandler(controller.OIDCAuthFlowController{}.CompleteProfile))                             // 完善信息接口
 					apiOidc.GET("/register-settings", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetRegisterSettings))                         // 获取注册字段配置（公开接口）
+					apiOidc.POST("/init-session", deps.WrapHandler(controller.OIDCAuthFlowController{}.InitSession))                                     // 初始化OIDC会话（用于iframe嵌入方式，无需浏览器跳转）
 				}
 			}
 
