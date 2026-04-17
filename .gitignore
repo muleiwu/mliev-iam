@@ -11,3 +11,7 @@ config/config.yaml
 .pnpm-store/
 /docs/
 .claude/
+/WARP.md
+/config/mliev_iam.db
+/scripts/reload-config.sh
+/admin-web/git_update.sh
