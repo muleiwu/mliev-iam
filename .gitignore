@@ -9,3 +9,5 @@ config/config.yaml
 /static/install/
 /.kiro/
 .pnpm-store/
+/docs/
+.claude/

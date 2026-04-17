@@ -2,10 +2,12 @@ package service
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
 
@@ -71,9 +73,16 @@ func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, u
 		return s.errorResponse("invalid_scope", "无效的作用域", req.State), nil
 	}
 
-	// 5. 验证PKCE（如果需要）
-	if handler.RequiresPKCE(app) && req.CodeChallenge == "" {
-		return s.errorResponse("invalid_request", "需要PKCE验证", req.State), nil
+	// 5. 验证PKCE
+	// 公开客户端强制 PKCE；机密客户端若配置 requirePkce 则强制；不强制时若提供也需格式合规
+	mustPKCE := handler.RequiresPKCE(app) || handler.IsPublicClient(app)
+	if mustPKCE && req.CodeChallenge == "" {
+		return s.errorResponse("invalid_request", "缺少 code_challenge（PKCE 必选）", req.State), nil
+	}
+	if req.CodeChallenge != "" {
+		if err := validateCodeChallengeFormat(req.CodeChallenge, req.CodeChallengeMethod); err != nil {
+			return s.errorResponse("invalid_request", err.Error(), req.State), nil
+		}
 	}
 
 	// 6. 验证用户
@@ -118,39 +127,48 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 		return nil, constants.ErrInvalidClient
 	}
 
-	// 3. 获取授权码
-	authCode, err := s.authCodeDAO.GetValidByCode(req.Code)
+	// 3. 原子消费授权码（RFC 6749 §4.1.2：code 必须一次性）
+	//    若消费失败且 code 曾存在过，则将原先由该 code 签发的 token 全部撤销
+	authCode, err := s.authCodeDAO.ConsumeAtomic(req.Code)
 	if err != nil {
-		// 添加调试日志
-		fmt.Printf("[DEBUG] 授权码验证失败 - Code: %s, Error: %v\n", req.Code, err)
-
-		// 尝试查询授权码是否存在（不管是否过期或已使用）
-		existingCode, _ := s.authCodeDAO.GetByCode(req.Code)
-		if existingCode != nil {
-			fmt.Printf("[DEBUG] 授权码存在但无效 - IsUsed: %v, Expired: %v, ExpiresAt: %s, Now: %s\n",
-				existingCode.IsUsed, existingCode.IsExpired(),
-				existingCode.ExpiresAt.Format("2006-01-02 15:04:05"),
-				time.Now().Format("2006-01-02 15:04:05"))
-		} else {
-			fmt.Printf("[DEBUG] 授权码不存在于数据库中\n")
+		if errors.Is(err, dao.ErrAuthorizationCodeConsumed) {
+			if existing, _ := s.authCodeDAO.GetByCode(req.Code); existing != nil {
+				// 检测到 code 复用，撤销所有基于该 code 的 token
+				_ = s.tokenDAO.RevokeByAuthorizationCode(existing.ID)
+				if logger := helper.GetHelper().GetLogger(); logger != nil {
+					logger.Warn(fmt.Sprintf("authorization_code replay detected: fp=%s", codeFingerprint(req.Code)))
+				}
+			}
+			return nil, constants.ErrInvalidGrant
 		}
-
 		return nil, constants.ErrInvalidGrant
 	}
 
-	// 4. 验证授权码
+	// 4. 校验授权码的上下文（client_id、redirect_uri、PKCE）
 	if err := s.validateAuthorizationCode(authCode, req, app); err != nil {
+		// 上下文不匹配视为潜在滥用，撤销该 code 相关 token
+		_ = s.tokenDAO.RevokeByAuthorizationCode(authCode.ID)
 		return nil, err
 	}
 
-	// 5. 标记授权码为已使用
-	authCode.MarkAsUsed()
-	if err := s.authCodeDAO.Update(authCode); err != nil {
-		return nil, constants.ErrServerError
-	}
+	// 5. 生成令牌（将 authCode.ID 透传，用于 token 与 code 的关联及后续回收）
+	return s.generateTokensFromCode(app, authCode, issuer)
+}
 
-	// 6. 生成令牌
-	return s.GenerateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer)
+// generateTokensFromCode 基于已消费的授权码生成 token，并设置 authorization_code_id 关联
+func (s *OIDCAuthorizationService) generateTokensFromCode(app *model.Application, authCode *model.AuthorizationCode, issuer string) (*dto.TokenResponse, error) {
+	resp, err := s.GenerateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer)
+	if err != nil {
+		return nil, err
+	}
+	// 将 token 记录与授权码绑定，便于重放检测时连锁撤销
+	// 通过 access_token hash 反查最新插入的 token 行
+	if token, lookupErr := s.tokenDAO.GetByAccessToken(resp.AccessToken); lookupErr == nil && token != nil {
+		codeID := authCode.ID
+		token.AuthorizationCodeID = &codeID
+		_ = s.tokenDAO.Update(token)
+	}
+	return resp, nil
 }
 
 // ExchangeClientCredentials 客户端凭据流程
@@ -275,23 +293,32 @@ func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest, issuer st
 	return s.GenerateTokens(app, token.UserID, scopes, "", issuer)
 }
 
-// IntrospectToken 令牌内省
+// IntrospectToken 令牌内省（RFC 7662）
+//
+// 强制要求：
+//   - 客户端必须携带 client_id + client_secret（或 HTTP Basic），否则返回 invalid_client
+//   - 令牌的 client_id 必须与请求客户端一致，否则仅返回 {"active":true} 的最小响应
+//     避免跨客户端元数据泄漏（RFC 7662 §2.2）
 func (s *OIDCAuthorizationService) IntrospectToken(req *dto.IntrospectionRequest) (*dto.IntrospectionResponse, error) {
-	// 1. 验证客户端（可选）
-	if req.ClientID != "" {
-		_, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
-		if err != nil {
-			return &dto.IntrospectionResponse{Active: false}, nil
-		}
+	if req.ClientID == "" || req.ClientSecret == "" {
+		return nil, constants.ErrInvalidClient
 	}
+	app, err := s.appService.ValidateApplication(req.ClientID, req.ClientSecret)
+	if err != nil {
+		return nil, constants.ErrInvalidClient
+	}
+	requesterClientID := s.getClientIDFromApp(app)
 
-	// 2. 获取令牌
 	token, err := s.tokenDAO.GetValidByAccessToken(req.Token)
 	if err != nil {
 		return &dto.IntrospectionResponse{Active: false}, nil
 	}
 
-	// 3. 构建基础响应
+	// 令牌不属于请求客户端：返回最小信息，避免跨客户端泄漏
+	if token.ClientID != requesterClientID {
+		return &dto.IntrospectionResponse{Active: true}, nil
+	}
+
 	response := &dto.IntrospectionResponse{
 		Active:    true,
 		ClientID:  token.ClientID,
@@ -301,15 +328,12 @@ func (s *OIDCAuthorizationService) IntrospectToken(req *dto.IntrospectionRequest
 		Scope:     strings.Join(token.Scopes, " "),
 	}
 
-	// 4. 如果有用户信息（UserID > 0），添加用户相关字段
-	// UserID = 0 表示客户端凭据流程，不关联特定用户
 	if token.UserID > 0 {
 		user, err := s.userService.GetUserByID(token.UserID)
 		if err != nil {
-			// 令牌有效但用户不存在，返回无效令牌
 			return &dto.IntrospectionResponse{Active: false}, nil
 		}
-		response.Sub = strconv.FormatUint(uint64(user.ID), 10)
+		response.Sub = user.UUID
 		response.Username = user.Username
 	}
 
@@ -378,12 +402,16 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 	}
 
 	if err := s.authCodeDAO.Create(authCode); err != nil {
-		fmt.Printf("[DEBUG] 创建授权码失败 - Code: %s, Error: %v\n", code, err)
-		return s.errorResponse("server_error", "创建授权码失败: "+err.Error(), req.State), nil
+		if logger := helper.GetHelper().GetLogger(); logger != nil {
+			logger.Error(fmt.Sprintf("创建授权码失败 fp=%s err=%v", codeFingerprint(code), err))
+		}
+		return s.errorResponse("server_error", "创建授权码失败", req.State), nil
 	}
 
-	fmt.Printf("[DEBUG] 授权码创建成功 - Code: %s, ClientID: %s, UserID: %d, RedirectURI: %s, ExpiresAt: %s\n",
-		code, clientID, user.ID, req.RedirectURI, authCode.ExpiresAt.Format("2006-01-02 15:04:05"))
+	if logger := helper.GetHelper().GetLogger(); logger != nil {
+		logger.Debug(fmt.Sprintf("authorization_code issued: fp=%s client=%s user=%d",
+			codeFingerprint(code), clientID, user.ID))
+	}
 
 	return &dto.AuthorizeResponse{
 		Code:  code,
@@ -426,13 +454,11 @@ func (s *OIDCAuthorizationService) validateAuthorizationCode(authCode *model.Aut
 
 	// 验证客户端ID
 	if authCode.ClientID != clientID {
-		fmt.Printf("[DEBUG] ClientID 不匹配 - 授权码: %s, 请求: %s\n", authCode.ClientID, clientID)
 		return constants.ErrInvalidGrant
 	}
 
 	// 验证重定向URI
 	if authCode.RedirectURI != req.RedirectURI {
-		fmt.Printf("[DEBUG] RedirectURI 不匹配 - 授权码: %s, 请求: %s\n", authCode.RedirectURI, req.RedirectURI)
 		return constants.ErrInvalidGrant
 	}
 
@@ -450,25 +476,72 @@ func (s *OIDCAuthorizationService) validateAuthorizationCode(authCode *model.Aut
 	return nil
 }
 
-// validatePKCE 验证PKCE
+// validatePKCE 验证 PKCE（RFC 7636）
+//   - code_verifier 长度 43-128，字符集 [A-Z a-z 0-9 - . _ ~]
+//   - plain 模式默认禁用（可通过配置 oidc.pkce.allow_plain=true 开启）
+//   - 常量时间比较，防计时攻击
 func (s *OIDCAuthorizationService) validatePKCE(codeChallenge, codeChallengeMethod, codeVerifier string) error {
-	var challengeVerifier string
+	if err := validateCodeVerifierFormat(codeVerifier); err != nil {
+		return err
+	}
 
+	var computed string
 	switch codeChallengeMethod {
 	case "plain":
-		challengeVerifier = codeVerifier
+		if !pkcePlainAllowed() {
+			return errors.New("unsupported_code_challenge_method")
+		}
+		computed = codeVerifier
 	case "S256", "":
 		hash := sha256.Sum256([]byte(codeVerifier))
-		challengeVerifier = base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(hash[:])
+		computed = base64.RawURLEncoding.EncodeToString(hash[:])
 	default:
 		return errors.New("unsupported_code_challenge_method")
 	}
 
-	if challengeVerifier != codeChallenge {
+	if subtle.ConstantTimeCompare([]byte(computed), []byte(codeChallenge)) != 1 {
 		return errors.New("invalid_code_verifier")
 	}
-
 	return nil
+}
+
+var pkceAllowedCharset = regexp.MustCompile(`^[A-Za-z0-9\-._~]+$`)
+
+// validateCodeChallengeFormat 校验授权端点收到的 code_challenge（RFC 7636 §4.2）
+func validateCodeChallengeFormat(challenge, method string) error {
+	if l := len(challenge); l < 43 || l > 128 {
+		return errors.New("code_challenge 长度必须在 43-128 字符之间")
+	}
+	if !pkceAllowedCharset.MatchString(challenge) {
+		return errors.New("code_challenge 字符非法，仅允许 [A-Za-z0-9-._~]")
+	}
+	if method != "" && method != "S256" && method != "plain" {
+		return errors.New("code_challenge_method 仅支持 S256 或 plain")
+	}
+	if method == "plain" && !pkcePlainAllowed() {
+		return errors.New("plain 挑战方法已禁用，请使用 S256")
+	}
+	return nil
+}
+
+// validateCodeVerifierFormat 校验 token 端点收到的 code_verifier（RFC 7636 §4.1）
+func validateCodeVerifierFormat(verifier string) error {
+	if l := len(verifier); l < 43 || l > 128 {
+		return errors.New("code_verifier 长度必须在 43-128 字符之间")
+	}
+	if !pkceAllowedCharset.MatchString(verifier) {
+		return errors.New("code_verifier 字符非法")
+	}
+	return nil
+}
+
+// pkcePlainAllowed 是否允许 plain 挑战方法（默认 false）
+func pkcePlainAllowed() bool {
+	h := helper.GetHelper()
+	if h == nil || h.GetEnv() == nil {
+		return false
+	}
+	return h.GetEnv().GetBool("oidc.pkce.allow_plain", false)
 }
 
 // validateRefreshScopes 验证刷新令牌的作用域
@@ -487,10 +560,9 @@ func (s *OIDCAuthorizationService) validateRefreshScopes(originalScopes, request
 	return nil
 }
 
-// generateTokens 生成令牌
 // GenerateTokens 生成访问令牌和刷新令牌（导出以供登录接口使用）
+// ID Token 中包含 at_hash，使客户端可验证 access_token 与 id_token 的绑定关系
 func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
-	// 生成 JWT 格式的访问令牌
 	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("生成访问令牌失败: %w", err)
@@ -500,7 +572,6 @@ func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID
 	clientID := s.getClientIDFromApp(app)
 	tokenLifetime := s.getTokenLifetimeFromApp(app)
 
-	// 创建令牌记录
 	token := &model.OIDCToken{
 		AccessToken:  accessToken,
 		TokenType:    model.TokenTypeBearer,
@@ -512,14 +583,14 @@ func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID
 		Attributes:   make(map[string]interface{}),
 	}
 
-	// 生成ID令牌（如果作用域包含openid）
+	// 生成 ID 令牌（若 scope 包含 openid），并写入 at_hash
 	if s.hasScope(scopes, "openid") {
 		user, err := s.userService.GetUserModelByID(userID)
 		if err != nil {
 			return nil, err
 		}
 
-		idToken, err := s.generateIDToken(app, user, scopes, nonce, issuer)
+		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "")
 		if err != nil {
 			return nil, err
 		}
@@ -546,8 +617,16 @@ func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID
 	return response, nil
 }
 
-// generateIDToken 生成ID令牌
+// generateIDToken 生成 ID Token（不含 at_hash / c_hash）
 func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user *model.User, scopes []string, nonce string, issuer string) (string, error) {
+	return s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, "", "")
+}
+
+// generateIDTokenWithHashes 生成 ID Token，携带可选的 at_hash / c_hash
+func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
+	app *model.Application, user *model.User, scopes []string, nonce string, issuer string,
+	accessToken, authCode string,
+) (string, error) {
 	// 获取全局配置
 	env := helper.GetHelper().GetEnv()
 	idTokenLifetime := env.GetInt("oidc.token_lifetime.id_token", 3600)
@@ -597,8 +676,8 @@ func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user 
 		return "", fmt.Errorf("不支持的密钥类型: %s", keyManager.GetKeyType())
 	}
 
-	// 5. 生成ID Token
-	idToken, err := idTokenService.GenerateIDToken(user, clientID, scopes, nonce, nil)
+	// 5. 生成ID Token（包含 at_hash / c_hash，若上层提供）
+	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, nil, accessToken, authCode)
 	if err != nil {
 		return "", fmt.Errorf("生成ID Token失败: %w", err)
 	}
@@ -739,6 +818,17 @@ func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *
 }
 
 // 辅助方法
+
+// codeFingerprint 生成授权码的不可逆指纹，用于日志中指代某一条 code
+// 截取 SHA-256 前 16 个十六进制字符（64 bit）足以在日志里追踪一条 code 的生命周期
+// 而不会泄漏明文
+func codeFingerprint(code string) string {
+	if code == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(code))
+	return hex.EncodeToString(sum[:8])
+}
 
 func (s *OIDCAuthorizationService) generateAuthorizationCode() string {
 	v7, err := uuid.NewV7()

@@ -153,7 +153,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 
 	// 1. 验证会话是否存在
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(req.SessionID)
+	session, err := sessionService.GetSession(ctx.Request.Context(), req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -172,7 +172,7 @@ func (c OIDCAuthFlowController) Login(ctx *gin.Context, helper interfaces.Helper
 	}
 
 	// 3. 标记会话为已认证
-	if err := sessionService.MarkAsAuthenticated(req.SessionID, user.ID); err != nil {
+	if err := sessionService.MarkAsAuthenticated(ctx.Request.Context(), req.SessionID, user.ID); err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "更新会话失败: "+err.Error())
 		return
 	}
@@ -270,7 +270,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 	// 1. 如果有sessionId，验证会话是否存在
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		_, err := sessionService.GetSession(req.SessionID)
+		_, err := sessionService.GetSession(ctx.Request.Context(), req.SessionID)
 		if err != nil {
 			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 			return
@@ -337,7 +337,7 @@ func (c OIDCAuthFlowController) Register(ctx *gin.Context, helper interfaces.Hel
 	// 5. 如果有会话，标记为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(req.SessionID, userResponse.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(ctx.Request.Context(), req.SessionID, userResponse.ID); err != nil {
 			// 注册成功但更新会话失败，仍返回成功
 			response := RegisterResponse{
 				Success: true,
@@ -370,7 +370,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 
 	// 1. 获取会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(req.SessionID)
+	session, err := sessionService.GetSession(ctx.Request.Context(), req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -391,7 +391,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 		}
 
 		// 删除会话
-		sessionService.DeleteSession(req.SessionID)
+		sessionService.DeleteSession(ctx.Request.Context(), req.SessionID)
 
 		response := ConsentResponse{
 			Success:     false,
@@ -404,7 +404,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 	}
 
 	// 4. 标记会话为已授权
-	if err := sessionService.MarkAsConsentGranted(req.SessionID); err != nil {
+	if err := sessionService.MarkAsConsentGranted(ctx.Request.Context(), req.SessionID); err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "更新会话失败: "+err.Error())
 		return
 	}
@@ -442,7 +442,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 		}
 
 		// 删除会话
-		sessionService.DeleteSession(req.SessionID)
+		sessionService.DeleteSession(ctx.Request.Context(), req.SessionID)
 
 		response := ConsentResponse{
 			Success:     false,
@@ -461,7 +461,7 @@ func (c OIDCAuthFlowController) Consent(ctx *gin.Context, helper interfaces.Help
 	}
 
 	// 删除会话（授权码已生成，会话不再需要）
-	sessionService.DeleteSession(req.SessionID)
+	sessionService.DeleteSession(ctx.Request.Context(), req.SessionID)
 
 	response := ConsentResponse{
 		Success:     true,
@@ -483,7 +483,7 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx *gin.Context, helper interfaces.
 
 	// 1. 获取会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(sessionID)
+	session, err := sessionService.GetSession(ctx.Request.Context(), sessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -641,7 +641,7 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx *gin.Context, helper in
 
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(req.SessionID)
+	session, err := sessionService.GetSession(ctx.Request.Context(), req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -707,7 +707,7 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx *gin.Context, helper interfa
 
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(req.SessionID)
+	session, err := sessionService.GetSession(ctx.Request.Context(), req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -986,7 +986,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx *gin.Context, helper interface
 
 	// 1. 获取会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(sessionID)
+	session, err := sessionService.GetSession(ctx.Request.Context(), sessionID)
 	if err != nil {
 		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
@@ -1139,6 +1139,7 @@ func (c OIDCAuthFlowController) InitSession(ctx *gin.Context, helper interfaces.
 	// 2. 创建OIDC会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.CreateSession(
+		ctx.Request.Context(),
 		req.ClientID,
 		req.RedirectURI,
 		req.Scope,

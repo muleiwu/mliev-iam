@@ -109,6 +109,14 @@ func (dao *OIDCTokenDAO) RevokeByClientAndUser(clientID string, userID uint) err
 		Update("is_revoked", true).Error
 }
 
+// RevokeByAuthorizationCode 撤销所有由指定授权码换出的令牌
+// 用于 code 重放检测后的 token 失效清理（RFC 6749 §4.1.2 要求）
+func (dao *OIDCTokenDAO) RevokeByAuthorizationCode(authCodeID uint) error {
+	return dao.db.Model(&model.OIDCToken{}).
+		Where("authorization_code_id = ?", authCodeID).
+		Update("is_revoked", true).Error
+}
+
 // DeleteExpired 删除过期的令牌
 func (dao *OIDCTokenDAO) DeleteExpired() error {
 	// 删除访问令牌过期且刷新令牌也过期的记录
