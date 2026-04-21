@@ -1,4 +1,4 @@
-.PHONY: all install-frontend build-frontend build-packages build-oidc build-install build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help
+.PHONY: all install-frontend build-frontend build-packages build-oidc build-install build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help migrate-new migrate-status migrate-up migrate-down
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -150,4 +150,30 @@ clean-packages:
 clean-go:
 	@echo "==> 清理 Go 二进制文件..."
 	@rm -f mliev-iam mliev-iam-test go_build_cnb_cool_mliev_iam_mliev_iam
+
+# ============================================================
+# 数据库迁移（Goose）
+#   生产环境 database.auto_migrate=false，schema 变更必须通过 migrations/*.go
+#   新增迁移步骤：
+#     1. make migrate-new NAME=add_xxx_field  创建迁移文件
+#     2. 在生成的 migrations/YYYYMMDDHHMMSS_add_xxx_field.go 中写 up/down
+#     3. 启动服务即自动执行（或 make migrate-up 手动）
+# ============================================================
+
+migrate-new:
+	@if [ -z "$(NAME)" ]; then echo "用法: make migrate-new NAME=add_xxx_field"; exit 1; fi
+	@TS=$$(date +%Y%m%d%H%M%S); \
+	FILE="migrations/$${TS}_$(NAME).go"; \
+	echo "==> 生成迁移文件 $$FILE"; \
+	printf 'package migrations\n\nimport (\n\t"context"\n\t"database/sql"\n\n\t"github.com/pressly/goose/v3"\n)\n\nfunc init() {\n\tgoose.AddMigrationContext(up%s, down%s)\n}\n\nfunc up%s(ctx context.Context, tx *sql.Tx) error {\n\t// TODO: up\n\treturn nil\n}\n\nfunc down%s(ctx context.Context, tx *sql.Tx) error {\n\t// TODO: down\n\treturn nil\n}\n' "$(NAME)" "$(NAME)" "$(NAME)" "$(NAME)" > $$FILE; \
+	echo "==> 完成，记得实现 up/down"
+
+migrate-status:
+	@echo "==> 启动服务前请使用 admin 后台查询 goose_db_version 表"
+
+migrate-up:
+	@echo "==> 运行迁移：启动进程即可自动执行，或使用 sql: UPDATE system；或通过 go run ./cmd/migrate up"
+
+migrate-down:
+	@echo "==> 不建议在生产 down；如需回滚请手写补偿迁移"
 

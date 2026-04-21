@@ -1,7 +1,11 @@
 package service
 
 import (
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
+	"hash"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -22,6 +26,10 @@ type IDTokenClaims struct {
 	Nonce    string `json:"nonce,omitempty"`     // 用于防重放攻击
 	AuthTime int64  `json:"auth_time,omitempty"` // 用户认证时间
 	Azp      string `json:"azp,omitempty"`       // Authorized party - 授权方
+
+	// Hybrid/Implicit 流程校验字段（OpenID Connect Core §3.3.2.11, §3.3.2.10）
+	AtHash string `json:"at_hash,omitempty"` // left-most half of hash(access_token)
+	CHash  string `json:"c_hash,omitempty"`  // left-most half of hash(authorization_code)
 
 	// Profile scope claims
 	Name              string `json:"name,omitempty"`
@@ -118,12 +126,21 @@ func NewOIDCIDTokenService(rsaKeyManager *jwt.RSAKeyManager, issuer string, toke
 	return NewOIDCIDTokenServiceWithRSA(rsaKeyManager, issuer, tokenLifetime)
 }
 
-// GenerateIDToken 生成ID Token
+// GenerateIDToken 生成 ID Token（不含 at_hash / c_hash，用于纯 id_token 场景）
 func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, scopes []string, nonce string, authTime *time.Time) (string, error) {
+	return s.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, authTime, "", "")
+}
+
+// GenerateIDTokenWithHashes 生成 ID Token，并按需嵌入 at_hash / c_hash
+// accessToken 非空时写入 at_hash；authorizationCode 非空时写入 c_hash。
+// Hash 算法跟随签名算法：RS256/HS256 -> SHA-256；RS512/HS512 -> SHA-512。
+func (s *OIDCIDTokenService) GenerateIDTokenWithHashes(
+	user *model.User, clientID string, scopes []string, nonce string, authTime *time.Time,
+	accessToken, authorizationCode string,
+) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
 
-	// 构建基础claims - 使用 UUID 作为 sub claim
 	claims := &IDTokenClaims{
 		Sub: user.UUID,
 		Iss: s.issuer,
@@ -131,63 +148,52 @@ func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, 
 		Exp: exp.Unix(),
 		Iat: now.Unix(),
 	}
-
-	// 添加nonce（如果有）
 	if nonce != "" {
 		claims.Nonce = nonce
 	}
-
-	// 添加认证时间
 	if authTime != nil {
 		claims.AuthTime = authTime.Unix()
 	} else {
 		claims.AuthTime = now.Unix()
 	}
 
-	// 根据scopes添加用户信息
+	if accessToken != "" {
+		claims.AtHash = leftMostHash(accessToken, s.algorithm)
+	}
+	if authorizationCode != "" {
+		claims.CHash = leftMostHash(authorizationCode, s.algorithm)
+	}
+
 	if s.hasScope(scopes, "profile") {
 		s.addProfileClaims(claims, user)
 	}
-
 	if s.hasScope(scopes, "email") {
 		s.addEmailClaims(claims, user)
 	}
-
 	if s.hasScope(scopes, "phone") {
 		s.addPhoneClaims(claims, user)
 	}
 
-	// 根据算法类型签名token
-	var tokenString string
-	var err error
+	return s.signToken(claims)
+}
 
-	switch s.algorithm {
-	case "RS256":
-		if s.rsaKeyManager == nil || !s.rsaKeyManager.IsInitialized() {
-			return "", fmt.Errorf("RS256算法需要初始化RSA密钥管理器")
-		}
-		tokenString, err = s.rsaKeyManager.SignToken(claims)
-		if err != nil {
-			return "", fmt.Errorf("使用RSA签名ID Token失败: %w", err)
-		}
-
-	case "HS256":
-		if len(s.hmacSecret) == 0 {
-			return "", fmt.Errorf("HS256算法需要HMAC密钥")
-		}
-		// 使用HMAC签名
-		token := jwtLib.NewWithClaims(jwtLib.SigningMethodHS256, claims)
-		token.Header["kid"] = s.keyID
-		tokenString, err = token.SignedString(s.hmacSecret)
-		if err != nil {
-			return "", fmt.Errorf("使用HMAC签名ID Token失败: %w", err)
-		}
-
-	default:
-		return "", fmt.Errorf("不支持的签名算法: %s", s.algorithm)
+// leftMostHash 按 OIDC Core §3.1.3.6 计算 at_hash / c_hash
+// 取 hash 的前一半字节，然后 base64url（不含 padding）编码
+func leftMostHash(value, alg string) string {
+	if value == "" {
+		return ""
 	}
-
-	return tokenString, nil
+	var h hash.Hash
+	switch alg {
+	case "RS512", "HS512":
+		h = sha512.New()
+	default:
+		h = sha256.New()
+	}
+	h.Write([]byte(value))
+	sum := h.Sum(nil)
+	half := sum[:len(sum)/2]
+	return base64.RawURLEncoding.EncodeToString(half)
 }
 
 // GenerateAccessToken 生成 JWT 格式的 Access Token (符合 RFC 9068)

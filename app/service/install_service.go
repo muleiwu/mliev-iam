@@ -565,7 +565,8 @@ func (s *InstallService) createDatabaseTables() error {
 		s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
 	}
 
-	// 执行自动迁移
+	// 执行自动迁移（仅安装流程，生产运行时请用 goose 迁移文件）
+	s.helper.GetLogger().Warn("[install] 执行 GORM AutoMigrate 建表；后续 schema 变更请用 migrations/*.go 而非 AutoMigrate")
 	if err := s.db.AutoMigrate(models...); err != nil {
 		return fmt.Errorf("数据库表结构迁移失败: %w", err)
 	}

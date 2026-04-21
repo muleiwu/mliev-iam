@@ -12,8 +12,10 @@ func (receiver Config) Get() []interfaces.InitConfig {
 	return []interfaces.InitConfig{
 		autoload.Base{},
 		autoload.Http{},
+		autoload.Cors{},
 		autoload.StaticFs{},
 		autoload.Database{},
+		autoload.DatabaseSafety{},
 		autoload.Redis{},
 		autoload.Push{},
 		autoload.Middleware{},

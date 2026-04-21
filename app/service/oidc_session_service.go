@@ -22,6 +22,7 @@ type OIDCSession struct {
 	ResponseType        string    `json:"response_type"`
 	CodeChallenge       string    `json:"code_challenge,omitempty"`
 	CodeChallengeMethod string    `json:"code_challenge_method,omitempty"`
+	Prompt              string    `json:"prompt,omitempty"`
 	UserID              *uint     `json:"user_id,omitempty"`
 	IsAuthenticated     bool      `json:"is_authenticated"`
 	IsConsentGranted    bool      `json:"is_consent_granted"`
@@ -31,6 +32,8 @@ type OIDCSession struct {
 }
 
 // OIDCSessionService OIDC会话管理服务
+// 所有方法均要求 ctx（从 *gin.Context.Request.Context() 传入），
+// 以支持请求级取消和追踪；不再使用 context.Background()。
 type OIDCSessionService struct {
 	redis         *redis.Client
 	keyPrefix     string
@@ -42,14 +45,16 @@ func NewOIDCSessionService(redisClient *redis.Client) *OIDCSessionService {
 	return &OIDCSessionService{
 		redis:         redisClient,
 		keyPrefix:     "oidc:session:",
-		sessionExpiry: 10 * time.Minute, // 会话默认10分钟过期
+		sessionExpiry: 10 * time.Minute,
 	}
 }
 
 // CreateSession 创建新的授权会话
 func (s *OIDCSessionService) CreateSession(
+	ctx context.Context,
 	clientID, redirectURI, scope, state, nonce, responseType string,
 	codeChallenge, codeChallengeMethod string,
+	prompt string,
 ) (*OIDCSession, error) {
 	sessionID, err := s.generateSessionID()
 	if err != nil {
@@ -67,14 +72,14 @@ func (s *OIDCSessionService) CreateSession(
 		ResponseType:        responseType,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		Prompt:              prompt,
 		IsAuthenticated:     false,
 		IsConsentGranted:    false,
 		CreatedAt:           now,
 		ExpiresAt:           now.Add(s.sessionExpiry),
 	}
 
-	// 保存到Redis
-	if err := s.saveSession(session); err != nil {
+	if err := s.saveSession(ctx, session); err != nil {
 		return nil, fmt.Errorf("保存会话失败: %w", err)
 	}
 
@@ -82,8 +87,7 @@ func (s *OIDCSessionService) CreateSession(
 }
 
 // GetSession 获取会话
-func (s *OIDCSessionService) GetSession(sessionID string) (*OIDCSession, error) {
-	ctx := context.Background()
+func (s *OIDCSessionService) GetSession(ctx context.Context, sessionID string) (*OIDCSession, error) {
 	key := s.keyPrefix + sessionID
 
 	data, err := s.redis.Get(ctx, key).Result()
@@ -99,9 +103,8 @@ func (s *OIDCSessionService) GetSession(sessionID string) (*OIDCSession, error) 
 		return nil, fmt.Errorf("解析会话数据失败: %w", err)
 	}
 
-	// 检查会话是否过期
 	if time.Now().After(session.ExpiresAt) {
-		s.DeleteSession(sessionID)
+		_ = s.DeleteSession(ctx, sessionID)
 		return nil, fmt.Errorf("会话已过期")
 	}
 
@@ -109,13 +112,13 @@ func (s *OIDCSessionService) GetSession(sessionID string) (*OIDCSession, error) 
 }
 
 // UpdateSession 更新会话
-func (s *OIDCSessionService) UpdateSession(session *OIDCSession) error {
-	return s.saveSession(session)
+func (s *OIDCSessionService) UpdateSession(ctx context.Context, session *OIDCSession) error {
+	return s.saveSession(ctx, session)
 }
 
 // MarkAsAuthenticated 标记会话为已认证
-func (s *OIDCSessionService) MarkAsAuthenticated(sessionID string, userID uint) error {
-	session, err := s.GetSession(sessionID)
+func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint) error {
+	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -123,13 +126,14 @@ func (s *OIDCSessionService) MarkAsAuthenticated(sessionID string, userID uint) 
 	session.UserID = &userID
 	session.IsAuthenticated = true
 	session.AuthTime = time.Now()
+	session.ExpiresAt = time.Now().Add(30 * time.Minute)
 
-	return s.UpdateSession(session)
+	return s.UpdateSession(ctx, session)
 }
 
 // MarkAsConsentGranted 标记会话为已授权
-func (s *OIDCSessionService) MarkAsConsentGranted(sessionID string) error {
-	session, err := s.GetSession(sessionID)
+func (s *OIDCSessionService) MarkAsConsentGranted(ctx context.Context, sessionID string) error {
+	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -140,57 +144,48 @@ func (s *OIDCSessionService) MarkAsConsentGranted(sessionID string) error {
 
 	session.IsConsentGranted = true
 
-	return s.UpdateSession(session)
+	return s.UpdateSession(ctx, session)
 }
 
 // DeleteSession 删除会话
-func (s *OIDCSessionService) DeleteSession(sessionID string) error {
-	ctx := context.Background()
+func (s *OIDCSessionService) DeleteSession(ctx context.Context, sessionID string) error {
 	key := s.keyPrefix + sessionID
-
 	return s.redis.Del(ctx, key).Err()
 }
 
 // ValidateSession 验证会话是否有效且完整
-func (s *OIDCSessionService) ValidateSession(sessionID string) (*OIDCSession, error) {
-	session, err := s.GetSession(sessionID)
+func (s *OIDCSessionService) ValidateSession(ctx context.Context, sessionID string) (*OIDCSession, error) {
+	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-
 	if !session.IsAuthenticated {
 		return nil, fmt.Errorf("用户尚未认证")
 	}
-
 	if !session.IsConsentGranted {
 		return nil, fmt.Errorf("用户尚未授权")
 	}
-
 	return session, nil
 }
 
 // ExtendSession 延长会话有效期
-func (s *OIDCSessionService) ExtendSession(sessionID string, duration time.Duration) error {
-	session, err := s.GetSession(sessionID)
+func (s *OIDCSessionService) ExtendSession(ctx context.Context, sessionID string, duration time.Duration) error {
+	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-
 	session.ExpiresAt = time.Now().Add(duration)
-
-	return s.UpdateSession(session)
+	return s.UpdateSession(ctx, session)
 }
 
-// CleanupExpiredSessions 清理过期会话（可以通过定时任务调用）
-func (s *OIDCSessionService) CleanupExpiredSessions() error {
-	// Redis会自动清理过期的key，这里可以实现额外的清理逻辑
-	// 或者通过SCAN命令查找并删除过期会话
+// CleanupExpiredSessions Redis 会自动清理过期 key，这里保留为扩展点
+func (s *OIDCSessionService) CleanupExpiredSessions(ctx context.Context) error {
+	_ = ctx
 	return nil
 }
 
 // 私有方法
 
-// generateSessionID 生成唯一的会话ID
 func (s *OIDCSessionService) generateSessionID() (string, error) {
 	v7, err := uuid.NewV7()
 	if err != nil {
@@ -199,9 +194,7 @@ func (s *OIDCSessionService) generateSessionID() (string, error) {
 	return v7.String(), nil
 }
 
-// saveSession 保存会话到Redis
-func (s *OIDCSessionService) saveSession(session *OIDCSession) error {
-	ctx := context.Background()
+func (s *OIDCSessionService) saveSession(ctx context.Context, session *OIDCSession) error {
 	key := s.keyPrefix + session.SessionID
 
 	data, err := json.Marshal(session)
@@ -209,12 +202,10 @@ func (s *OIDCSessionService) saveSession(session *OIDCSession) error {
 		return fmt.Errorf("序列化会话数据失败: %w", err)
 	}
 
-	// 计算剩余过期时间
 	ttl := time.Until(session.ExpiresAt)
 	if ttl <= 0 {
 		return fmt.Errorf("会话已过期")
 	}
 
-	// 保存到Redis，设置过期时间
 	return s.redis.Set(ctx, key, data, ttl).Err()
 }

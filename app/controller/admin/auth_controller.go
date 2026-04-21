@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
@@ -78,22 +79,44 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 		// userService.UpdateLastLoginIP(userResponse.ID, clientIP)
 	}
 
+	expiresIn := int64(jwtAuthService.GetConfig().GetAccessTokenHours() * 3600)
+
+	// 下发 HttpOnly Cookie：防 XSS 读取 token。前端保留 accessToken 字段仅用于兼容展示，
+	// 浏览器请求会自动带上 Cookie，无需在 Authorization 头里手工注入。
+	setAdminAccessCookie(c, accessToken, int(expiresIn))
+
 	response := AdminLoginResponse{
 		User:        *userResponse,
 		AccessToken: accessToken,
 		TokenType:   "Bearer",
-		ExpiresIn:   int64(jwtAuthService.GetConfig().GetAccessTokenHours() * 3600), // 转换为秒
+		ExpiresIn:   expiresIn,
 	}
 
 	ac.SuccessWithMessage(c, "管理员登录成功", response)
 }
 
+// setAdminAccessCookie 将管理员 access_token 写入 HttpOnly/Secure/SameSite Cookie
+func setAdminAccessCookie(c *gin.Context, token string, maxAgeSeconds int) {
+	isSecure := c.Request.TLS != nil
+	if isSecure {
+		c.SetSameSite(http.SameSiteLaxMode)
+	} else {
+		c.SetSameSite(http.SameSiteLaxMode)
+	}
+	c.SetCookie(middleware.AdminCookieName, token, maxAgeSeconds, "/", "", isSecure, true)
+}
+
+// clearAdminAccessCookie 清除管理员 cookie（登出时）
+func clearAdminAccessCookie(c *gin.Context) {
+	isSecure := c.Request.TLS != nil
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(middleware.AdminCookieName, "", -1, "/", "", isSecure, true)
+}
+
 // Logout 管理员退出登录
 // POST /api/admin/auth/logout
 func (ac AuthController) Logout(c *gin.Context, helper interfaces.HelperInterface) {
-	// 这里可以添加令牌失效逻辑
-	// 例如将令牌加入黑名单或从Redis中删除
-
+	clearAdminAccessCookie(c)
 	ac.SuccessWithMessage(c, "退出登录成功", nil)
 }
 
@@ -121,10 +144,12 @@ func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 		return
 	}
 
+	expiresIn := jwtAuthService.GetConfig().GetAccessTokenHours() * 3600
+	setAdminAccessCookie(c, newAccessToken, expiresIn)
 	response := gin.H{
 		"accessToken": newAccessToken,
 		"tokenType":   "Bearer",
-		"expiresIn":   jwtAuthService.GetConfig().GetAccessTokenHours() * 3600, // 转换为秒
+		"expiresIn":   expiresIn,
 	}
 
 	ac.SuccessWithMessage(c, "令牌刷新成功", response)

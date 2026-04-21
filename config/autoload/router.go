@@ -245,6 +245,21 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 						// 推送服务配置管理（管理员）
 						adminSettings.GET("/push/config", deps.WrapHandler(AdminController.SettingController{}.GetPushSettings))    // 获取推送服务配置
 						adminSettings.PUT("/push/config", deps.WrapHandler(AdminController.SettingController{}.UpdatePushSettings)) // 更新推送服务配置
+
+						// 验证码场景绑定配置（管理员）
+						adminSettings.GET("/captcha/bindings", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings))    // 获取场景绑定配置
+						adminSettings.PUT("/captcha/bindings", deps.WrapHandler(AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)) // 更新场景绑定配置
+					}
+
+					// 验证码配置管理路由（管理员）
+					adminCaptchaConfigs := admin.Group("/captcha-configs", middleware.AdminAuthMiddleware(helper))
+					{
+						adminCaptchaConfigs.GET("", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaConfigs))             // 获取配置列表
+						adminCaptchaConfigs.GET("/providers", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaProviders)) // 获取支持的提供商
+						adminCaptchaConfigs.GET("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaConfig))          // 获取单个配置
+						adminCaptchaConfigs.POST("", deps.WrapHandler(AdminController.CaptchaConfigController{}.CreateCaptchaConfig))          // 创建配置
+						adminCaptchaConfigs.PUT("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.UpdateCaptchaConfig))       // 更新配置
+						adminCaptchaConfigs.DELETE("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.DeleteCaptchaConfig))    // 删除配置
 					}
 				}
 
@@ -277,16 +292,24 @@ func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[strin
 					auth.GET("/codes", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.GetAccessCodes))  // 获取用户权限码
 				}
 
+				// 验证码公开路由组
+				captcha := api.Group("/captcha")
+				{
+					captcha.POST("/params", deps.WrapHandler(controller.CaptchaController{}.GetCaptchaParams)) // 获取验证码前端参数
+				}
+
 				apiOidc := api.Group("/oidc")
 				{
 					// OIDC 授权流程端点
 					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))                                                  // 登录接口
 					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))                                            // 注册接口
 					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo))                                         // 获取授权信息接口
+					apiOidc.GET("/flow-status", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetFlowStatus))                                     // 获取授权流程状态（统一入口编排器使用）
 					apiOidc.POST("/send-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendVerificationCode))                  // 发送验证码接口（需要认证）
 					apiOidc.POST("/send-register-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)) // 发送注册验证码接口（公开）
 					apiOidc.POST("/complete-profile", deps.WrapHandler(controller.OIDCAuthFlowController{}.CompleteProfile))                             // 完善信息接口
 					apiOidc.GET("/register-settings", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetRegisterSettings))                         // 获取注册字段配置（公开接口）
+					apiOidc.POST("/init-session", deps.WrapHandler(controller.OIDCAuthFlowController{}.InitSession))                                     // 初始化OIDC会话（用于iframe嵌入方式，无需浏览器跳转）
 				}
 			}
 

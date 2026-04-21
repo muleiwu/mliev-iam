@@ -139,7 +139,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if sessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(sessionID, response.User.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(c.Request.Context(), sessionID, response.User.ID); err != nil {
 			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
 			return
 		}
@@ -287,7 +287,7 @@ func (sc SocialAuthController) BindWithLogin(c *gin.Context, helper interfaces.H
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(req.SessionID, response.User.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(c.Request.Context(), req.SessionID, response.User.ID); err != nil {
 			// 记录日志但不阻断流程，因为可能是非OIDC流程或session已过期
 			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
 			// 对于非OIDC流程，继续返回成功，因为绑定本身已经成功
@@ -339,7 +339,7 @@ func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfa
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(req.SessionID, response.User.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(c.Request.Context(), req.SessionID, response.User.ID); err != nil {
 			// 记录日志但不阻断流程，因为可能是非OIDC流程或session已过期
 			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
 			// 对于非OIDC流程，继续返回成功，因为注册本身已经成功

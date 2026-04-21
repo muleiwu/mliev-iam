@@ -3,6 +3,8 @@ package protocol
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -224,7 +226,11 @@ func (h *OIDCProtocolHandler) ValidateClient(app *model.Application, clientSecre
 	return nil
 }
 
-// ValidateRedirectURI 验证重定向URI
+// ValidateRedirectURI 验证重定向 URI（RFC 6749 §3.1.2 + OIDC Core §3.1.2.1）
+//   - 必须是注册白名单内的 URI
+//   - 禁止 fragment（#...）
+//   - 比较方式为规范化后精确匹配：scheme + host + path + query（query 允许客户端附加则在注册时预先声明）
+//   - localhost / 自定义 scheme 走原始精确比较以兼容 native app
 func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redirectURI string) error {
 	config := app.ProtocolConfig
 	redirectUris, ok := config["redirectUris"].([]interface{})
@@ -232,14 +238,60 @@ func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redire
 		return errors.New("重定向URI配置错误")
 	}
 
+	incoming, err := parseAndValidateRedirectURI(redirectURI)
+	if err != nil {
+		return err
+	}
+	incomingNorm := normalizeRedirectURI(incoming)
+
 	for _, uri := range redirectUris {
 		uriStr, ok := uri.(string)
-		if ok && uriStr == redirectURI {
+		if !ok || uriStr == "" {
+			continue
+		}
+		registered, err := url.Parse(uriStr)
+		if err != nil {
+			continue
+		}
+		if normalizeRedirectURI(registered) == incomingNorm {
 			return nil
 		}
 	}
-
 	return errors.New("无效的重定向URI")
+}
+
+// parseAndValidateRedirectURI 解析并检查 URI 的结构层面合规性
+func parseAndValidateRedirectURI(raw string) (*url.URL, error) {
+	if raw == "" {
+		return nil, errors.New("重定向URI不能为空")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("重定向URI解析失败: %w", err)
+	}
+	if u.Scheme == "" {
+		return nil, errors.New("重定向URI必须包含 scheme")
+	}
+	if u.Fragment != "" || strings.Contains(raw, "#") {
+		return nil, errors.New("重定向URI禁止包含 fragment")
+	}
+	return u, nil
+}
+
+// normalizeRedirectURI 规范化用于比较：大小写化 scheme/host、去尾部多余斜杠
+func normalizeRedirectURI(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Host)
+	path := u.EscapedPath()
+	if path == "" && (scheme == "http" || scheme == "https") {
+		path = "/"
+	}
+	// query 参与比较以保证严格匹配
+	canonical := scheme + "://" + host + path
+	if u.RawQuery != "" {
+		canonical += "?" + u.RawQuery
+	}
+	return canonical
 }
 
 // ValidateGrantType 验证授权类型
@@ -351,47 +403,11 @@ func (h *OIDCProtocolHandler) VerifyClientSecret(secret, hashedSecret string) bo
 	return err == nil
 }
 
-// validateRedirectURIFormat 验证重定向URI格式
+// validateRedirectURIFormat 验证重定向URI格式（注册时）
+// 同时禁止 fragment，避免将非法 URI 写入白名单
 func (h *OIDCProtocolHandler) validateRedirectURIFormat(uri string) error {
-	if uri == "" {
-		return errors.New("URI不能为空")
-	}
-
-	// 简单的URL格式验证
-	if len(uri) < 7 {
-		return errors.New("URI格式无效")
-	}
-
-	// 检查是否包含scheme
-	hasValidScheme := false
-	validSchemes := []string{"http://", "https://"}
-	for _, scheme := range validSchemes {
-		if len(uri) >= len(scheme) && uri[:len(scheme)] == scheme {
-			hasValidScheme = true
-			break
-		}
-	}
-
-	// 也支持自定义scheme格式 (例如: myapp://)
-	if !hasValidScheme {
-		// 检查是否匹配自定义scheme格式 scheme://
-		schemeEndIdx := -1
-		for i := 0; i < len(uri) && i < 50; i++ { // 限制scheme长度
-			if i+3 < len(uri) && uri[i:i+3] == "://" {
-				schemeEndIdx = i
-				break
-			}
-		}
-		if schemeEndIdx > 0 {
-			hasValidScheme = true
-		}
-	}
-
-	if !hasValidScheme {
-		return errors.New("URI必须包含有效的scheme (http://, https://, 或自定义scheme://)")
-	}
-
-	return nil
+	_, err := parseAndValidateRedirectURI(uri)
+	return err
 }
 
 // generateKeyForApplication 为应用生成密钥（使用新事务）

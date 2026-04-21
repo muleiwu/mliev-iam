@@ -11,12 +11,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// AdminCookieName 管理员 Access Token 的 HttpOnly Cookie 名
+const AdminCookieName = "admin_access_token"
+
+// extractBearerToken 从 Authorization 头或 HttpOnly Cookie 提取 JWT
+// 优先 Authorization 头（便于 API 调试与移动端），其次 Cookie（浏览器端防 XSS）
+func extractBearerToken(c *gin.Context) string {
+	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && parts[0] == "Bearer" {
+			return strings.TrimSpace(parts[1])
+		}
+		return ""
+	}
+	if cookie, err := c.Cookie(AdminCookieName); err == nil && cookie != "" {
+		return cookie
+	}
+	return ""
+}
+
 // AuthMiddleware JWT认证中间件
+// 支持两种凭据来源（任选其一）：
+//  1. Authorization: Bearer <token>
+//  2. HttpOnly Cookie admin_access_token（浏览器推荐，防 XSS 窃取）
 func AuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 从请求头获取token
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		tokenString := extractBearerToken(c)
+		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, dto.Response{
 				Code:    constants.ErrCodeUnauthorized,
 				Message: "缺少认证令牌",
@@ -24,19 +45,6 @@ func AuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-
-		// 检查Bearer前缀
-		tokenParts := strings.SplitN(authHeader, " ", 2)
-		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, dto.Response{
-				Code:    constants.ErrCodeUnauthorized,
-				Message: "认证令牌格式错误",
-			})
-			c.Abort()
-			return
-		}
-
-		tokenString := tokenParts[1]
 
 		// 创建JWT认证服务实例
 		jwtAuthService := service.NewJWTAuthService()
@@ -92,19 +100,11 @@ func AdminAuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 // 如果提供了token则验证，如果没有提供则继续执行，但不设置用户信息
 func OptionalAuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		tokenString := extractBearerToken(c)
+		if tokenString == "" {
 			c.Next()
 			return
 		}
-
-		tokenParts := strings.SplitN(authHeader, " ", 2)
-		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
-			c.Next()
-			return
-		}
-
-		tokenString := tokenParts[1]
 		jwtAuthService := service.NewJWTAuthService()
 
 		claims, err := jwtAuthService.ValidateToken(tokenString)
