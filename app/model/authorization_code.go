@@ -20,10 +20,10 @@ type AuthorizationCode struct {
 	// User     *User       `gorm:"foreignKey:UserID" json:"user,omitempty"`
 
 	// 授权信息
-	RedirectURI string   `gorm:"size:255;not null" json:"redirectUri"`
+	RedirectURI string   `gorm:"size:text;not null" json:"redirectUri"`
 	Scopes      []string `gorm:"type:json;serializer:json" json:"scopes"`
-	State       string   `gorm:"size:255" json:"state"`
-	Nonce       string   `gorm:"size:255" json:"nonce"`
+	State       string   `gorm:"type:text" json:"state"`
+	Nonce       string   `gorm:"size:text" json:"nonce"`
 
 	// PKCE 支持
 	CodeChallenge       string `gorm:"size:128" json:"codeChallenge"`
