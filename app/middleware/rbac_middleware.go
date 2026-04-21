@@ -6,136 +6,95 @@ import (
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
-// RBACMiddleware RBAC权限验证中间件
-func RBACMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 获取当前用户ID（从JWT中间件或session中获取）
-		userIDInterface, exists := c.Get("user_id")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "用户未登录",
-			})
-			c.Abort()
+// resolveUserID 从上下文解析 user_id，支持 uint / string 两种存储。
+// 失败时自动写回 401 并返回 (0, false)。
+func resolveUserID(c httpInterfaces.RouterContextInterface) (uint, bool) {
+	v := c.Get("user_id")
+	if v == nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
+			"code":    401,
+			"message": "用户未登录",
+		})
+		return 0, false
+	}
+	if id, ok := v.(uint); ok {
+		return id, true
+	}
+	if s, ok := v.(string); ok {
+		if id, err := strconv.ParseUint(s, 10, 32); err == nil {
+			return uint(id), true
+		}
+		c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
+			"code":    401,
+			"message": "用户ID格式错误",
+		})
+		return 0, false
+	}
+	c.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
+		"code":    401,
+		"message": "用户ID类型错误",
+	})
+	return 0, false
+}
+
+// RBACMiddleware RBAC 权限验证中间件
+func RBACMiddleware() httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
+		userID, ok := resolveUserID(c)
+		if !ok {
 			return
 		}
 
-		userID, ok := userIDInterface.(uint)
-		if !ok {
-			// 尝试字符串转换
-			if userIDStr, ok := userIDInterface.(string); ok {
-				if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
-					userID = uint(id)
-				} else {
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"code":    401,
-						"message": "用户ID格式错误",
-					})
-					c.Abort()
-					return
-				}
-			} else {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "用户ID类型错误",
-				})
-				c.Abort()
-				return
-			}
-		}
-
-		// 获取请求路径和方法
-		path := c.Request.URL.Path
-		method := c.Request.Method
-
-		// 检查用户是否有URL访问权限
 		userService := service.NewUserService(helper.GetDatabase())
-		hasPermission, err := userService.CheckUserURLPermission(userID, path, method)
+		hasPermission, err := userService.CheckUserURLPermission(userID, c.Path(), c.Method())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{
 				"code":    500,
 				"message": "权限检查失败: " + err.Error(),
 			})
-			c.Abort()
 			return
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
+			c.AbortWithStatusJSON(http.StatusForbidden, map[string]any{
 				"code":    403,
 				"message": "没有访问权限",
 			})
-			c.Abort()
 			return
 		}
 
-		// 将用户ID和权限信息存储到上下文中，供后续处理使用
 		c.Set("user_id", userID)
 		c.Next()
 	}
 }
 
 // RequirePermission 要求特定权限的中间件
-func RequirePermission(resource, action string, helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 获取当前用户ID
-		userIDInterface, exists := c.Get("user_id")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "用户未登录",
-			})
-			c.Abort()
+func RequirePermission(resource, action string) httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
+		userID, ok := resolveUserID(c)
+		if !ok {
 			return
 		}
 
-		userID, ok := userIDInterface.(uint)
-		if !ok {
-			// 尝试字符串转换
-			if userIDStr, ok := userIDInterface.(string); ok {
-				if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
-					userID = uint(id)
-				} else {
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"code":    401,
-						"message": "用户ID格式错误",
-					})
-					c.Abort()
-					return
-				}
-			} else {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "用户ID类型错误",
-				})
-				c.Abort()
-				return
-			}
-		}
-
-		// 检查用户是否有特定权限
 		userService := service.NewUserService(helper.GetDatabase())
-		permissionCode := resource + ":" + action
-		hasPermission, err := userService.CheckUserPermission(userID, permissionCode)
+		hasPermission, err := userService.CheckUserPermission(userID, resource+":"+action)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{
 				"code":    500,
 				"message": "权限检查失败: " + err.Error(),
 			})
-			c.Abort()
 			return
 		}
 
 		if !hasPermission {
-			c.JSON(http.StatusForbidden, gin.H{
+			c.AbortWithStatusJSON(http.StatusForbidden, map[string]any{
 				"code":    403,
 				"message": "没有" + resource + ":" + action + "权限",
 			})
-			c.Abort()
 			return
 		}
 
@@ -144,56 +103,23 @@ func RequirePermission(resource, action string, helper interfaces.HelperInterfac
 }
 
 // RequireRole 要求特定角色的中间件
-func RequireRole(roleCode string, helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 获取当前用户ID
-		userIDInterface, exists := c.Get("user_id")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "用户未登录",
-			})
-			c.Abort()
+func RequireRole(roleCode string) httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
+		userID, ok := resolveUserID(c)
+		if !ok {
 			return
 		}
 
-		userID, ok := userIDInterface.(uint)
-		if !ok {
-			// 尝试字符串转换
-			if userIDStr, ok := userIDInterface.(string); ok {
-				if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
-					userID = uint(id)
-				} else {
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"code":    401,
-						"message": "用户ID格式错误",
-					})
-					c.Abort()
-					return
-				}
-			} else {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "用户ID类型错误",
-				})
-				c.Abort()
-				return
-			}
-		}
-
-		// 获取用户角色
 		userService := service.NewUserService(helper.GetDatabase())
 		userRoles, err := userService.GetUserRoles(userID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{
 				"code":    500,
 				"message": "获取用户角色失败: " + err.Error(),
 			})
-			c.Abort()
 			return
 		}
 
-		// 检查是否有指定角色
 		hasRole := false
 		for _, role := range userRoles {
 			if role.Code == roleCode && role.IsEnabled() {
@@ -203,11 +129,10 @@ func RequireRole(roleCode string, helper interfaces.HelperInterface) gin.Handler
 		}
 
 		if !hasRole {
-			c.JSON(http.StatusForbidden, gin.H{
+			c.AbortWithStatusJSON(http.StatusForbidden, map[string]any{
 				"code":    403,
 				"message": "需要" + roleCode + "角色权限",
 			})
-			c.Abort()
 			return
 		}
 
@@ -216,77 +141,44 @@ func RequireRole(roleCode string, helper interfaces.HelperInterface) gin.Handler
 }
 
 // RequireAnyRole 要求任意一个角色的中间件
-func RequireAnyRole(roleCodes []string, helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 获取当前用户ID
-		userIDInterface, exists := c.Get("user_id")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"code":    401,
-				"message": "用户未登录",
-			})
-			c.Abort()
+func RequireAnyRole(roleCodes []string) httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
+		userID, ok := resolveUserID(c)
+		if !ok {
 			return
 		}
 
-		userID, ok := userIDInterface.(uint)
-		if !ok {
-			// 尝试字符串转换
-			if userIDStr, ok := userIDInterface.(string); ok {
-				if id, err := strconv.ParseUint(userIDStr, 10, 32); err == nil {
-					userID = uint(id)
-				} else {
-					c.JSON(http.StatusUnauthorized, gin.H{
-						"code":    401,
-						"message": "用户ID格式错误",
-					})
-					c.Abort()
-					return
-				}
-			} else {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"code":    401,
-					"message": "用户ID类型错误",
-				})
-				c.Abort()
-				return
-			}
-		}
-
-		// 获取用户角色
 		userService := service.NewUserService(helper.GetDatabase())
 		userRoles, err := userService.GetUserRoles(userID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{
 				"code":    500,
 				"message": "获取用户角色失败: " + err.Error(),
 			})
-			c.Abort()
 			return
 		}
 
-		// 检查是否有任意一个指定角色
 		hasRole := false
 		for _, role := range userRoles {
-			if role.IsEnabled() {
-				for _, roleCode := range roleCodes {
-					if role.Code == roleCode {
-						hasRole = true
-						break
-					}
-				}
-				if hasRole {
+			if !role.IsEnabled() {
+				continue
+			}
+			for _, code := range roleCodes {
+				if role.Code == code {
+					hasRole = true
 					break
 				}
+			}
+			if hasRole {
+				break
 			}
 		}
 
 		if !hasRole {
-			c.JSON(http.StatusForbidden, gin.H{
+			c.AbortWithStatusJSON(http.StatusForbidden, map[string]any{
 				"code":    403,
 				"message": "需要以下任意一个角色权限: " + strings.Join(roleCodes, ", "),
 			})
-			c.Abort()
 			return
 		}
 

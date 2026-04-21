@@ -1,15 +1,72 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"gorm.io/gorm"
 )
+
+const settingCacheTTL = time.Hour
+
+func settingCacheKey(key string) string {
+	return "setting:" + key
+}
+
+// Get 返回指定 key 的设置值；未命中返回空字符串。
+// 替代原 internal/helper.GetSetting，内部走 go-web cache + 项目 dao。
+func (s *SettingService) Get(key string) string {
+	return s.GetWithDefault(key, "")
+}
+
+// GetWithDefault 返回指定 key 的设置值，未命中时回退到默认值。
+func (s *SettingService) GetWithDefault(key, defaultValue string) string {
+	ctx := context.Background()
+
+	if cache := helper.GetCache(); cache != nil {
+		var cached string
+		if err := cache.Get(ctx, settingCacheKey(key), &cached); err == nil && cached != "" {
+			return cached
+		}
+	}
+
+	setting, err := s.settingDao.GetByKey(key)
+	if err != nil {
+		return defaultValue
+	}
+
+	if cache := helper.GetCache(); cache != nil {
+		_ = cache.Set(ctx, settingCacheKey(key), setting.Value, settingCacheTTL)
+	}
+
+	return setting.Value
+}
+
+// SetSimple 更新 key 对应的设置值并失效缓存；用于替代原 helper.SetSetting。
+// 区别于 Update(key, req): SetSimple 只写 value，不动 category/remark。
+func (s *SettingService) SetSimple(key, value string) error {
+	if err := s.settingDao.UpdateByKey(key, value); err != nil {
+		return err
+	}
+	if cache := helper.GetCache(); cache != nil {
+		ctx := context.Background()
+		_ = cache.Del(ctx, settingCacheKey(key))
+	}
+	return nil
+}
+
+// NewSettingServiceFromHelper 使用包级 helper.GetDatabase() 构建服务实例。
+// 为原 helper.GetSetting/SetSetting 调用方提供无参简易入口。
+func NewSettingServiceFromHelper() *SettingService {
+	return NewSettingService(helper.GetDatabase())
+}
 
 const (
 	// RegisterFieldsConfigKey 注册字段配置的key

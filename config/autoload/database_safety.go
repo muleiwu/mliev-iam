@@ -1,6 +1,8 @@
 package autoload
 
-import envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+import (
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+)
 
 // DatabaseSafety 数据库安全配置
 //
@@ -9,9 +11,9 @@ import envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 //	  新增表/字段请用 goose 迁移文件（migrations/YYYYMMDDHHMMSS_xxx.go）。
 type DatabaseSafety struct{}
 
-func (receiver DatabaseSafety) InitConfig(helper envInterface.HelperInterface) map[string]any {
+func (receiver DatabaseSafety) InitConfig() map[string]any {
 	env := helper.GetEnv()
-	mode := env.GetString("mode", "release")
+	mode := env.GetString("app.mode", "release")
 	defaultAllow := mode == "debug"
 	return map[string]any{
 		"database.auto_migrate": env.GetBool("database.auto_migrate", defaultAllow),

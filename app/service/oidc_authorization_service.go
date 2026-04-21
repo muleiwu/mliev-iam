@@ -16,8 +16,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
-	"cnb.cool/mliev/iam/mliev-iam/internal/helper"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -135,7 +135,7 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 			if existing, _ := s.authCodeDAO.GetByCode(req.Code); existing != nil {
 				// 检测到 code 复用，撤销所有基于该 code 的 token
 				_ = s.tokenDAO.RevokeByAuthorizationCode(existing.ID)
-				if logger := helper.GetHelper().GetLogger(); logger != nil {
+				if logger := helper.GetLogger(); logger != nil {
 					logger.Warn(fmt.Sprintf("authorization_code replay detected: fp=%s", codeFingerprint(req.Code)))
 				}
 			}
@@ -402,13 +402,13 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 	}
 
 	if err := s.authCodeDAO.Create(authCode); err != nil {
-		if logger := helper.GetHelper().GetLogger(); logger != nil {
+		if logger := helper.GetLogger(); logger != nil {
 			logger.Error(fmt.Sprintf("创建授权码失败 fp=%s err=%v", codeFingerprint(code), err))
 		}
 		return s.errorResponse("server_error", "创建授权码失败", req.State), nil
 	}
 
-	if logger := helper.GetHelper().GetLogger(); logger != nil {
+	if logger := helper.GetLogger(); logger != nil {
 		logger.Debug(fmt.Sprintf("authorization_code issued: fp=%s client=%s user=%d",
 			codeFingerprint(code), clientID, user.ID))
 	}
@@ -537,11 +537,11 @@ func validateCodeVerifierFormat(verifier string) error {
 
 // pkcePlainAllowed 是否允许 plain 挑战方法（默认 false）
 func pkcePlainAllowed() bool {
-	h := helper.GetHelper()
-	if h == nil || h.GetEnv() == nil {
+	env := helper.GetEnv()
+	if env == nil {
 		return false
 	}
-	return h.GetEnv().GetBool("oidc.pkce.allow_plain", false)
+	return env.GetBool("oidc.pkce.allow_plain", false)
 }
 
 // validateRefreshScopes 验证刷新令牌的作用域
@@ -628,7 +628,7 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 	accessToken, authCode string,
 ) (string, error) {
 	// 获取全局配置
-	env := helper.GetHelper().GetEnv()
+	env := helper.GetEnv()
 	idTokenLifetime := env.GetInt("oidc.token_lifetime.id_token", 3600)
 
 	// 1. 获取客户端ID
@@ -688,7 +688,7 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 // generateJWTAccessToken 生成 JWT 格式的 Access Token
 func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string) (string, error) {
 	// 获取全局配置
-	env := helper.GetHelper().GetEnv()
+	env := helper.GetEnv()
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
 		accessTokenLifetime = env.GetInt("oidc.token_lifetime.access_token", 3600)
@@ -757,7 +757,7 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 // generateClientCredentialsJWTAccessToken 生成客户端凭据流程的 JWT Access Token
 func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string) (string, error) {
 	// 获取全局配置
-	env := helper.GetHelper().GetEnv()
+	env := helper.GetEnv()
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
 		accessTokenLifetime = env.GetInt("oidc.token_lifetime.access_token", 3600)

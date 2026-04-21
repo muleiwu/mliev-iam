@@ -159,7 +159,7 @@ func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 // GET /api/admin/auth/profile
 func (ac AuthController) GetAdminProfile(c *gin.Context, helper interfaces.HelperInterface) {
 	// 从认证中间件获取当前用户信息
-	userID, _, exists := middleware.GetCurrentUser(c)
+	userID, _, exists := middleware.GetCurrentUserFromGin(c)
 	if !exists {
 		ac.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return

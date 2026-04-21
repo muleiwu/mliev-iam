@@ -2,7 +2,7 @@ package admin
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/reload"
+	"cnb.cool/mliev/open/go-web/pkg/server/reload"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,12 +23,8 @@ func (sc SystemController) ReloadConfig(c *gin.Context, helper interfaces.Helper
 	// 记录操作日志
 	helper.GetLogger().Info("管理员触发配置重载")
 
-	// 异步触发重启
-	go func() {
-		if !reload.TriggerReload() {
-			helper.GetLogger().Warn("重启请求已在队列中，忽略此次请求")
-		}
-	}()
+	// 异步触发重启。go-web 的 TriggerReload 不返回状态；若通道已满会静默丢弃。
+	go reload.TriggerReload()
 
 	// 立即返回响应
 	sc.Success(c, ReloadConfigResponse{

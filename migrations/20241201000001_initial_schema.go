@@ -6,7 +6,7 @@ import (
 	"errors"
 	"log"
 
-	"cnb.cool/mliev/iam/mliev-iam/internal/helper"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/pressly/goose/v3"
 )
 
@@ -28,7 +28,7 @@ func upInitialSchema(ctx context.Context, tx *sql.Tx) error {
 		return nil
 	}
 
-	allowAutoMigrate := helper.GetHelper().GetConfig().GetBool("database.auto_migrate", false)
+	allowAutoMigrate := helper.GetConfig().GetBool("database.auto_migrate", false)
 	if !allowAutoMigrate {
 		if tx != nil {
 			var exists int
@@ -43,7 +43,7 @@ func upInitialSchema(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	log.Println("[initial_schema] database.auto_migrate=true，执行 GORM AutoMigrate（仅推荐开发/首次安装）")
-	models := helper.GetHelper().GetConfig().Get("database.migration", []any{}).([]any)
+	models := helper.GetConfig().Get("database.migration", []any{}).([]any)
 	if err := db.AutoMigrate(models...); err != nil {
 		return err
 	}

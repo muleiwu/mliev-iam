@@ -2,54 +2,45 @@ package autoload
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
-	envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 )
 
 type Migration struct {
 }
 
+// Get 返回需要通过 GORM AutoMigrate 处理的模型列表（仅在 debug 模式或
+// database.auto_migrate=true 时使用；生产环境请使用 migrations/ 下的 goose 脚本）。
 func (receiver Migration) Get() []any {
 	return []any{
-		// 基础模型（被其他表引用的表需要先创建）
 		&model.Department{},
 		&model.Role{},
 		&model.Permission{},
 
-		// 用户相关模型
 		&model.User{},
 
-		// 关联表模型（依赖User和Role/Permission/Department）
-		&model.UserDepartment{}, // 用户部门关联表（保持独立性，支持To C和To B）
+		&model.UserDepartment{},
 		&model.UserRole{},
 		&model.RolePermission{},
 
-		// 应用管理模型（支持多协议）
 		&model.Application{},
-
-		// OIDC应用密钥表
 		&model.ApplicationOIDCKey{},
 
-		// 验证码
 		&model.CaptchaConfig{},
 
-		// OIDC协议相关模型
 		&model.AuthorizationCode{},
 		&model.OIDCToken{},
 
-		// 社会化登录相关模型
-		&model.SocialProvider{},    // 社会化登录提供商配置表
-		&model.UserSocialAccount{}, // 用户社交账号绑定表
+		&model.SocialProvider{},
+		&model.UserSocialAccount{},
 
-		// 系统设置模型
-		&model.Setting{}, // 系统设置表（key-value存储）
-
-		// 测试模型（可选）
-		//&model.TestDemo{},
+		&model.Setting{},
 	}
 }
 
-func (receiver Migration) InitConfig(helper envInterface.HelperInterface) map[string]any {
+func (receiver Migration) InitConfig() map[string]any {
+	env := helper.GetEnv()
 	return map[string]any{
-		"database.migration": receiver.Get(),
+		"database.migration":     receiver.Get(),
+		"database.migration.dir": env.GetString("database.migration.dir", "migrations"),
 	}
 }

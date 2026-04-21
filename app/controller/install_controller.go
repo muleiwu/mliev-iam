@@ -7,9 +7,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/reload"
-	"cnb.cool/mliev/iam/mliev-iam/internal/service/migration"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
+	"cnb.cool/mliev/open/go-web/pkg/server/reload"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +20,7 @@ type InstallController struct {
 // CheckInstall 检查系统安装状态
 // GET /api/install/check
 func (ic InstallController) CheckInstall(c *gin.Context, helper interfaces.HelperInterface) {
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 	response := installService.CheckInstallStatus()
 
 	ic.Success(c, response)
@@ -36,7 +35,7 @@ func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.Hel
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 
 	// 测试数据库连接
 	testDB, err := installService.TestDatabaseConnection(req)
@@ -61,7 +60,7 @@ func (ic InstallController) TestRedisConnection(c *gin.Context, helper interface
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 
 	// 测试Redis连接
 	testRedis, err := installService.TestRedisConnection(req)
@@ -86,7 +85,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 
 	// 1. 检查系统是否已安装
 	status := installService.CheckInstallStatus()
@@ -122,7 +121,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 	}()
 
 	// 4. 使用测试成功的数据库连接创建新的 service 实例
-	newInstallService := service.NewInstallService(testDB, helper)
+	newInstallService := service.NewInstallService(testDB)
 
 	// 5. 更新数据库配置到配置文件
 	if err := newInstallService.UpdateDatabaseConfig(req.Database); err != nil {
@@ -152,7 +151,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 	if dialect == "" {
 		dialect = "mysql" // 默认 MySQL
 	}
-	if err := migration.RunGooseMigrations(sqlDB, dialect, nil); err != nil {
+	if err := migrations.RunGooseMigrations(sqlDB, dialect, nil); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "数据库迁移失败: "+err.Error())
 		return
 	}

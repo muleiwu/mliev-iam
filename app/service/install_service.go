@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,8 +10,7 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	redisImpl "cnb.cool/mliev/iam/mliev-iam/internal/pkg/redis/impl"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
@@ -22,13 +22,12 @@ import (
 
 // InstallService 安装服务
 type InstallService struct {
-	db     *gorm.DB
-	helper interfaces.HelperInterface
+	db *gorm.DB
 }
 
 // NewInstallService 创建安装服务实例
-func NewInstallService(db *gorm.DB, helper interfaces.HelperInterface) *InstallService {
-	return &InstallService{db: db, helper: helper}
+func NewInstallService(db *gorm.DB) *InstallService {
+	return &InstallService{db: db}
 }
 
 // CheckInstallStatus 检查安装状态
@@ -148,13 +147,18 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gor
 
 // TestRedisConnection 测试Redis连接
 func (s *InstallService) TestRedisConnection(config dto.RedisConfig) (*redis.Client, error) {
-	// 使用已有的Redis实现进行连接测试
-	client, err := redisImpl.NewRedis(s.helper, config.Host, config.Port, config.DB, config.Password)
-	if err != nil {
+	client := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%d", config.Host, config.Port),
+		Password: config.Password,
+		DB:       config.DB,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("Redis连接失败: %w", err)
 	}
 
-	// 返回Redis客户端供后续使用
 	return client, nil
 }
 
@@ -541,39 +545,37 @@ func (s *InstallService) MarkAsInstalled() error {
 
 // createDatabaseTables 创建数据库表结构
 func (s *InstallService) createDatabaseTables() error {
-	// 从配置中获取迁移模型列表（与 config/autoload/migration.go 保持一致）
-	migrationConfig := s.helper.GetConfig().Get("database.migration", []any{})
+	cfg := helper.GetConfig()
+	migrationConfig := cfg.Get("database.migration", []any{})
 	if migrationConfig == nil {
 		return fmt.Errorf("未找到数据库迁移配置")
 	}
 
-	models, ok := migrationConfig.([]interface{})
+	models, ok := migrationConfig.([]any)
 	if !ok {
-		return fmt.Errorf("数据库迁移配置格式错误")
+		if typed, okTyped := migrationConfig.([]interface{}); okTyped {
+			models = typed
+		} else {
+			return fmt.Errorf("数据库迁移配置格式错误")
+		}
 	}
 
 	if len(models) == 0 {
 		return fmt.Errorf("数据库迁移配置为空")
 	}
 
-	// 获取数据库驱动类型
-	driver := s.helper.GetConfig().GetString("database.driver", "mysql")
+	driver := cfg.GetString("database.driver", "mysql")
 
-	// 根据不同的数据库类型，执行相应的外键检查设置
 	if driver == "mysql" {
-		// MySQL: 禁用外键检查
 		s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
 	}
 
-	// 执行自动迁移（仅安装流程，生产运行时请用 goose 迁移文件）
-	s.helper.GetLogger().Warn("[install] 执行 GORM AutoMigrate 建表；后续 schema 变更请用 migrations/*.go 而非 AutoMigrate")
+	helper.GetLogger().Warn("[install] 执行 GORM AutoMigrate 建表；后续 schema 变更请用 migrations/*.go 而非 AutoMigrate")
 	if err := s.db.AutoMigrate(models...); err != nil {
 		return fmt.Errorf("数据库表结构迁移失败: %w", err)
 	}
 
-	// 根据不同的数据库类型，恢复外键检查设置
 	if driver == "mysql" {
-		// MySQL: 重新启用外键检查
 		s.db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
 	}
 

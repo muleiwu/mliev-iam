@@ -1,140 +1,59 @@
+// Package helper 提供 HelperInterface 单例，是迁移 mach/go-web 期间的过渡桥接。
+//
+// 过渡策略：
+//   - 目标框架（go-web）将 env/config/logger/db/redis/cache 放在 cnb.cool/mliev/open/go-web/pkg/helper
+//     的包级全局函数里，controller 与 middleware 直接 helper.GetDatabase() 即可。
+//   - 本包保留 HelperInterface + GetHelper() 单例 API，把每次访问委托给 go-web 的包级函数。
+//   - 这样未迁移完成的 controller（仍持有 helper 参数并调用 helper.GetDatabase() 等）继续工作，
+//     而底层数据源已由 go-web 的装配链托管。
+//   - Controller 全部切到 go-web signature 后，本包会被删除；新增代码请直接用 go-web helper。
 package helper
 
 import (
-	"context"
-	"sync"
-	"time"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/dao"
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+	goweb "cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/muleiwu/gsr"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-type Helper struct {
-	env      gsr.Enver
-	config   gsr.Provider
-	logger   gsr.Logger
-	redis    *redis.Client
-	database *gorm.DB
-	cache    gsr.Cacher
-}
+// Helper 是 HelperInterface 的过渡实现；字段都委托给 go-web 包级函数，
+// 无状态，可在 container 装配完成后任意时刻调用。
+type Helper struct{}
 
-var helperOnce sync.Once
-var helperData interfaces.HelperInterface
+var helperData interfaces.HelperInterface = &Helper{}
 
+// GetHelper 返回进程级单例；在 go-web 装配完成前调用时，Getter 也会返回 nil（由 go-web 决定）。
 func GetHelper() interfaces.HelperInterface {
-	helperOnce.Do(func() {
-		helperData = &Helper{}
-	})
 	return helperData
 }
 
-func (receiver *Helper) GetEnv() gsr.Enver {
-	return receiver.env
+func (*Helper) GetEnv() gsr.Enver       { return goweb.GetEnv() }
+func (*Helper) GetConfig() gsr.Provider { return goweb.GetConfig() }
+func (*Helper) GetLogger() gsr.Logger   { return goweb.GetLogger() }
+func (*Helper) GetRedis() *redis.Client { return goweb.GetRedis() }
+func (*Helper) GetDatabase() *gorm.DB   { return goweb.GetDatabase() }
+func (*Helper) GetCache() gsr.Cacher    { return goweb.GetCache() }
+
+// Setter 在新架构下不再需要（由 container 托管），仅保留空实现以满足接口。
+func (*Helper) SetEnv(gsr.Enver)       {}
+func (*Helper) SetConfig(gsr.Provider) {}
+func (*Helper) SetLogger(gsr.Logger)   {}
+func (*Helper) SetRedis(*redis.Client) {}
+func (*Helper) SetDatabase(*gorm.DB)   {}
+func (*Helper) SetCache(gsr.Cacher)    {}
+
+// GetSetting / GetSettingWithDefault / SetSetting 委托给 app/service.SettingService。
+// 新代码请直接使用 service.NewSettingServiceFromHelper()。
+func (*Helper) GetSetting(key string) string {
+	return service.NewSettingServiceFromHelper().Get(key)
 }
 
-func (receiver *Helper) GetConfig() gsr.Provider {
-	return receiver.config
+func (*Helper) GetSettingWithDefault(key, defaultValue string) string {
+	return service.NewSettingServiceFromHelper().GetWithDefault(key, defaultValue)
 }
 
-func (receiver *Helper) GetLogger() gsr.Logger {
-	return receiver.logger
-}
-
-func (receiver *Helper) GetRedis() *redis.Client {
-	return receiver.redis
-}
-
-func (receiver *Helper) GetDatabase() *gorm.DB {
-	return receiver.database
-}
-
-func (receiver *Helper) SetEnv(env gsr.Enver) {
-	receiver.env = env
-}
-
-func (receiver *Helper) SetConfig(config gsr.Provider) {
-	receiver.config = config
-}
-
-func (receiver *Helper) SetLogger(logger gsr.Logger) {
-	receiver.logger = logger
-}
-
-func (receiver *Helper) SetRedis(redis *redis.Client) {
-	receiver.redis = redis
-}
-
-func (receiver *Helper) SetDatabase(database *gorm.DB) {
-	receiver.database = database
-}
-
-func (receiver *Helper) GetCache() gsr.Cacher {
-	return receiver.cache
-}
-
-func (receiver *Helper) SetCache(cache gsr.Cacher) {
-	receiver.cache = cache
-}
-
-// GetSetting retrieves a setting value by key, using cache when available
-func (receiver *Helper) GetSetting(key string) string {
-	return receiver.GetSettingWithDefault(key, "")
-}
-
-// GetSettingWithDefault retrieves a setting value by key with a default value, using cache when available
-func (receiver *Helper) GetSettingWithDefault(key string, defaultValue string) string {
-	cacheKey := "setting:" + key
-	ctx := context.Background()
-
-	// Try to get from cache first
-	if receiver.cache != nil {
-		var cachedValue string
-		err := receiver.cache.Get(ctx, cacheKey, &cachedValue)
-		if err == nil && cachedValue != "" {
-			return cachedValue
-		}
-	}
-
-	// Cache miss or no cache, query from database
-	if receiver.database == nil {
-		return defaultValue
-	}
-
-	settingDao := dao.NewSettingDao(receiver.database)
-	setting, err := settingDao.GetByKey(key)
-	if err != nil {
-		return defaultValue
-	}
-
-	// Store in cache with 1 hour TTL
-	if receiver.cache != nil {
-		_ = receiver.cache.Set(ctx, cacheKey, setting.Value, time.Hour)
-	}
-
-	return setting.Value
-}
-
-// SetSetting updates a setting value and invalidates cache
-func (receiver *Helper) SetSetting(key, value string) error {
-	if receiver.database == nil {
-		return gorm.ErrInvalidDB
-	}
-
-	settingDao := dao.NewSettingDao(receiver.database)
-	err := settingDao.UpdateByKey(key, value)
-	if err != nil {
-		return err
-	}
-
-	// Invalidate cache
-	if receiver.cache != nil {
-		cacheKey := "setting:" + key
-		ctx := context.Background()
-		_ = receiver.cache.Del(ctx, cacheKey)
-	}
-
-	return nil
+func (*Helper) SetSetting(key, value string) error {
+	return service.NewSettingServiceFromHelper().SetSimple(key, value)
 }
