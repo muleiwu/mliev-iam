@@ -3,14 +3,12 @@ module cnb.cool/mliev/iam/mliev-iam
 go 1.25.0
 
 require (
-	cnb.cool/mliev/open/go-web v0.0.0-00010101000000-000000000000
-	github.com/gin-gonic/gin v1.11.0
+	cnb.cool/mliev/open/go-web v1.7.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/mliev-sdk/push-go v1.0.0
 	github.com/muleiwu/gomander v1.0.0
-	github.com/muleiwu/gsr v1.1.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/spf13/viper v1.21.0
@@ -25,7 +23,7 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-replace cnb.cool/mliev/open/go-web => ../../open/go-web
+//replace cnb.cool/mliev/open/go-web => ../../open/go-web
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -40,6 +38,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
+	github.com/gin-gonic/gin v1.11.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
@@ -66,6 +65,7 @@ require (
 	github.com/muleiwu/anyto v1.1.0 // indirect
 	github.com/muleiwu/go-cache v1.1.0 // indirect
 	github.com/muleiwu/golog v1.1.1 // indirect
+	github.com/muleiwu/gsr v1.1.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect

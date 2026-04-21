@@ -8,8 +8,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // SocialProviderController 社会化登录提供商管理控制器（管理员）
@@ -19,7 +19,7 @@ type SocialProviderController struct {
 
 // CreateProvider 创建提供商
 // POST /api/admin/social-providers
-func (pc SocialProviderController) CreateProvider(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) CreateProvider(c httpInterfaces.RouterContextInterface) {
 	var req dto.CreateSocialProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -38,7 +38,7 @@ func (pc SocialProviderController) CreateProvider(c *gin.Context, helper interfa
 
 // GetProvider 获取提供商详情
 // GET /api/admin/social-providers/:id
-func (pc SocialProviderController) GetProvider(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) GetProvider(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -58,7 +58,7 @@ func (pc SocialProviderController) GetProvider(c *gin.Context, helper interfaces
 
 // GetProviderList 获取提供商列表
 // GET /api/admin/social-providers
-func (pc SocialProviderController) GetProviderList(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) GetProviderList(c httpInterfaces.RouterContextInterface) {
 	// 获取分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
@@ -80,7 +80,7 @@ func (pc SocialProviderController) GetProviderList(c *gin.Context, helper interf
 		return
 	}
 
-	pc.Success(c, gin.H{
+	pc.Success(c, map[string]any{
 		"items":    items,
 		"total":    total,
 		"page":     page,
@@ -90,7 +90,7 @@ func (pc SocialProviderController) GetProviderList(c *gin.Context, helper interf
 
 // UpdateProvider 更新提供商
 // PUT /api/admin/social-providers/:id
-func (pc SocialProviderController) UpdateProvider(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) UpdateProvider(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -116,7 +116,7 @@ func (pc SocialProviderController) UpdateProvider(c *gin.Context, helper interfa
 
 // DeleteProvider 删除提供商
 // DELETE /api/admin/social-providers/:id
-func (pc SocialProviderController) DeleteProvider(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) DeleteProvider(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -135,7 +135,7 @@ func (pc SocialProviderController) DeleteProvider(c *gin.Context, helper interfa
 
 // BatchOperation 批量操作提供商
 // POST /api/admin/social-providers/batch
-func (pc SocialProviderController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) BatchOperation(c httpInterfaces.RouterContextInterface) {
 	var req dto.SocialProviderBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -153,7 +153,7 @@ func (pc SocialProviderController) BatchOperation(c *gin.Context, helper interfa
 
 // GetProviderStats 获取提供商统计信息
 // GET /api/admin/social-providers/stats
-func (pc SocialProviderController) GetProviderStats(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc SocialProviderController) GetProviderStats(c httpInterfaces.RouterContextInterface) {
 	providerService := service.NewSocialProviderService(helper.GetDatabase())
 	stats, err := providerService.GetProviderStats()
 	if err != nil {

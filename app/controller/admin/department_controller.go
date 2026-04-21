@@ -7,8 +7,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // DepartmentController 管理员部门控制器
@@ -18,7 +18,7 @@ type DepartmentController struct {
 
 // CreateDepartment 创建部门（管理员操作）
 // POST /api/admin/departments
-func (adc DepartmentController) CreateDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) CreateDepartment(c httpInterfaces.RouterContextInterface) {
 	var req dto.CreateDepartmentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		adc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -51,7 +51,7 @@ func (adc DepartmentController) CreateDepartment(c *gin.Context, helper interfac
 
 // GetDepartment 获取部门详情（管理员操作）
 // GET /api/admin/departments/:id
-func (adc DepartmentController) GetDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetDepartment(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -77,7 +77,7 @@ func (adc DepartmentController) GetDepartment(c *gin.Context, helper interfaces.
 
 // UpdateDepartment 更新部门信息（管理员操作）
 // PUT /api/admin/departments/:id
-func (adc DepartmentController) UpdateDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) UpdateDepartment(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -114,7 +114,7 @@ func (adc DepartmentController) UpdateDepartment(c *gin.Context, helper interfac
 
 // DeleteDepartment 删除部门（管理员操作）
 // DELETE /api/admin/departments/:id
-func (adc DepartmentController) DeleteDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) DeleteDepartment(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -145,7 +145,7 @@ func (adc DepartmentController) DeleteDepartment(c *gin.Context, helper interfac
 
 // GetDepartmentList 获取部门列表（管理员操作）
 // GET /api/admin/departments
-func (adc DepartmentController) GetDepartmentList(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetDepartmentList(c httpInterfaces.RouterContextInterface) {
 	var req dto.DepartmentQueryRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		adc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
@@ -164,7 +164,7 @@ func (adc DepartmentController) GetDepartmentList(c *gin.Context, helper interfa
 
 // GetDepartmentTree 获取部门树形结构（管理员操作）
 // GET /api/admin/departments/tree
-func (adc DepartmentController) GetDepartmentTree(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetDepartmentTree(c httpInterfaces.RouterContextInterface) {
 	departmentService := service.NewDepartmentService(helper.GetDatabase())
 	response, err := departmentService.GetDepartmentTree()
 	if err != nil {
@@ -177,7 +177,7 @@ func (adc DepartmentController) GetDepartmentTree(c *gin.Context, helper interfa
 
 // UpdateDepartmentStatus 更新部门状态（管理员操作）
 // PUT /api/admin/departments/:id/status
-func (adc DepartmentController) UpdateDepartmentStatus(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) UpdateDepartmentStatus(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -207,7 +207,7 @@ func (adc DepartmentController) UpdateDepartmentStatus(c *gin.Context, helper in
 
 // BatchOperation 批量操作部门（管理员操作）
 // POST /api/admin/departments/batch
-func (adc DepartmentController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) BatchOperation(c httpInterfaces.RouterContextInterface) {
 	var req dto.BatchDepartmentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		adc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -226,7 +226,7 @@ func (adc DepartmentController) BatchOperation(c *gin.Context, helper interfaces
 
 // MoveDepartment 移动部门（管理员操作）
 // PUT /api/admin/departments/:id/move
-func (adc DepartmentController) MoveDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) MoveDepartment(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -267,7 +267,7 @@ func (adc DepartmentController) MoveDepartment(c *gin.Context, helper interfaces
 
 // GetChildrenDepartments 获取子部门列表（管理员操作）
 // GET /api/admin/departments/:id/children
-func (adc DepartmentController) GetChildrenDepartments(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetChildrenDepartments(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -291,7 +291,7 @@ func (adc DepartmentController) GetChildrenDepartments(c *gin.Context, helper in
 
 // GetDescendantDepartments 获取所有后代部门（管理员操作）
 // GET /api/admin/departments/:id/descendants
-func (adc DepartmentController) GetDescendantDepartments(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetDescendantDepartments(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -315,7 +315,7 @@ func (adc DepartmentController) GetDescendantDepartments(c *gin.Context, helper 
 
 // GetRootDepartments 获取根部门列表（管理员操作）
 // GET /api/admin/departments/roots
-func (adc DepartmentController) GetRootDepartments(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetRootDepartments(c httpInterfaces.RouterContextInterface) {
 	departmentService := service.NewDepartmentService(helper.GetDatabase())
 	response, err := departmentService.GetRootDepartments()
 	if err != nil {
@@ -328,7 +328,7 @@ func (adc DepartmentController) GetRootDepartments(c *gin.Context, helper interf
 
 // GetDepartmentsByManager 根据负责人获取部门列表（管理员操作）
 // GET /api/admin/managers/:managerId/departments
-func (adc DepartmentController) GetDepartmentsByManager(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetDepartmentsByManager(c httpInterfaces.RouterContextInterface) {
 	managerIdStr := c.Param("managerId")
 	managerId, err := strconv.ParseUint(managerIdStr, 10, 32)
 	if err != nil {
@@ -348,7 +348,7 @@ func (adc DepartmentController) GetDepartmentsByManager(c *gin.Context, helper i
 
 // GetActiveDepartmentsCount 获取部门统计数据（管理员操作）
 // GET /api/admin/departments/stats/active-count
-func (adc DepartmentController) GetActiveDepartmentsCount(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) GetActiveDepartmentsCount(c httpInterfaces.RouterContextInterface) {
 	departmentService := service.NewDepartmentService(helper.GetDatabase())
 	stats, err := departmentService.GetDepartmentStats()
 	if err != nil {
@@ -361,7 +361,7 @@ func (adc DepartmentController) GetActiveDepartmentsCount(c *gin.Context, helper
 
 // ValidateHierarchy 验证部门层级结构完整性（管理员操作）
 // POST /api/admin/departments/validate-hierarchy
-func (adc DepartmentController) ValidateHierarchy(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) ValidateHierarchy(c httpInterfaces.RouterContextInterface) {
 	departmentService := service.NewDepartmentService(helper.GetDatabase())
 	err := departmentService.ValidateDepartmentHierarchy()
 	if err != nil {
@@ -374,7 +374,7 @@ func (adc DepartmentController) ValidateHierarchy(c *gin.Context, helper interfa
 
 // RepairHierarchy 修复部门层级结构（管理员操作）
 // POST /api/admin/departments/repair-hierarchy
-func (adc DepartmentController) RepairHierarchy(c *gin.Context, helper interfaces.HelperInterface) {
+func (adc DepartmentController) RepairHierarchy(c httpInterfaces.RouterContextInterface) {
 	departmentService := service.NewDepartmentService(helper.GetDatabase())
 	err := departmentService.RepairDepartmentHierarchy()
 	if err != nil {

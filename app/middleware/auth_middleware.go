@@ -8,7 +8,6 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
-	"github.com/gin-gonic/gin"
 )
 
 // AdminCookieName 管理员 Access Token 的 HttpOnly Cookie 名
@@ -140,46 +139,6 @@ func GetCurrentUserID(c httpInterfaces.RouterContextInterface) (uint, bool) {
 func GetCurrentRole(c httpInterfaces.RouterContextInterface) (string, bool) {
 	v := c.Get("role")
 	if v == nil {
-		return "", false
-	}
-	role, ok := v.(string)
-	return role, ok
-}
-
-// ── 过渡期兼容：基于 *gin.Context 的读取辅助 ──
-// 目的：controller 全量迁移到 go-web 签名之前，仍以 *gin.Context 作为 handler 入参的老代码
-// 可通过下列 *FromGin 变体读取认证中间件写入的 user_id / username / role。
-// controller 迁移完成后，以下三函数连同 Overload 将一并删除。
-
-// GetCurrentUserFromGin 从 *gin.Context 读取 user_id + username
-func GetCurrentUserFromGin(c *gin.Context) (uint, string, bool) {
-	userID, exists1 := c.Get("user_id")
-	username, exists2 := c.Get("username")
-	if !exists1 || !exists2 {
-		return 0, "", false
-	}
-	uid, ok1 := userID.(uint)
-	uname, ok2 := username.(string)
-	if !ok1 || !ok2 {
-		return 0, "", false
-	}
-	return uid, uname, true
-}
-
-// GetCurrentUserIDFromGin 从 *gin.Context 读取 user_id
-func GetCurrentUserIDFromGin(c *gin.Context) (uint, bool) {
-	v, ok := c.Get("user_id")
-	if !ok {
-		return 0, false
-	}
-	id, ok := v.(uint)
-	return id, ok
-}
-
-// GetCurrentRoleFromGin 从 *gin.Context 读取 role
-func GetCurrentRoleFromGin(c *gin.Context) (string, bool) {
-	v, ok := c.Get("role")
-	if !ok {
 		return "", false
 	}
 	role, ok := v.(string)

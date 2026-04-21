@@ -24,7 +24,10 @@ func NewJWTAuthService() *JWTAuthService {
 
 // GenerateToken 生成JWT token
 func (s *JWTAuthService) GenerateToken(user *dto.UserResponse) (string, error) {
-	return s.jwtService.GenerateToken(user, s.config.GetAccessTokenHours())
+	return s.jwtService.GenerateToken(jwt.TokenSubject{
+		UserID:   user.ID,
+		Username: user.Username,
+	}, s.config.GetAccessTokenHours())
 }
 
 // ValidateToken 验证JWT token

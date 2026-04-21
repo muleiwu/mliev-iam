@@ -11,8 +11,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"gorm.io/gorm"
 )
 
@@ -23,7 +23,7 @@ type OIDCController struct {
 
 // Authorize OIDC授权端点
 // GET /oidc/authorize
-func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 	var req dto.AuthorizeRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		if req.RedirectURI == "" {
@@ -43,7 +43,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 	}
 
 	// 2. 创建 OIDC 会话（携带 prompt 参数）
-	rctx := c.Request.Context()
+	rctx := c.Request().Context()
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.CreateSession(
 		rctx,
@@ -65,7 +65,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 
 	// 3. prompt=none：不允许显示任何 UI
 	if req.Prompt == "none" {
-		if ok := oc.trySSO(c, helper, sessionService, session, req, true); ok {
+		if ok := oc.trySSO(c, sessionService, session, req, true); ok {
 			return
 		}
 		sessionService.DeleteSession(rctx, session.SessionID)
@@ -75,7 +75,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 
 	// 4. 非 prompt=login 时尝试 SSO 自动认证（不中断交互式流程，仅标记会话）
 	if req.Prompt != "login" {
-		_ = oc.trySSO(c, helper, sessionService, session, req, false)
+		_ = oc.trySSO(c, sessionService, session, req, false)
 	}
 
 	// 5. 重定向到统一的前端授权入口（编排器）
@@ -85,7 +85,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 
 // Token OIDC令牌端点
 // POST /oidc/token
-func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) Token(c httpInterfaces.RouterContextInterface) {
 	appUuid := c.Param("client_id")
 	var req dto.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
@@ -96,7 +96,7 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 	// 支持HTTP Basic认证
 	// 根据 RFC 6749 Section 2.3.1，客户端可以通过HTTP Basic认证或请求体传递凭据
 	if req.ClientID == "" || req.ClientSecret == "" {
-		clientID, clientSecret, hasAuth := c.Request.BasicAuth()
+		clientID, clientSecret, hasAuth := c.Request().BasicAuth()
 		if hasAuth {
 			req.ClientID = clientID
 			req.ClientSecret = clientSecret
@@ -112,7 +112,7 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 
 	// 获取issuer，确保与Discovery端点一致
-	issuer := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", appUuid))
+	issuer := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", appUuid))
 
 	var response *dto.TokenResponse
 	var err error
@@ -149,7 +149,7 @@ func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface
 // UserInfo OIDC用户信息端点
 // GET/POST /oidc/userinfo
 // 支持 GET (token 在 Authorization 头) 和 POST (token 在请求体或头)
-func (oc OIDCController) UserInfo(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) UserInfo(c httpInterfaces.RouterContextInterface) {
 	// 1. 获取访问令牌
 	accessToken := oc.extractAccessToken(c)
 	if accessToken == "" {
@@ -167,11 +167,11 @@ func (oc OIDCController) UserInfo(c *gin.Context, helper interfaces.HelperInterf
 		// 根据错误类型返回不同状态码
 		if errorCode == "insufficient_scope" {
 			// RFC 6750 §3: scope 不足返回 403 + WWW-Authenticate
-			c.Header("WWW-Authenticate", fmt.Sprintf(
+			c.SetHeader("WWW-Authenticate", fmt.Sprintf(
 				`Bearer realm="oidc", error="insufficient_scope", error_description=%q, scope="openid"`,
 				errorDescription,
 			))
-			c.JSON(http.StatusForbidden, gin.H{
+			c.JSON(http.StatusForbidden, map[string]any{
 				"error":             errorCode,
 				"error_description": errorDescription,
 			})
@@ -186,7 +186,7 @@ func (oc OIDCController) UserInfo(c *gin.Context, helper interfaces.HelperInterf
 
 // extractAccessToken 从请求中提取访问令牌
 // 支持 Authorization 头 (Bearer token) 和请求体 (POST)
-func (oc OIDCController) extractAccessToken(c *gin.Context) string {
+func (oc OIDCController) extractAccessToken(c httpInterfaces.RouterContextInterface) string {
 	// 1. 优先从 Authorization 头获取
 	authHeader := c.GetHeader("Authorization")
 	if authHeader != "" {
@@ -197,7 +197,7 @@ func (oc OIDCController) extractAccessToken(c *gin.Context) string {
 	}
 
 	// 2. 如果是 POST 请求，尝试从请求体获取
-	if c.Request.Method == "POST" {
+	if c.Method() == "POST" {
 		token := c.PostForm("access_token")
 		if token != "" {
 			return strings.TrimSpace(token)
@@ -209,14 +209,14 @@ func (oc OIDCController) extractAccessToken(c *gin.Context) string {
 
 // userInfoError 返回 UserInfo 端点的错误响应（RFC 6750 §3）
 // 统一 realm 为 "oidc"；error_description 用 %q 转义双引号
-func (oc OIDCController) userInfoError(c *gin.Context, errCode, errorDescription string) {
+func (oc OIDCController) userInfoError(c httpInterfaces.RouterContextInterface, errCode, errorDescription string) {
 	wwwAuth := fmt.Sprintf(`Bearer realm="oidc", error=%q`, errCode)
 	if errorDescription != "" {
 		wwwAuth += fmt.Sprintf(`, error_description=%q`, errorDescription)
 	}
-	c.Header("WWW-Authenticate", wwwAuth)
+	c.SetHeader("WWW-Authenticate", wwwAuth)
 
-	c.JSON(http.StatusUnauthorized, gin.H{
+	c.JSON(http.StatusUnauthorized, map[string]any{
 		"error":             errCode,
 		"error_description": errorDescription,
 	})
@@ -238,10 +238,10 @@ func (oc OIDCController) getUserInfoErrorDescription(errorCode string) string {
 
 // Discovery OIDC发现文档端点
 // GET /.well-known/openid-configuration
-func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) Discovery(c httpInterfaces.RouterContextInterface) {
 	clientId := c.Param("client_id")
 	// 构建基础URL，支持反向代理场景
-	baseURL := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", clientId))
+	baseURL := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", clientId))
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
 	response := discoveryService.GetDiscoveryDocument()
@@ -251,10 +251,10 @@ func (oc OIDCController) Discovery(c *gin.Context, helper interfaces.HelperInter
 
 // Introspect 令牌内省端点
 // POST /oidc/introspect
-func (oc OIDCController) Introspect(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) Introspect(c httpInterfaces.RouterContextInterface) {
 	var req dto.IntrospectionRequest
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusBadRequest, map[string]any{
 			"error":             "invalid_request",
 			"error_description": "请求参数错误: " + err.Error(),
 		})
@@ -263,7 +263,7 @@ func (oc OIDCController) Introspect(c *gin.Context, helper interfaces.HelperInte
 
 	// 支持 HTTP Basic 认证（RFC 7662 §2.1 要求 token endpoint 的认证方式）
 	if req.ClientID == "" || req.ClientSecret == "" {
-		if id, secret, ok := c.Request.BasicAuth(); ok {
+		if id, secret, ok := c.Request().BasicAuth(); ok {
 			req.ClientID = id
 			req.ClientSecret = secret
 		}
@@ -272,8 +272,8 @@ func (oc OIDCController) Introspect(c *gin.Context, helper interfaces.HelperInte
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	response, err := authService.IntrospectToken(&req)
 	if err != nil {
-		c.Header("WWW-Authenticate", `Basic realm="oidc"`)
-		c.JSON(http.StatusUnauthorized, gin.H{
+		c.SetHeader("WWW-Authenticate", `Basic realm="oidc"`)
+		c.JSON(http.StatusUnauthorized, map[string]any{
 			"error":             "invalid_client",
 			"error_description": "内省端点必须携带有效的客户端凭据",
 		})
@@ -285,10 +285,10 @@ func (oc OIDCController) Introspect(c *gin.Context, helper interfaces.HelperInte
 
 // Revoke 令牌撤销端点
 // POST /oidc/revoke
-func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) Revoke(c httpInterfaces.RouterContextInterface) {
 	var req dto.RevocationRequest
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusBadRequest, map[string]any{
 			"error":             "invalid_request",
 			"error_description": "请求参数错误: " + err.Error(),
 		})
@@ -304,7 +304,7 @@ func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterfac
 			statusCode = http.StatusUnauthorized
 		}
 
-		c.JSON(statusCode, gin.H{
+		c.JSON(statusCode, map[string]any{
 			"error":             errorCode,
 			"error_description": oc.getRevocationErrorDescription(errorCode),
 		})
@@ -317,13 +317,13 @@ func (oc OIDCController) Revoke(c *gin.Context, helper interfaces.HelperInterfac
 
 // JWKS JSON Web Key Set端点
 // GET /oidc/jwks
-func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface) {
+func (oc OIDCController) JWKS(c httpInterfaces.RouterContextInterface) {
 	db := helper.GetDatabase()
 
 	// 要求必须提供 client_id 参数
 	clientID := c.Param("client_id")
 	if clientID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusBadRequest, map[string]any{
 			"error":             "invalid_request",
 			"error_description": "缺少必需的 client_id 参数",
 		})
@@ -333,14 +333,14 @@ func (oc OIDCController) JWKS(c *gin.Context, helper interfaces.HelperInterface)
 	// 获取应用的所有有效密钥的 JWKS
 	jwks, err := oc.getJWKSArrayForApplication(db, clientID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		c.JSON(http.StatusInternalServerError, map[string]any{
 			"error":             "server_error",
 			"error_description": "无法获取密钥",
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	c.JSON(http.StatusOK, map[string]any{
 		"keys": jwks,
 	})
 }
@@ -396,14 +396,13 @@ func (oc OIDCController) getJWKSArrayForApplication(db *gorm.DB, clientID string
 //   - 生成全新的 IAM 内部会话令牌并写入新的 Set-Cookie，实现 refresh token rotation
 //   - 若检测到旧 token 已被使用（可能是攻击者重放），会话链整体撤销
 func (oc OIDCController) trySSO(
-	c *gin.Context,
-	helper interfaces.HelperInterface,
+	c httpInterfaces.RouterContextInterface,
 	sessionService *service.OIDCSessionService,
 	session *service.OIDCSession,
 	req dto.AuthorizeRequest,
 	silent bool,
 ) bool {
-	rctx := c.Request.Context()
+	rctx := c.Request().Context()
 	refreshToken, cookieErr := c.Cookie("refresh_token")
 	if cookieErr != nil || refreshToken == "" {
 		return false
@@ -465,7 +464,7 @@ func (oc OIDCController) trySSO(
 	authService := service.NewOIDCAuthorizationService(db)
 	appService := service.NewApplicationService(db)
 	app, appErr := appService.GetApplicationByClientID(session.ClientID)
-	issuer := utils.GetBaseURL(c, helper, fmt.Sprintf("/oidc/%s", session.ClientID))
+	issuer := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", session.ClientID))
 
 	authReq := &dto.AuthorizeRequest{
 		ResponseType:        session.ResponseType,
@@ -493,7 +492,7 @@ func (oc OIDCController) trySSO(
 	if appErr == nil && app != nil {
 		scopes := authService.ParseScopes(session.Scope)
 		if newResp, err := authService.GenerateTokens(app, oldToken.UserID, scopes, session.Nonce, issuer); err == nil && newResp != nil {
-			isSecure := c.Request.TLS != nil
+			isSecure := c.Request().TLS != nil
 			if isSecure {
 				c.SetSameSite(http.SameSiteNoneMode)
 			} else {
@@ -520,9 +519,9 @@ func (oc OIDCController) trySSO(
 
 // redirectWithError 重定向并携带错误信息（RFC 6749 §4.1.2.1）
 // 所有参数均做 URL 编码，避免特殊字符破坏 query string 或触发重定向污染
-func (oc OIDCController) redirectWithError(c *gin.Context, redirectURI, errorCode, errorDescription, state string) {
+func (oc OIDCController) redirectWithError(c httpInterfaces.RouterContextInterface, redirectURI, errorCode, errorDescription, state string) {
 	if redirectURI == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusBadRequest, map[string]any{
 			"error":             errorCode,
 			"error_description": errorDescription,
 		})
@@ -545,7 +544,7 @@ func (oc OIDCController) redirectWithError(c *gin.Context, redirectURI, errorCod
 }
 
 // tokenError 返回令牌错误响应
-func (oc OIDCController) tokenError(c *gin.Context, error, errorDescription string, statusCode int) {
+func (oc OIDCController) tokenError(c httpInterfaces.RouterContextInterface, error, errorDescription string, statusCode int) {
 	c.JSON(statusCode, dto.TokenErrorResponse{
 		Error:            error,
 		ErrorDescription: errorDescription,
@@ -554,12 +553,12 @@ func (oc OIDCController) tokenError(c *gin.Context, error, errorDescription stri
 
 // tokenErrorWithAuth 返回带 WWW-Authenticate 头的 401 错误（RFC 6750 §3）
 // realm 统一为 "oidc"，避免多个端点各自一个 realm 造成规范混乱
-func (oc OIDCController) tokenErrorWithAuth(c *gin.Context, errCode, errorDescription string) {
+func (oc OIDCController) tokenErrorWithAuth(c httpInterfaces.RouterContextInterface, errCode, errorDescription string) {
 	wwwAuth := fmt.Sprintf(`Basic realm="oidc", error=%q`, errCode)
 	if errorDescription != "" {
 		wwwAuth += fmt.Sprintf(`, error_description=%q`, errorDescription)
 	}
-	c.Header("WWW-Authenticate", wwwAuth)
+	c.SetHeader("WWW-Authenticate", wwwAuth)
 	c.JSON(http.StatusUnauthorized, dto.TokenErrorResponse{
 		Error:            errCode,
 		ErrorDescription: errorDescription,

@@ -9,8 +9,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // AuthController 管理员认证控制器
@@ -34,7 +34,7 @@ type AdminLoginResponse struct {
 
 // Login 管理员登录
 // POST /api/admin/auth/login
-func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac AuthController) Login(c httpInterfaces.RouterContextInterface) {
 	var req AdminLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -59,7 +59,7 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 
 	// 这里可以添加额外的管理员权限验证
 	// 例如检查用户是否有管理员角色或权限
-	if !ac.isAdminUser(userResponse, helper) {
+	if !ac.isAdminUser(userResponse) {
 		ac.Error(c, constants.ErrCodeForbidden, "权限不足，仅限管理员登录")
 		return
 	}
@@ -96,33 +96,29 @@ func (ac AuthController) Login(c *gin.Context, helper interfaces.HelperInterface
 }
 
 // setAdminAccessCookie 将管理员 access_token 写入 HttpOnly/Secure/SameSite Cookie
-func setAdminAccessCookie(c *gin.Context, token string, maxAgeSeconds int) {
-	isSecure := c.Request.TLS != nil
-	if isSecure {
-		c.SetSameSite(http.SameSiteLaxMode)
-	} else {
-		c.SetSameSite(http.SameSiteLaxMode)
-	}
+func setAdminAccessCookie(c httpInterfaces.RouterContextInterface, token string, maxAgeSeconds int) {
+	isSecure := c.Request().TLS != nil
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(middleware.AdminCookieName, token, maxAgeSeconds, "/", "", isSecure, true)
 }
 
 // clearAdminAccessCookie 清除管理员 cookie（登出时）
-func clearAdminAccessCookie(c *gin.Context) {
-	isSecure := c.Request.TLS != nil
+func clearAdminAccessCookie(c httpInterfaces.RouterContextInterface) {
+	isSecure := c.Request().TLS != nil
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(middleware.AdminCookieName, "", -1, "/", "", isSecure, true)
 }
 
 // Logout 管理员退出登录
 // POST /api/admin/auth/logout
-func (ac AuthController) Logout(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac AuthController) Logout(c httpInterfaces.RouterContextInterface) {
 	clearAdminAccessCookie(c)
 	ac.SuccessWithMessage(c, "退出登录成功", nil)
 }
 
 // RefreshToken 刷新访问令牌
 // POST /api/admin/auth/refresh
-func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac AuthController) RefreshToken(c httpInterfaces.RouterContextInterface) {
 	// 从请求头或请求体中获取刷新令牌
 	refreshToken := c.GetHeader("Refresh-Token")
 	if refreshToken == "" {
@@ -146,7 +142,7 @@ func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 
 	expiresIn := jwtAuthService.GetConfig().GetAccessTokenHours() * 3600
 	setAdminAccessCookie(c, newAccessToken, expiresIn)
-	response := gin.H{
+	response := map[string]any{
 		"accessToken": newAccessToken,
 		"tokenType":   "Bearer",
 		"expiresIn":   expiresIn,
@@ -157,9 +153,9 @@ func (ac AuthController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 
 // GetAdminProfile 获取管理员个人信息
 // GET /api/admin/auth/profile
-func (ac AuthController) GetAdminProfile(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac AuthController) GetAdminProfile(c httpInterfaces.RouterContextInterface) {
 	// 从认证中间件获取当前用户信息
-	userID, _, exists := middleware.GetCurrentUserFromGin(c)
+	userID, _, exists := middleware.GetCurrentUser(c)
 	if !exists {
 		ac.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
@@ -174,7 +170,7 @@ func (ac AuthController) GetAdminProfile(c *gin.Context, helper interfaces.Helpe
 	}
 
 	// 返回用户信息（不包含敏感信息）
-	response := gin.H{
+	response := map[string]any{
 		"id":       userResponse.ID,
 		"username": userResponse.Username,
 		"email":    userResponse.Email,
@@ -187,7 +183,7 @@ func (ac AuthController) GetAdminProfile(c *gin.Context, helper interfaces.Helpe
 
 // isAdminUser 检查用户是否为管理员
 // 通过查询用户是否关联 super_admin 系统角色来判断
-func (ac AuthController) isAdminUser(user *dto.UserResponse, helper interfaces.HelperInterface) bool {
+func (ac AuthController) isAdminUser(user *dto.UserResponse) bool {
 	// 创建 RoleDao 实例
 	roleDao := dao.NewRoleDao(helper.GetDatabase())
 

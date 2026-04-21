@@ -8,8 +8,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // UserController 管理员用户控制器
@@ -19,7 +19,7 @@ type UserController struct {
 
 // CreateUser 创建用户（管理员操作）
 // POST /api/admin/users
-func (auc UserController) CreateUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) CreateUser(c httpInterfaces.RouterContextInterface) {
 	var req dto.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -50,7 +50,7 @@ func (auc UserController) CreateUser(c *gin.Context, helper interfaces.HelperInt
 
 // GetUser 获取用户详情（管理员操作）
 // GET /api/admin/users/:id
-func (auc UserController) GetUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUser(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -74,7 +74,7 @@ func (auc UserController) GetUser(c *gin.Context, helper interfaces.HelperInterf
 
 // UpdateUser 更新用户信息（管理员操作）
 // PUT /api/admin/users/:id
-func (auc UserController) UpdateUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) UpdateUser(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -111,7 +111,7 @@ func (auc UserController) UpdateUser(c *gin.Context, helper interfaces.HelperInt
 
 // DeleteUser 删除用户（管理员操作）
 // DELETE /api/admin/users/:id
-func (auc UserController) DeleteUser(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) DeleteUser(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -135,7 +135,7 @@ func (auc UserController) DeleteUser(c *gin.Context, helper interfaces.HelperInt
 
 // GetUserList 获取用户列表（管理员操作）
 // GET /api/admin/users
-func (auc UserController) GetUserList(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserList(c httpInterfaces.RouterContextInterface) {
 	var req dto.UserQueryRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
@@ -157,7 +157,7 @@ func (auc UserController) GetUserList(c *gin.Context, helper interfaces.HelperIn
 
 // UpdateUserStatus 更新用户状态（管理员操作）
 // PUT /api/admin/users/:id/status
-func (auc UserController) UpdateUserStatus(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) UpdateUserStatus(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -187,7 +187,7 @@ func (auc UserController) UpdateUserStatus(c *gin.Context, helper interfaces.Hel
 
 // ResetPassword 重置用户密码（管理员操作）
 // PUT /api/admin/users/:id/reset-password
-func (auc UserController) ResetPassword(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) ResetPassword(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -219,7 +219,7 @@ func (auc UserController) ResetPassword(c *gin.Context, helper interfaces.Helper
 
 // BatchOperation 批量操作用户（管理员操作）
 // POST /api/admin/users/batch
-func (auc UserController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) BatchOperation(c httpInterfaces.RouterContextInterface) {
 	var req dto.BatchUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		auc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -238,7 +238,7 @@ func (auc UserController) BatchOperation(c *gin.Context, helper interfaces.Helpe
 
 // GetUsersByDepartment 根据部门获取用户列表（管理员操作）
 // GET /api/admin/departments/:departmentId/users
-func (auc UserController) GetUsersByDepartment(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUsersByDepartment(c httpInterfaces.RouterContextInterface) {
 	departmentIdStr := c.Param("id")
 	departmentId, err := strconv.ParseUint(departmentIdStr, 10, 32)
 	if err != nil {
@@ -258,7 +258,7 @@ func (auc UserController) GetUsersByDepartment(c *gin.Context, helper interfaces
 
 // GetUserDepartments 获取用户的部门列表（管理员操作）
 // GET /api/admin/users/:id/departments
-func (auc UserController) GetUserDepartments(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserDepartments(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -278,7 +278,7 @@ func (auc UserController) GetUserDepartments(c *gin.Context, helper interfaces.H
 
 // GetActiveUsersCount 获取活跃用户数量统计（管理员操作）
 // GET /api/admin/users/stats/active-count
-func (auc UserController) GetActiveUsersCount(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetActiveUsersCount(c httpInterfaces.RouterContextInterface) {
 	userService := service.NewUserService(helper.GetDatabase())
 	count, err := userService.GetActiveUsersCount()
 	if err != nil {
@@ -286,14 +286,14 @@ func (auc UserController) GetActiveUsersCount(c *gin.Context, helper interfaces.
 		return
 	}
 
-	auc.Success(c, gin.H{
+	auc.Success(c, map[string]any{
 		"activeUsersCount": count,
 	})
 }
 
 // AssignUserRole 为用户分配角色
 // POST /api/admin/users/:id/roles
-func (auc UserController) AssignUserRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) AssignUserRole(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -340,7 +340,7 @@ func (auc UserController) AssignUserRole(c *gin.Context, helper interfaces.Helpe
 
 // RemoveUserRole 移除用户角色
 // DELETE /api/admin/users/:id/roles/:roleId
-func (auc UserController) RemoveUserRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) RemoveUserRole(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -371,7 +371,7 @@ func (auc UserController) RemoveUserRole(c *gin.Context, helper interfaces.Helpe
 
 // GetUserRoles 获取用户的角色列表
 // GET /api/admin/users/:id/roles
-func (auc UserController) GetUserRoles(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserRoles(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -391,7 +391,7 @@ func (auc UserController) GetUserRoles(c *gin.Context, helper interfaces.HelperI
 
 // GetUserWithRoles 获取用户及其角色信息
 // GET /api/admin/users/:id/with-roles
-func (auc UserController) GetUserWithRoles(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserWithRoles(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -415,7 +415,7 @@ func (auc UserController) GetUserWithRoles(c *gin.Context, helper interfaces.Hel
 
 // BatchAssignUserRoles 批量分配角色给用户
 // POST /api/admin/users/:id/roles/batch
-func (auc UserController) BatchAssignUserRoles(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) BatchAssignUserRoles(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -453,7 +453,7 @@ func (auc UserController) BatchAssignUserRoles(c *gin.Context, helper interfaces
 
 // BatchRemoveUserRoles 批量移除用户角色
 // DELETE /api/admin/users/:id/roles/batch
-func (auc UserController) BatchRemoveUserRoles(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) BatchRemoveUserRoles(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -483,7 +483,7 @@ func (auc UserController) BatchRemoveUserRoles(c *gin.Context, helper interfaces
 
 // SetUserPrimaryRole 设置用户主要角色
 // PUT /api/admin/users/:id/roles/:roleId/primary
-func (auc UserController) SetUserPrimaryRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) SetUserPrimaryRole(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -514,7 +514,7 @@ func (auc UserController) SetUserPrimaryRole(c *gin.Context, helper interfaces.H
 
 // GetUserPermissions 获取用户的权限列表
 // GET /api/admin/users/:id/permissions
-func (auc UserController) GetUserPermissions(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserPermissions(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -534,7 +534,7 @@ func (auc UserController) GetUserPermissions(c *gin.Context, helper interfaces.H
 
 // GetUserMenuTree 获取用户菜单树
 // GET /api/admin/users/:id/menu-tree
-func (auc UserController) GetUserMenuTree(c *gin.Context, helper interfaces.HelperInterface) {
+func (auc UserController) GetUserMenuTree(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	userID, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {

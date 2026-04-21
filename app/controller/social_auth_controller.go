@@ -8,8 +8,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // SocialAuthController 社会化登录控制器（用户端）
@@ -19,7 +19,7 @@ type SocialAuthController struct {
 
 // GetEnabledProviders 获取启用的提供商列表（公开接口）
 // GET /api/social/providers
-func (sc SocialAuthController) GetEnabledProviders(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) GetEnabledProviders(c httpInterfaces.RouterContextInterface) {
 	providerService := service.NewSocialProviderService(helper.GetDatabase())
 	providers, err := providerService.GetEnabledProviders()
 	if err != nil {
@@ -32,7 +32,7 @@ func (sc SocialAuthController) GetEnabledProviders(c *gin.Context, helper interf
 
 // InitiateAuth 发起OAuth授权
 // GET /api/social/auth/:provider?session_id=xxx
-func (sc SocialAuthController) InitiateAuth(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) InitiateAuth(c httpInterfaces.RouterContextInterface) {
 	providerIdentifier := c.Param("provider")
 	if providerIdentifier == "" {
 		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
@@ -55,7 +55,7 @@ func (sc SocialAuthController) InitiateAuth(c *gin.Context, helper interfaces.He
 
 // HandleCallback 处理OAuth回调
 // GET /api/social/callback/:provider
-func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) HandleCallback(c httpInterfaces.RouterContextInterface) {
 	providerIdentifier := c.Param("provider")
 	code := c.Query("code")
 	state := c.Query("state")
@@ -130,7 +130,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 </body>
 </html>
 `, response.BindToken, sessionID, socialInfo)
-		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.SetHeader("Content-Type", "text/html; charset=utf-8")
 		c.String(200, html)
 		return
 	}
@@ -139,7 +139,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if sessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(c.Request.Context(), sessionID, response.User.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(c.Request().Context(), sessionID, response.User.ID); err != nil {
 			sc.Error(c, constants.ErrCodeInternal, "标记会话失败: "+err.Error())
 			return
 		}
@@ -165,7 +165,7 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 </body>
 </html>
 `, sessionID)
-		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.SetHeader("Content-Type", "text/html; charset=utf-8")
 		c.String(200, html)
 		return
 	}
@@ -180,10 +180,10 @@ func (sc SocialAuthController) HandleCallback(c *gin.Context, helper interfaces.
 
 // BindAccount 绑定社交账号（需要认证）
 // POST /api/social/bind/:provider
-func (sc SocialAuthController) BindAccount(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) BindAccount(c httpInterfaces.RouterContextInterface) {
 	// 从上下文获取当前用户ID（由认证中间件设置）
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userID := c.Get("user_id")
+	if userID == nil {
 		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
 	}
@@ -217,10 +217,10 @@ func (sc SocialAuthController) BindAccount(c *gin.Context, helper interfaces.Hel
 
 // UnbindAccount 解绑社交账号（需要认证）
 // DELETE /api/social/unbind/:accountId
-func (sc SocialAuthController) UnbindAccount(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) UnbindAccount(c httpInterfaces.RouterContextInterface) {
 	// 从上下文获取当前用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userID := c.Get("user_id")
+	if userID == nil {
 		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
 	}
@@ -244,10 +244,10 @@ func (sc SocialAuthController) UnbindAccount(c *gin.Context, helper interfaces.H
 
 // GetUserSocialAccounts 获取当前用户的社交账号列表（需要认证）
 // GET /api/user/social-accounts
-func (sc SocialAuthController) GetUserSocialAccounts(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) GetUserSocialAccounts(c httpInterfaces.RouterContextInterface) {
 	// 从上下文获取当前用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userID := c.Get("user_id")
+	if userID == nil {
 		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
 	}
@@ -264,7 +264,7 @@ func (sc SocialAuthController) GetUserSocialAccounts(c *gin.Context, helper inte
 
 // BindWithLogin 用社交账号绑定到已有账户
 // POST /api/social/bind-with-login
-func (sc SocialAuthController) BindWithLogin(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) BindWithLogin(c httpInterfaces.RouterContextInterface) {
 	var req dto.SocialBindWithLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -287,7 +287,7 @@ func (sc SocialAuthController) BindWithLogin(c *gin.Context, helper interfaces.H
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(c.Request.Context(), req.SessionID, response.User.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(c.Request().Context(), req.SessionID, response.User.ID); err != nil {
 			// 记录日志但不阻断流程，因为可能是非OIDC流程或session已过期
 			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
 			// 对于非OIDC流程，继续返回成功，因为绑定本身已经成功
@@ -304,7 +304,7 @@ func (sc SocialAuthController) BindWithLogin(c *gin.Context, helper interfaces.H
 
 // RegisterWithSocial 用社交账号注册新账户
 // POST /api/social/register-with-social
-func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SocialAuthController) RegisterWithSocial(c httpInterfaces.RouterContextInterface) {
 	var req dto.SocialRegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -339,7 +339,7 @@ func (sc SocialAuthController) RegisterWithSocial(c *gin.Context, helper interfa
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(c.Request.Context(), req.SessionID, response.User.ID); err != nil {
+		if err := sessionService.MarkAsAuthenticated(c.Request().Context(), req.SessionID, response.User.ID); err != nil {
 			// 记录日志但不阻断流程，因为可能是非OIDC流程或session已过期
 			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
 			// 对于非OIDC流程，继续返回成功，因为注册本身已经成功

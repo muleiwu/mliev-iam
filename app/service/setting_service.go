@@ -62,12 +62,6 @@ func (s *SettingService) SetSimple(key, value string) error {
 	return nil
 }
 
-// NewSettingServiceFromHelper 使用包级 helper.GetDatabase() 构建服务实例。
-// 为原 helper.GetSetting/SetSetting 调用方提供无参简易入口。
-func NewSettingServiceFromHelper() *SettingService {
-	return NewSettingService(helper.GetDatabase())
-}
-
 const (
 	// RegisterFieldsConfigKey 注册字段配置的key
 	RegisterFieldsConfigKey = "register_fields_config"
