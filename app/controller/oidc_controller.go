@@ -86,7 +86,7 @@ func (oc OIDCController) Authorize(c *gin.Context, helper interfaces.HelperInter
 // Token OIDC令牌端点
 // POST /oidc/token
 func (oc OIDCController) Token(c *gin.Context, helper interfaces.HelperInterface) {
-	appUuid := c.Param("uuid")
+	appUuid := c.Param("client_id")
 	var req dto.TokenRequest
 	if err := c.ShouldBind(&req); err != nil {
 		oc.tokenError(c, "invalid_request", "请求参数错误: "+err.Error(), http.StatusBadRequest)
