@@ -13,10 +13,7 @@ COPY . /app
 RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
     cd /app/admin-web && \
     pnpm install && \
-    pnpm build:antd && pnpm build:install && \
-    cd /app/frontend-oidc && \
-    pnpm install && \
-    pnpm build && \
+    pnpm build:antd && pnpm build:install && pnpm build:oidc && \
     ls /app && ls /app/static && ls /app/static/auth
 
 
@@ -47,7 +44,7 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
-RUN rm -rf /app/admin-web /app/frontend-oidc && ls /app/static
+RUN rm -rf /app/admin-web && ls /app/static
 
 # 下载依赖
 # 复制构建产物到 nginx 的默认静态文件目录
