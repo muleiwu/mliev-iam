@@ -230,6 +230,11 @@ func (receiver Router) InitConfig() map[string]any {
 			social.POST("/bind-with-login", controller.SocialAuthController{}.BindWithLogin)
 			social.POST("/register-with-social", controller.SocialAuthController{}.RegisterWithSocial)
 			social.POST("/miniprogram/login/:provider", controller.SocialAuthController{}.MiniProgramLogin)
+			// 小程序扫码登录（PC 展示小程序码 + 手机端确认）
+			social.POST("/miniprogram/qrcode/:provider", controller.SocialAuthController{}.CreateMPQRCode)
+			social.GET("/miniprogram/qrcode/status/:ticket", controller.SocialAuthController{}.GetMPQRCodeStatus)
+			social.POST("/miniprogram/qrcode/scan", controller.SocialAuthController{}.ScanMPQRCode)
+			social.POST("/miniprogram/qrcode/confirm", controller.SocialAuthController{}.ConfirmMPQRCode)
 
 			socialAuth := router.Group("/social")
 			socialAuth.Use(middleware.AuthMiddleware())

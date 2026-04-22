@@ -394,6 +394,93 @@ func (sc SocialAuthController) MiniProgramLogin(c httpInterfaces.RouterContextIn
 	sc.Success(c, response)
 }
 
+// ==================== 微信小程序扫码登录（PC 侧发起） ====================
+
+// CreateMPQRCode 创建扫码登录票据（PC 端调用）
+// POST /social/miniprogram/qrcode/:provider
+func (sc SocialAuthController) CreateMPQRCode(c httpInterfaces.RouterContextInterface) {
+	providerIdentifier := c.Param("provider")
+	if providerIdentifier == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
+		return
+	}
+
+	var req dto.MPQRCodeCreateRequest
+	_ = c.ShouldBindJSON(&req) // 全部字段可选，允许空 body
+
+	svc := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis())
+	resp, err := svc.CreateSession(c.Request().Context(), providerIdentifier, &req)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+	sc.Success(c, resp)
+}
+
+// GetMPQRCodeStatus PC 端轮询扫码状态
+// GET /social/miniprogram/qrcode/status/:ticket
+func (sc SocialAuthController) GetMPQRCodeStatus(c httpInterfaces.RouterContextInterface) {
+	ticket := c.Param("ticket")
+	if ticket == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "ticket 不能为空")
+		return
+	}
+
+	svc := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis())
+	resp, err := svc.GetStatus(c.Request().Context(), ticket)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	// 若已 confirmed 且带 sessionID，顺手把 OIDC 会话标记为已认证。
+	if resp.State == service.QRStateConfirmed && resp.SessionID != "" && resp.User != nil && resp.Token != "" {
+		sessionSvc := service.NewOIDCSessionService(helper.GetRedis())
+		if err := sessionSvc.MarkAsAuthenticated(c.Request().Context(), resp.SessionID, resp.User.ID); err != nil {
+			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", resp.SessionID, err)
+		} else {
+			resp.Token = ""
+		}
+	}
+
+	sc.Success(c, resp)
+}
+
+// ScanMPQRCode 小程序扫码后上报 jsCode
+// POST /social/miniprogram/qrcode/scan
+func (sc SocialAuthController) ScanMPQRCode(c httpInterfaces.RouterContextInterface) {
+	var req dto.MPQRCodeScanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	svc := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis())
+	resp, err := svc.Scan(c.Request().Context(), &req)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+	sc.Success(c, resp)
+}
+
+// ConfirmMPQRCode 小程序端确认/取消
+// POST /social/miniprogram/qrcode/confirm
+func (sc SocialAuthController) ConfirmMPQRCode(c httpInterfaces.RouterContextInterface) {
+	var req dto.MPQRCodeConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	svc := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis())
+	if err := svc.Confirm(c.Request().Context(), &req); err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+	sc.SuccessWithMessage(c, "操作成功", nil)
+}
+
 // escapeJS 转义 JavaScript 字符串中的特殊字符
 func escapeJS(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
