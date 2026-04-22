@@ -51,9 +51,10 @@ func (rs RoleStatus) String() string {
 // 角色模型用于RBAC权限控制，支持角色定义与管理
 type Role struct {
 	// 基础信息
+	// uniqueIndex 与 DeletedAt 组成复合唯一索引（见 DeletedAt 的 tag）。
 	ID          uint        `gorm:"primaryKey" json:"id"`
-	Name        string      `gorm:"uniqueIndex;size:50;not null" json:"name" validate:"required,min=2,max=50"`
-	Code        string      `gorm:"uniqueIndex;size:50;not null" json:"code" validate:"required,min=2,max=50"`
+	Name        string      `gorm:"uniqueIndex:uk_roles_name,priority:1;size:50;not null" json:"name" validate:"required,min=2,max=50"`
+	Code        string      `gorm:"uniqueIndex:uk_roles_code,priority:1;size:50;not null" json:"code" validate:"required,min=2,max=50"`
 	Description string      `gorm:"size:255" json:"description" validate:"max=255"`
 	Type        *RoleType   `gorm:"default:1;not null" json:"type"`
 	Status      *RoleStatus `gorm:"default:1;not null" json:"status"`
@@ -71,7 +72,7 @@ type Role struct {
 	// 时间信息
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt gorm.DeletedAt `gorm:"uniqueIndex:uk_roles_name,priority:2;uniqueIndex:uk_roles_code,priority:2;index" json:"-"`
 
 	// 扩展属性
 	Attributes datatypes.JSON `gorm:"type:json" json:"attributes,omitempty"`

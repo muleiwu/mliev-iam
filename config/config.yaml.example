@@ -26,7 +26,9 @@ database:
   # 数据库名。Viper 读 key "database.database"，go-web 内部映射为 database.dbname。
   database: iam
   username: root
-  password: root
+  # 生产环境不要把 password 写在这里。推荐通过环境变量覆盖（env 优先于 yaml）：
+  #   DB_DRIVER / DB_HOST / DB_PORT / DB_USERNAME / DB_PASSWORD / DB_DATABASE / DB_CHARSET / DB_FILEPATH
+  password: ""
   charset: utf8mb4
   # sqlite 专用路径（driver=sqlite 时生效）
   filepath: "./config/mliev_iam.db"
@@ -40,6 +42,7 @@ database:
 redis:
   host: 127.0.0.1
   port: 6379
+  # 支持环境变量覆盖：REDIS_HOST / REDIS_PASSWORD
   password: ""
   db: 0
 

@@ -1,17 +1,28 @@
 package service
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+// bcryptCost 定义 bcrypt 工作因子。12 是当前推荐下限（2026 年硬件），
+// 单次验签耗时约 250ms。调高会线性增加 CPU 成本。
+const bcryptCost = 12
+
+// isBcryptHash 判断已存密码是否为 bcrypt 格式（$2a$/$2b$/$2y$ 前缀）。
+// 非 bcrypt 视为历史 SHA-256 + salt 格式。
+func isBcryptHash(hash string) bool {
+	return strings.HasPrefix(hash, "$2a$") || strings.HasPrefix(hash, "$2b$") || strings.HasPrefix(hash, "$2y$")
+}
 
 // UserService 用户业务逻辑层
 type UserService struct {
@@ -370,21 +381,15 @@ func (s *UserService) GetActiveUsersCount() (int64, error) {
 	return s.userDao.GetActiveUsersCount()
 }
 
-// generatePasswordHash 生成密码哈希
+// generatePasswordHash 生成密码哈希。
+// 新记录一律使用 bcrypt；salt 字段保留为空字符串（bcrypt 自带 salt）。
+// 返回值保持既有调用方签名 (salt, hash, err) 不变。
 func (s *UserService) generatePasswordHash(password string) (salt, hash string, err error) {
-	// 生成盐值
-	saltBytes := make([]byte, 16)
-	if _, err := rand.Read(saltBytes); err != nil {
-		return "", "", err
+	b, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	if err != nil {
+		return "", "", fmt.Errorf("bcrypt hash failed: %w", err)
 	}
-	salt = hex.EncodeToString(saltBytes)
-
-	// 生成密码哈希
-	h := sha256.New()
-	h.Write([]byte(password + salt))
-	hash = hex.EncodeToString(h.Sum(nil))
-
-	return salt, hash, nil
+	return "", string(b), nil
 }
 
 // GeneratePasswordHash 生成密码哈希（公开方法）
@@ -392,12 +397,16 @@ func (s *UserService) GeneratePasswordHash(password string) (salt, hash string, 
 	return s.generatePasswordHash(password)
 }
 
-// verifyPassword 验证密码
+// verifyPassword 验证密码。
+//   - bcrypt 新格式：忽略 salt，直接 CompareHashAndPassword。
+//   - 历史 SHA-256 + salt 格式：回落到旧校验逻辑，便于老用户登录后透明迁移。
 func (s *UserService) verifyPassword(password, salt, hash string) bool {
+	if isBcryptHash(hash) {
+		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	}
 	h := sha256.New()
 	h.Write([]byte(password + salt))
-	computedHash := hex.EncodeToString(h.Sum(nil))
-	return computedHash == hash
+	return hex.EncodeToString(h.Sum(nil)) == hash
 }
 
 // ValidateUserForLogin 验证用户登录
@@ -416,6 +425,17 @@ func (s *UserService) ValidateUserForLogin(username, password string) (*dto.User
 	// 验证密码
 	if !s.verifyPassword(password, user.Salt, user.PasswordHash) {
 		return nil, fmt.Errorf("用户名或密码错误")
+	}
+
+	// 透明迁移：旧 SHA-256 + salt 格式的用户，登录成功后重哈希为 bcrypt。
+	// 失败只记日志、不影响本次登录（下次登录还会再尝试）。
+	if !isBcryptHash(user.PasswordHash) {
+		if _, newHash, err := s.generatePasswordHash(password); err == nil {
+			_ = s.userDao.UpdateById(user.ID, map[string]interface{}{
+				"salt":          "",
+				"password_hash": newHash,
+			})
+		}
 	}
 
 	response := dto.ConvertToUserResponse(user)

@@ -19,8 +19,9 @@ const (
 // Application 应用模型 - 协议无关的应用抽象
 type Application struct {
 	// 基础信息
+	// uniqueIndex 与 DeletedAt 组成复合唯一索引（见 DeletedAt 的 tag）。
 	ID          uint   `gorm:"primaryKey" json:"id"`
-	UUID        string `gorm:"size:36;uniqueIndex;not null" json:"uuid" validate:"required"`
+	UUID        string `gorm:"size:36;uniqueIndex:uk_applications_uuid,priority:1;not null" json:"uuid" validate:"required"`
 	Name        string `gorm:"size:100;not null" json:"name" validate:"required"`
 	Description string `gorm:"type:text" json:"description"`
 
@@ -38,7 +39,7 @@ type Application struct {
 	// 时间信息
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt gorm.DeletedAt `gorm:"uniqueIndex:uk_applications_uuid,priority:2;index" json:"-"`
 
 	// 创建者信息
 	CreatedByUserID *uint `gorm:"index" json:"createdByUserId"`

@@ -31,11 +31,14 @@ func (s UserStatus) String() string {
 // 用户模型包含用户的基础信息、认证信息和状态管理
 type User struct {
 	// 基础信息
+	// uniqueIndex 与 DeletedAt 组成复合唯一索引，允许同一 UUID/Username/... 在软删后重建。
+	// 注意：MySQL 对 NULL 视为互不相等，所以"活跃（deleted_at IS NULL）状态下的重复值"
+	// 仍需 DAO 层显式检查。现有 userDao 的 CheckUsernameExists 等方法保留此职责。
 	ID       uint    `gorm:"primaryKey" json:"id"`
-	UUID     string  `gorm:"uniqueIndex;size:36;not null" json:"uuid"`
-	Username string  `gorm:"uniqueIndex;size:50;not null" json:"username" validate:"required,min=3,max=50"`
-	Email    *string `gorm:"uniqueIndex;size:100" json:"email" validate:"email,max=100"`
-	Phone    *string `gorm:"uniqueIndex;size:20" json:"phone" validate:"max=20"`
+	UUID     string  `gorm:"uniqueIndex:uk_users_uuid,priority:1;size:36;not null" json:"uuid"`
+	Username string  `gorm:"uniqueIndex:uk_users_username,priority:1;size:50;not null" json:"username" validate:"required,min=3,max=50"`
+	Email    *string `gorm:"uniqueIndex:uk_users_email,priority:1;size:100" json:"email" validate:"email,max=100"`
+	Phone    *string `gorm:"uniqueIndex:uk_users_phone,priority:1;size:20" json:"phone" validate:"max=20"`
 	Nickname string  `gorm:"size:50" json:"nickname" validate:"max=50"`
 	RealName string  `gorm:"size:50" json:"realName" validate:"max=50"`
 	Avatar   string  `gorm:"size:255" json:"avatar" validate:"max=255"`
@@ -55,7 +58,7 @@ type User struct {
 	PasswordExpiry *time.Time     `json:"passwordExpiry"`
 	CreatedAt      time.Time      `json:"createdAt"`
 	UpdatedAt      time.Time      `json:"updatedAt"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt      gorm.DeletedAt `gorm:"uniqueIndex:uk_users_uuid,priority:2;uniqueIndex:uk_users_username,priority:2;uniqueIndex:uk_users_email,priority:2;uniqueIndex:uk_users_phone,priority:2;index" json:"-"`
 
 	// 扩展属性
 	Attributes JSONObject `gorm:"type:json" json:"attributes,omitempty"`

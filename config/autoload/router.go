@@ -37,8 +37,9 @@ func (receiver Router) InitConfig() map[string]any {
 			install.POST("/test-redis", controller.InstallController{}.TestRedisConnection)
 			install.POST("/submit", controller.InstallController{}.SubmitInstall)
 
-			// 系统级路由（非 /admin 命名空间）
+			// 系统级路由（非 /admin 命名空间，仅管理员可访问）
 			adminSystem := api.Group("/system")
+			adminSystem.Use(middleware.AdminAuthMiddleware())
 			adminSystem.GET("/reload", AdminController.SystemController{}.ReloadConfig)
 			adminSystem.GET("/info", AdminController.SystemController{}.GetSystemInfo)
 

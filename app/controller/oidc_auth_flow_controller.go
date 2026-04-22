@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"strings"
@@ -66,10 +67,13 @@ type LoginResponse struct {
 	ExpiresIn   int64  `json:"expiresIn,omitempty"`   // 过期时间（秒）
 }
 
-// ConsentRequest 授权确认请求
+// ConsentRequest 授权确认请求。
+// CsrfToken 由 /api/oidc/auth-info 下发给前端，必须在 POST 中原样带回，
+// 用于防止 CSRF（攻击者仅凭已知 sessionId 无法伪造授权）。
 type ConsentRequest struct {
 	SessionID string `json:"sessionId" binding:"required"`
 	Approved  bool   `json:"approved"`
+	CsrfToken string `json:"csrfToken" binding:"required"`
 }
 
 // ConsentResponse 授权确认响应
@@ -79,9 +83,11 @@ type ConsentResponse struct {
 	RedirectURL string `json:"redirectUrl,omitempty"`
 }
 
-// AuthInfoResponse 授权信息响应
+// AuthInfoResponse 授权信息响应。
+// CsrfToken 为当前会话绑定的一次性令牌，供前端回传到 /webhook/oidc/consent 做 CSRF 校验。
 type AuthInfoResponse struct {
 	SessionID string `json:"sessionId"`
+	CsrfToken string `json:"csrfToken"`
 	Client    struct {
 		ClientID    string `json:"clientId"`
 		Name        string `json:"name"`
@@ -376,7 +382,15 @@ func (c OIDCAuthFlowController) Consent(ctx httpInterfaces.RouterContextInterfac
 		return
 	}
 
-	// 2. 检查会话是否已认证
+	// 2. CSRF 校验：req.CsrfToken 必须等于 session 中绑定的令牌（常量时间比较）。
+	// 这可阻断"攻击者仅凭已知 sessionId 即伪造授权"的 CSRF 链路。
+	if session.CsrfToken == "" ||
+		subtle.ConstantTimeCompare([]byte(req.CsrfToken), []byte(session.CsrfToken)) != 1 {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "CSRF 校验失败")
+		return
+	}
+
+	// 3. 检查会话是否已认证
 	if !session.IsAuthenticated || session.UserID == nil {
 		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
 		return
@@ -514,6 +528,7 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx httpInterfaces.RouterContextInte
 	// 5. 构建响应
 	response := AuthInfoResponse{
 		SessionID: sessionID,
+		CsrfToken: session.CsrfToken,
 	}
 
 	response.Client.ClientID = session.ClientID

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +31,20 @@ type OIDCSession struct {
 	AuthTime            time.Time `json:"auth_time,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	ExpiresAt           time.Time `json:"expires_at"`
+
+	// CsrfToken 绑定到会话的一次性 CSRF 令牌。由服务端在 CreateSession 时生成，
+	// 通过 /api/oidc/auth-info 交给前端；前端在 POST /webhook/oidc/consent 时携带，
+	// 服务端使用 subtle.ConstantTimeCompare 校验后再执行授权动作。
+	CsrfToken string `json:"csrf_token"`
+}
+
+// newCsrfToken 生成 32 字节随机值并 base64url 编码，用作 CSRF 令牌。
+func newCsrfToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // OIDCSessionService OIDC会话管理服务
@@ -61,6 +77,11 @@ func (s *OIDCSessionService) CreateSession(
 		return nil, fmt.Errorf("生成会话ID失败: %w", err)
 	}
 
+	csrfToken, err := newCsrfToken()
+	if err != nil {
+		return nil, fmt.Errorf("生成CSRF令牌失败: %w", err)
+	}
+
 	now := time.Now()
 	session := &OIDCSession{
 		SessionID:           sessionID,
@@ -77,6 +98,7 @@ func (s *OIDCSessionService) CreateSession(
 		IsConsentGranted:    false,
 		CreatedAt:           now,
 		ExpiresAt:           now.Add(s.sessionExpiry),
+		CsrfToken:           csrfToken,
 	}
 
 	if err := s.saveSession(ctx, session); err != nil {

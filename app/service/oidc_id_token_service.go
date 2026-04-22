@@ -373,10 +373,21 @@ func (s *OIDCIDTokenService) hasScope(scopes []string, targetScope string) bool 
 	return false
 }
 
-// VerifyIDToken 验证ID Token
-func (s *OIDCIDTokenService) VerifyIDToken(tokenString string) (*IDTokenClaims, error) {
+// VerifyIDToken 验证 ID Token。
+//
+// 强制校验（OIDC Core §3.1.3.7）：
+//   - 签名（由 rsaKeyManager 完成）
+//   - iss == s.issuer
+//   - aud 包含 expectedClientID（aud 可为 string 或 []string）
+//   - exp > now，nbf <= now（若存在）
+//
+// expectedClientID 必填；调用方应传入当前 RP 的 client_id。
+func (s *OIDCIDTokenService) VerifyIDToken(tokenString, expectedClientID string) (*IDTokenClaims, error) {
 	if !s.rsaKeyManager.IsInitialized() {
 		return nil, fmt.Errorf("RSA密钥未初始化")
+	}
+	if expectedClientID == "" {
+		return nil, fmt.Errorf("expectedClientID 不能为空")
 	}
 
 	token, err := s.rsaKeyManager.VerifyToken(tokenString)
@@ -393,21 +404,70 @@ func (s *OIDCIDTokenService) VerifyIDToken(tokenString string) (*IDTokenClaims, 
 		return nil, fmt.Errorf("无法解析ID Token claims")
 	}
 
-	// 这里可以进一步验证claims的内容
-	// 例如验证issuer、audience等
+	iss, _ := claims["iss"].(string)
+	if iss != s.issuer {
+		return nil, fmt.Errorf("invalid issuer: got %q, expected %q", iss, s.issuer)
+	}
 
-	// 将MapClaims转换为IDTokenClaims
-	idTokenClaims := &IDTokenClaims{}
+	if !audienceContains(claims["aud"], expectedClientID) {
+		return nil, fmt.Errorf("invalid audience: token aud does not contain %q", expectedClientID)
+	}
+
+	now := time.Now().Unix()
+	if expF, ok := claims["exp"].(float64); ok {
+		if int64(expF) <= now {
+			return nil, fmt.Errorf("ID Token 已过期")
+		}
+	} else {
+		return nil, fmt.Errorf("ID Token 缺少 exp")
+	}
+	if nbfF, ok := claims["nbf"].(float64); ok {
+		if int64(nbfF) > now {
+			return nil, fmt.Errorf("ID Token 尚未生效 (nbf)")
+		}
+	}
+
+	idTokenClaims := &IDTokenClaims{Iss: iss}
 	if sub, ok := claims["sub"].(string); ok {
 		idTokenClaims.Sub = sub
 	}
-	if iss, ok := claims["iss"].(string); ok {
-		idTokenClaims.Iss = iss
+	if audStr, ok := claims["aud"].(string); ok {
+		idTokenClaims.Aud = audStr
+	} else {
+		idTokenClaims.Aud = expectedClientID
 	}
-	if aud, ok := claims["aud"].(string); ok {
-		idTokenClaims.Aud = aud
+	if nonce, ok := claims["nonce"].(string); ok {
+		idTokenClaims.Nonce = nonce
 	}
-	// ... 可以继续转换其他字段
-
+	if expF, ok := claims["exp"].(float64); ok {
+		idTokenClaims.Exp = int64(expF)
+	}
+	if iatF, ok := claims["iat"].(float64); ok {
+		idTokenClaims.Iat = int64(iatF)
+	}
+	if atF, ok := claims["auth_time"].(float64); ok {
+		idTokenClaims.AuthTime = int64(atF)
+	}
 	return idTokenClaims, nil
+}
+
+// audienceContains 判断 aud claim（string 或 []interface{}）是否包含指定 clientID。
+func audienceContains(aud any, clientID string) bool {
+	switch v := aud.(type) {
+	case string:
+		return v == clientID
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == clientID {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s == clientID {
+				return true
+			}
+		}
+	}
+	return false
 }

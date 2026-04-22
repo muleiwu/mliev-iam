@@ -2,9 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -14,6 +11,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -439,21 +437,14 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 	return nil
 }
 
-// generatePasswordHash 生成密码哈希
+// generatePasswordHash 生成密码哈希（bcrypt）。
+// 与 UserService 保持一致：salt 留空，bcrypt 自带 salt。
 func (s *InstallService) generatePasswordHash(password string) (salt, hash string, err error) {
-	// 生成盐值
-	saltBytes := make([]byte, 16)
-	if _, err := rand.Read(saltBytes); err != nil {
-		return "", "", err
+	b, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	if err != nil {
+		return "", "", fmt.Errorf("bcrypt hash failed: %w", err)
 	}
-	salt = hex.EncodeToString(saltBytes)
-
-	// 生成密码哈希
-	h := sha256.New()
-	h.Write([]byte(password + salt))
-	hash = hex.EncodeToString(h.Sum(nil))
-
-	return salt, hash, nil
+	return "", string(b), nil
 }
 
 // UpdateDatabaseConfig 更新数据库配置到配置文件
