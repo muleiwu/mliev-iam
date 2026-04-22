@@ -230,9 +230,10 @@ func (s *SocialProviderService) GetProviderList(page, pageSize int, status *mode
 	return items, total, nil
 }
 
-// GetEnabledProviders 获取所有启用的提供商（用于 Web 登录页展示）。
-// 仅返回能在浏览器里走 OAuth 授权流程的提供商；
-// 非浏览器流（如微信小程序）不会出现在登录按钮列表里，只能由对应客户端直接调用专属端点。
+// GetEnabledProviders 获取所有启用的提供商（供登录页按钮列表展示）。
+// 所有类型都会返回，前端根据 type 字段决定交互方式——
+// 浏览器流（github/google/oidc/qq/wechat）点按钮打开弹窗走 /social/auth；
+// 小程序（wechat_miniprogram）点按钮弹扫码 Modal 走 /social/miniprogram/qrcode。
 func (s *SocialProviderService) GetEnabledProviders() ([]*dto.PublicProviderInfo, error) {
 	providers, err := s.providerDAO.GetEnabledProviders()
 	if err != nil {
@@ -241,9 +242,6 @@ func (s *SocialProviderService) GetEnabledProviders() ([]*dto.PublicProviderInfo
 
 	items := make([]*dto.PublicProviderInfo, 0, len(providers))
 	for _, provider := range providers {
-		if !isBrowserFlowType(provider.Type) {
-			continue
-		}
 		items = append(items, &dto.PublicProviderInfo{
 			Identifier: provider.Identifier,
 			Name:       provider.Name,
@@ -255,17 +253,6 @@ func (s *SocialProviderService) GetEnabledProviders() ([]*dto.PublicProviderInfo
 	}
 
 	return items, nil
-}
-
-// isBrowserFlowType 判断类型是否能用于浏览器 OAuth 授权流。
-// 保持与 protocol.NewSocialProviderAdapter 的类型分发一致。
-func isBrowserFlowType(t model.ProviderType) bool {
-	switch t {
-	case model.ProviderTypeWeChatMiniProgram:
-		return false
-	default:
-		return true
-	}
 }
 
 // BatchOperation 批量操作提供商
