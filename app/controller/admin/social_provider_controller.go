@@ -8,6 +8,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
@@ -26,7 +27,7 @@ func (pc SocialProviderController) CreateProvider(c httpInterfaces.RouterContext
 		return
 	}
 
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	response, err := providerService.CreateProvider(&req)
 	if err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -46,7 +47,7 @@ func (pc SocialProviderController) GetProvider(c httpInterfaces.RouterContextInt
 		return
 	}
 
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	response, err := providerService.GetProvider(uint(id))
 	if err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -73,7 +74,7 @@ func (pc SocialProviderController) GetProviderList(c httpInterfaces.RouterContex
 		}
 	}
 
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	items, total, err := providerService.GetProviderList(page, pageSize, status)
 	if err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -104,7 +105,7 @@ func (pc SocialProviderController) UpdateProvider(c httpInterfaces.RouterContext
 		return
 	}
 
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	response, err := providerService.UpdateProvider(uint(id), &req)
 	if err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -124,7 +125,7 @@ func (pc SocialProviderController) DeleteProvider(c httpInterfaces.RouterContext
 		return
 	}
 
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	if err := providerService.DeleteProvider(uint(id)); err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())
 		return
@@ -142,7 +143,7 @@ func (pc SocialProviderController) BatchOperation(c httpInterfaces.RouterContext
 		return
 	}
 
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	if err := providerService.BatchOperation(&req); err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())
 		return
@@ -151,10 +152,36 @@ func (pc SocialProviderController) BatchOperation(c httpInterfaces.RouterContext
 	pc.SuccessWithMessage(c, "批量操作成功", nil)
 }
 
+// DiscoverOIDC 根据 issuer 抓取 OIDC 发现文档（管理端预览用）
+// POST /api/admin/social-providers/discover-oidc
+func (pc SocialProviderController) DiscoverOIDC(c httpInterfaces.RouterContextInterface) {
+	var req dto.OIDCDiscoverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	cache := protocol.NewOIDCDiscoveryCache(helper.GetRedis())
+	doc, err := cache.FetchAndCache(c.Request().Context(), req.Issuer)
+	if err != nil {
+		pc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	pc.Success(c, dto.OIDCDiscoverResponse{
+		Issuer:                doc.Issuer,
+		AuthorizationEndpoint: doc.AuthorizationEndpoint,
+		TokenEndpoint:         doc.TokenEndpoint,
+		UserinfoEndpoint:      doc.UserinfoEndpoint,
+		JwksURI:               doc.JwksURI,
+		ScopesSupported:       doc.ScopesSupported,
+	})
+}
+
 // GetProviderStats 获取提供商统计信息
 // GET /api/admin/social-providers/stats
 func (pc SocialProviderController) GetProviderStats(c httpInterfaces.RouterContextInterface) {
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	stats, err := providerService.GetProviderStats()
 	if err != nil {
 		pc.Error(c, constants.ErrCodeInternal, err.Error())

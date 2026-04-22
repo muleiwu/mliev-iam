@@ -20,7 +20,7 @@ type SocialAuthController struct {
 // GetEnabledProviders 获取启用的提供商列表（公开接口）
 // GET /api/social/providers
 func (sc SocialAuthController) GetEnabledProviders(c httpInterfaces.RouterContextInterface) {
-	providerService := service.NewSocialProviderService(helper.GetDatabase())
+	providerService := service.NewSocialProviderService(helper.GetDatabase(), helper.GetRedis())
 	providers, err := providerService.GetEnabledProviders()
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
@@ -352,6 +352,46 @@ func (sc SocialAuthController) RegisterWithSocial(c httpInterfaces.RouterContext
 	}
 
 	sc.SuccessWithMessage(c, "注册成功", response)
+}
+
+// MiniProgramLogin 处理微信小程序登录（无浏览器回调）
+// POST /social/miniprogram/login/:provider
+func (sc SocialAuthController) MiniProgramLogin(c httpInterfaces.RouterContextInterface) {
+	providerIdentifier := c.Param("provider")
+	if providerIdentifier == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
+		return
+	}
+
+	var req dto.SocialMiniProgramLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		sc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
+	response, err := authService.HandleMiniProgramLogin(providerIdentifier, req.JsCode, req.SessionID)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	if response == nil {
+		sc.Error(c, constants.ErrCodeInternal, "登录失败：响应为空")
+		return
+	}
+
+	// 可选：关联 OIDC 会话
+	if req.SessionID != "" && response.User != nil && response.Token != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		if err := sessionService.MarkAsAuthenticated(c.Request().Context(), req.SessionID, response.User.ID); err != nil {
+			fmt.Printf("警告: 标记OIDC会话失败 (sessionID: %s): %v\n", req.SessionID, err)
+		} else {
+			response.Token = ""
+		}
+	}
+
+	sc.Success(c, response)
 }
 
 // escapeJS 转义 JavaScript 字符串中的特殊字符

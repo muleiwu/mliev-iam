@@ -53,7 +53,7 @@ func NewSocialAuthService(db *gorm.DB, redisClient *redis.Client) *SocialAuthSer
 		providerDAO:       dao.NewSocialProviderDAO(db),
 		accountDAO:        dao.NewUserSocialAccountDAO(db),
 		userDAO:           dao.NewUserDao(db),
-		providerService:   NewSocialProviderService(db),
+		providerService:   NewSocialProviderService(db, redisClient),
 		userService:       NewUserService(db),
 		jwtAuthService:    NewJWTAuthService(),
 		stateKeyPrefix:    "social:state:",
@@ -80,9 +80,14 @@ func (s *SocialAuthService) GetAuthURLWithSessionID(providerIdentifier string, s
 	}
 
 	// 创建适配器
-	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
 	if err != nil {
 		return nil, fmt.Errorf("创建适配器失败: %w", err)
+	}
+
+	browser, ok := adapter.(protocol.BrowserFlowAdapter)
+	if !ok {
+		return nil, fmt.Errorf("提供商 %s 不支持浏览器授权流程", provider.Identifier)
 	}
 
 	// 生成state参数（防CSRF）
@@ -97,7 +102,7 @@ func (s *SocialAuthService) GetAuthURLWithSessionID(providerIdentifier string, s
 	}
 
 	// 获取授权URL
-	authURL := adapter.GetAuthURL(state)
+	authURL := browser.GetAuthURL(state)
 
 	return &dto.SocialAuthURLResponse{
 		AuthURL: authURL,
@@ -120,27 +125,41 @@ func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state strin
 	}
 
 	// 创建适配器
-	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
 	if err != nil {
 		return nil, fmt.Errorf("创建适配器失败: %w", err)
 	}
 
+	browser, ok := adapter.(protocol.BrowserFlowAdapter)
+	if !ok {
+		return nil, fmt.Errorf("提供商 %s 不支持浏览器回调流程", provider.Identifier)
+	}
+
 	// 交换授权码获取令牌
 	ctx := context.Background()
-	token, err := adapter.ExchangeToken(ctx, code)
+	token, err := browser.ExchangeToken(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("交换令牌失败: %w", err)
 	}
 
 	// 获取用户信息
-	socialUser, err := adapter.GetUserInfo(ctx, token)
+	socialUser, err := browser.GetUserInfo(ctx, token)
 	if err != nil {
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
 
-	// 调试日志
-	fmt.Printf("DEBUG: socialUser.OpenID = %s\n", socialUser.OpenID)
+	return s.buildCallbackResponse(provider, socialUser, token, sessionID)
+}
 
+// buildCallbackResponse 根据拿到的社交用户信息执行后续的账号查找/临时存储分支。
+// 同时被 HandleCallback（浏览器回调）和 HandleMiniProgramLogin（小程序 code 流）复用。
+// token 可能为 nil（小程序流程没有 OAuth2 access_token）。
+func (s *SocialAuthService) buildCallbackResponse(
+	provider *model.SocialProvider,
+	socialUser *protocol.SocialUser,
+	token *oauth2.Token,
+	sessionID string,
+) (*dto.SocialAuthCallbackResponse, error) {
 	// 查找是否已绑定账号
 	account, err := s.accountDAO.GetByProviderAndOpenID(provider.ID, socialUser.OpenID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -148,31 +167,27 @@ func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state strin
 	}
 
 	if account != nil {
-		// 已绑定，直接登录
-		fmt.Printf("DEBUG: 已有账号，执行登录流程\n")
 		response, err := s.loginWithSocialAccount(account, socialUser, token)
 		if err != nil {
 			return nil, err
 		}
-		// 将sessionID附加到响应中（用于OIDC流程）
 		response.SessionID = sessionID
 		return response, nil
 	}
 
 	// 未绑定，返回需要绑定的响应
-	fmt.Printf("DEBUG: 新用户，需要选择绑定或注册\n")
-
-	// 生成绑定令牌
 	bindToken := uuid.New().String()
 
-	// 提取 OAuth token 信息
 	var accessToken, tokenType string
 	var expiresIn int64
-	accessToken = token.AccessToken
-	tokenType = token.TokenType
-	expiresIn = int64(time.Until(token.Expiry).Seconds())
+	if token != nil {
+		accessToken = token.AccessToken
+		tokenType = token.TokenType
+		if !token.Expiry.IsZero() {
+			expiresIn = int64(time.Until(token.Expiry).Seconds())
+		}
+	}
 
-	// 存储临时社交用户信息到 Redis
 	tempUserInfo := &TempSocialUserInfo{
 		ProviderID:  provider.ID,
 		OpenID:      socialUser.OpenID,
@@ -190,14 +205,44 @@ func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state strin
 		return nil, fmt.Errorf("存储临时用户信息失败: %w", err)
 	}
 
-	fmt.Printf("DEBUG: 生成 BindToken: %s\n", bindToken)
-
-	// 返回需要绑定的响应
 	return &dto.SocialAuthCallbackResponse{
 		NeedsBind: true,
 		BindToken: bindToken,
-		SessionID: sessionID, // 附加sessionID用于OIDC流程
+		SessionID: sessionID,
 	}, nil
+}
+
+// HandleMiniProgramLogin 处理微信小程序登录。
+// 前端通过 wx.login 拿到 js_code 后 POST 到后端，由后端调用 jscode2session 完成登录/绑定。
+func (s *SocialAuthService) HandleMiniProgramLogin(providerIdentifier, jsCode, sessionID string) (*dto.SocialAuthCallbackResponse, error) {
+	if jsCode == "" {
+		return nil, fmt.Errorf("js_code 不能为空")
+	}
+
+	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
+	if err != nil {
+		return nil, err
+	}
+	if !provider.IsEnabled() {
+		return nil, fmt.Errorf("提供商未启用")
+	}
+
+	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
+	if err != nil {
+		return nil, fmt.Errorf("创建适配器失败: %w", err)
+	}
+
+	codeFlow, ok := adapter.(protocol.CodeFlowAdapter)
+	if !ok {
+		return nil, fmt.Errorf("提供商 %s 不支持 code 登录流程", provider.Identifier)
+	}
+
+	socialUser, err := codeFlow.LoginWithCode(context.Background(), jsCode)
+	if err != nil {
+		return nil, fmt.Errorf("code 登录失败: %w", err)
+	}
+
+	return s.buildCallbackResponse(provider, socialUser, nil, sessionID)
 }
 
 // BindSocialAccount 绑定社交账号（已登录用户）
@@ -214,20 +259,25 @@ func (s *SocialAuthService) BindSocialAccount(userID uint, providerIdentifier, c
 	}
 
 	// 创建适配器
-	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
 	if err != nil {
 		return fmt.Errorf("创建适配器失败: %w", err)
 	}
 
+	browser, ok := adapter.(protocol.BrowserFlowAdapter)
+	if !ok {
+		return fmt.Errorf("提供商 %s 不支持浏览器回调绑定", provider.Identifier)
+	}
+
 	// 交换授权码获取令牌
 	ctx := context.Background()
-	token, err := adapter.ExchangeToken(ctx, code)
+	token, err := browser.ExchangeToken(ctx, code)
 	if err != nil {
 		return fmt.Errorf("交换令牌失败: %w", err)
 	}
 
 	// 获取用户信息
-	socialUser, err := adapter.GetUserInfo(ctx, token)
+	socialUser, err := browser.GetUserInfo(ctx, token)
 	if err != nil {
 		return fmt.Errorf("获取用户信息失败: %w", err)
 	}

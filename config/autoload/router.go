@@ -159,6 +159,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSocialProviders.DELETE("/:id", AdminController.SocialProviderController{}.DeleteProvider)
 			adminSocialProviders.POST("/batch", AdminController.SocialProviderController{}.BatchOperation)
 			adminSocialProviders.GET("/stats", AdminController.SocialProviderController{}.GetProviderStats)
+			adminSocialProviders.POST("/discover-oidc", AdminController.SocialProviderController{}.DiscoverOIDC)
 
 			// 管理员系统设置
 			adminSettings := admin.Group("/settings")
@@ -228,6 +229,7 @@ func (receiver Router) InitConfig() map[string]any {
 			social.GET("/callback/:provider", controller.SocialAuthController{}.HandleCallback)
 			social.POST("/bind-with-login", controller.SocialAuthController{}.BindWithLogin)
 			social.POST("/register-with-social", controller.SocialAuthController{}.RegisterWithSocial)
+			social.POST("/miniprogram/login/:provider", controller.SocialAuthController{}.MiniProgramLogin)
 
 			socialAuth := router.Group("/social")
 			socialAuth.Use(middleware.AuthMiddleware())

@@ -10,12 +10,14 @@ import (
 type ProviderType string
 
 const (
-	ProviderTypeGeneric ProviderType = "generic" // 通用OAuth2.0
-	ProviderTypeWeChat  ProviderType = "wechat"  // 微信（预留）
-	ProviderTypeQQ      ProviderType = "qq"      // QQ（预留）
-	ProviderTypeAlipay  ProviderType = "alipay"  // 支付宝（预留）
-	ProviderTypeGithub  ProviderType = "github"  // GitHub
-	ProviderTypeGoogle  ProviderType = "google"  // Google
+	ProviderTypeGeneric            ProviderType = "generic"            // 通用 OAuth2.0（历史枚举，不在 UI 新建）
+	ProviderTypeWeChat             ProviderType = "wechat"             // 微信网页/公众号
+	ProviderTypeWeChatMiniProgram  ProviderType = "wechat_miniprogram" // 微信小程序（无浏览器回调）
+	ProviderTypeQQ                 ProviderType = "qq"                 // QQ 互联
+	ProviderTypeAlipay             ProviderType = "alipay"             // 支付宝（历史枚举，不在 UI 新建）
+	ProviderTypeGithub             ProviderType = "github"             // GitHub
+	ProviderTypeGoogle             ProviderType = "google"             // Google
+	ProviderTypeOIDC               ProviderType = "oidc"               // 标准 OIDC（支持 /.well-known 自动发现）
 )
 
 // String returns the string representation of ProviderType
@@ -47,7 +49,7 @@ type SocialProvider struct {
 	AuthURL      string `gorm:"size:255" json:"authUrl" validate:"max=255"`                       // 授权端点URL
 	TokenURL     string `gorm:"size:255" json:"tokenUrl" validate:"max=255"`                      // 令牌端点URL
 	UserInfoURL  string `gorm:"size:255" json:"userInfoUrl" validate:"max=255"`                   // 用户信息端点URL
-	RedirectURL  string `gorm:"size:255;not null" json:"redirectUrl" validate:"required,max=255"` // 回调URL
+	RedirectURL  string `gorm:"size:255" json:"redirectUrl" validate:"max=255"`                   // 回调URL（小程序等无回调类型可为空）
 
 	// 配置参数
 	Scopes string `gorm:"type:text" json:"scopes"` // OAuth2.0作用域（逗号分隔）

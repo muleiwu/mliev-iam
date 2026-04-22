@@ -7,20 +7,24 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // SocialProviderService 社会化登录提供商服务
 type SocialProviderService struct {
 	db          *gorm.DB
+	redis       *redis.Client
 	providerDAO *dao.SocialProviderDAO
 	accountDAO  *dao.UserSocialAccountDAO
 }
 
-// NewSocialProviderService 创建服务实例
-func NewSocialProviderService(db *gorm.DB) *SocialProviderService {
+// NewSocialProviderService 创建服务实例。
+// redisClient 可为 nil；OIDC discovery 缓存会降级为每次重新抓取。
+func NewSocialProviderService(db *gorm.DB, redisClient *redis.Client) *SocialProviderService {
 	return &SocialProviderService{
 		db:          db,
+		redis:       redisClient,
 		providerDAO: dao.NewSocialProviderDAO(db),
 		accountDAO:  dao.NewUserSocialAccountDAO(db),
 	}
@@ -305,13 +309,10 @@ func (s *SocialProviderService) GetProviderStats() (*dto.SocialProviderStatsResp
 
 // validateProviderConfig 验证提供商配置
 func (s *SocialProviderService) validateProviderConfig(provider *model.SocialProvider) error {
-	// 创建适配器
-	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
 	if err != nil {
 		return err
 	}
-
-	// 验证配置
 	return adapter.ValidateConfig()
 }
 

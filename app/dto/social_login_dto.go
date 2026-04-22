@@ -15,11 +15,11 @@ type CreateSocialProviderRequest struct {
 	Type         model.ProviderType   `json:"type" binding:"required"`
 	Description  string               `json:"description" binding:"max=255"`
 	ClientID     string               `json:"clientId" binding:"required,max=255"`
-	ClientSecret string               `json:"clientSecret" binding:"required,max=255"`
+	ClientSecret string               `json:"clientSecret" binding:"max=255"`
 	AuthURL      string               `json:"authUrl" binding:"max=255"`
 	TokenURL     string               `json:"tokenUrl" binding:"max=255"`
 	UserInfoURL  string               `json:"userInfoUrl" binding:"max=255"`
-	RedirectURL  string               `json:"redirectUrl" binding:"required,max=255"`
+	RedirectURL  string               `json:"redirectUrl" binding:"max=255"`
 	Scopes       string               `json:"scopes"`
 	Icon         string               `json:"icon" binding:"max=255"`
 	SortOrder    int                  `json:"sortOrder"`
@@ -169,6 +169,27 @@ type SocialBindAccountRequest struct {
 // SocialUnbindAccountRequest 解绑社交账号请求
 type SocialUnbindAccountRequest struct {
 	AccountID uint `json:"accountId" binding:"required"`
+}
+
+// SocialMiniProgramLoginRequest 小程序登录请求
+type SocialMiniProgramLoginRequest struct {
+	JsCode    string `json:"jsCode" binding:"required"`
+	SessionID string `json:"sessionId,omitempty"`
+}
+
+// OIDCDiscoverRequest OIDC 发现请求
+type OIDCDiscoverRequest struct {
+	Issuer string `json:"issuer" binding:"required"`
+}
+
+// OIDCDiscoverResponse OIDC 发现响应
+type OIDCDiscoverResponse struct {
+	Issuer                string   `json:"issuer"`
+	AuthorizationEndpoint string   `json:"authorizationEndpoint"`
+	TokenEndpoint         string   `json:"tokenEndpoint"`
+	UserinfoEndpoint      string   `json:"userinfoEndpoint"`
+	JwksURI               string   `json:"jwksUri"`
+	ScopesSupported       []string `json:"scopesSupported,omitempty"`
 }
 
 // ==================== 统计信息 DTO ====================
