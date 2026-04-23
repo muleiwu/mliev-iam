@@ -7,7 +7,6 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
-	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
@@ -542,41 +541,3 @@ func (s *InstallService) MarkAsInstalled() error {
 	return nil
 }
 
-// createDatabaseTables 创建数据库表结构
-func (s *InstallService) createDatabaseTables() error {
-	cfg := helper.GetConfig()
-	migrationConfig := cfg.Get("database.migration", []any{})
-	if migrationConfig == nil {
-		return fmt.Errorf("未找到数据库迁移配置")
-	}
-
-	models, ok := migrationConfig.([]any)
-	if !ok {
-		if typed, okTyped := migrationConfig.([]interface{}); okTyped {
-			models = typed
-		} else {
-			return fmt.Errorf("数据库迁移配置格式错误")
-		}
-	}
-
-	if len(models) == 0 {
-		return fmt.Errorf("数据库迁移配置为空")
-	}
-
-	driver := cfg.GetString("database.driver", "mysql")
-
-	if driver == "mysql" {
-		s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
-	}
-
-	helper.GetLogger().Warn("[install] 执行 GORM AutoMigrate 建表；后续 schema 变更请用 migrations/*.go 而非 AutoMigrate")
-	if err := s.db.AutoMigrate(models...); err != nil {
-		return fmt.Errorf("数据库表结构迁移失败: %w", err)
-	}
-
-	if driver == "mysql" {
-		s.db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
-	}
-
-	return nil
-}

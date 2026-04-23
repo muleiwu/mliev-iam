@@ -21,7 +21,8 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatalf("goose up 失败: %v", err)
 	}
 
-	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at", "is_verified"} {
+	// 新代码读写依赖的列都存在
+	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at"} {
 		var count int
 		q := fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = '%s'`, col)
 		if err := db.QueryRow(q).Scan(&count); err != nil {
@@ -32,16 +33,26 @@ func TestSqliteSmoke(t *testing.T) {
 		}
 	}
 
+	// 已 DROP 的遗留列确实不存在
+	var legacyCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'is_verified'`).Scan(&legacyCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("users.is_verified 列本该被 drop_user_is_verified 迁移删除，实际还在")
+	}
+
 	var name string
 	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='captcha_configs'").Scan(&name); err != nil {
 		t.Fatalf("captcha_configs 未创建: %v", err)
 	}
 
+	const expectedMaxVersion int64 = 20260424040609
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	if maxV != 20260424022005 {
-		t.Fatalf("期望最大版本 20260424022005，实际 %d", maxV)
+	if maxV != expectedMaxVersion {
+		t.Fatalf("期望最大版本 %d，实际 %d", expectedMaxVersion, maxV)
 	}
 }

@@ -47,10 +47,8 @@ type User struct {
 	PasswordHash string `gorm:"size:100" json:"-"`
 
 	// 状态管理
-	Status      UserStatus `gorm:"default:0;not null" json:"status"`
-	IsActivated bool       `gorm:"default:false;not null" json:"isActivated"`
-	// Deprecated: 保留列以兼容历史数据，新逻辑读取 EmailVerifiedAt / PhoneVerifiedAt 判定。
-	IsVerified      bool       `gorm:"default:false;not null" json:"-"`
+	Status          UserStatus `gorm:"default:0;not null" json:"status"`
+	IsActivated     bool       `gorm:"default:false;not null" json:"isActivated"`
 	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
 	PhoneVerifiedAt *time.Time `json:"phoneVerifiedAt"`
 	LoginCount      int64      `gorm:"default:0" json:"loginCount"`
