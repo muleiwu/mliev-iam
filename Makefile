@@ -152,21 +152,23 @@ clean-go:
 	@rm -f mliev-iam mliev-iam-test go_build_cnb_cool_mliev_iam_mliev_iam
 
 # ============================================================
-# 数据库迁移（Goose）
-#   生产环境 database.auto_migrate=false，schema 变更必须通过 migrations/*.go
-#   新增迁移步骤：
-#     1. make migrate-new NAME=add_xxx_field  创建迁移文件
-#     2. 在生成的 migrations/YYYYMMDDHHMMSS_add_xxx_field.go 中写 up/down
-#     3. 启动服务即自动执行（或 make migrate-up 手动）
+# 数据库迁移（Goose, 多方言）
+#   每次 schema 变更，在 migrations/{mysql,postgresql,sqlite} 下各生成一份 .sql。
+#   流程：
+#     1. make migrate-new NAME=add_xxx_field   三个方言各生成一个空模板
+#     2. 按各方言语法分别填写 -- +goose Up / -- +goose Down
+#     3. 启动服务（install 流程）自动执行对应方言目录下的 goose.Up
 # ============================================================
 
 migrate-new:
 	@if [ -z "$(NAME)" ]; then echo "用法: make migrate-new NAME=add_xxx_field"; exit 1; fi
 	@TS=$$(date +%Y%m%d%H%M%S); \
-	FILE="migrations/$${TS}_$(NAME).go"; \
-	echo "==> 生成迁移文件 $$FILE"; \
-	printf 'package migrations\n\nimport (\n\t"context"\n\t"database/sql"\n\n\t"github.com/pressly/goose/v3"\n)\n\nfunc init() {\n\tgoose.AddMigrationContext(up%s, down%s)\n}\n\nfunc up%s(ctx context.Context, tx *sql.Tx) error {\n\t// TODO: up\n\treturn nil\n}\n\nfunc down%s(ctx context.Context, tx *sql.Tx) error {\n\t// TODO: down\n\treturn nil\n}\n' "$(NAME)" "$(NAME)" "$(NAME)" "$(NAME)" > $$FILE; \
-	echo "==> 完成，记得实现 up/down"
+	for D in mysql postgresql sqlite; do \
+	  FILE="migrations/$$D/$${TS}_$(NAME).sql"; \
+	  printf -- '-- +goose Up\n-- +goose StatementBegin\n\n-- +goose StatementEnd\n\n-- +goose Down\n-- +goose StatementBegin\n\n-- +goose StatementEnd\n' > $$FILE; \
+	  echo "==> $$FILE"; \
+	done; \
+	echo "==> 三份模板已生成，记得按方言语法填写 up/down"
 
 migrate-status:
 	@echo "==> 启动服务前请使用 admin 后台查询 goose_db_version 表"

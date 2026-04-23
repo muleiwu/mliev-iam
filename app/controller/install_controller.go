@@ -142,16 +142,13 @@ func (ic InstallController) SubmitInstall(c httpInterfaces.RouterContextInterfac
 		return
 	}
 
-	// 设置外部数据库连接供 initial_schema 迁移使用
-	migrations.SetExternalDB(testDB)
-	defer migrations.ClearExternalDB()
-
-	// 执行 goose 迁移，使用用户选择的数据库驱动作为方言
+	// 执行 goose 迁移，使用用户选择的数据库驱动分派到对应方言 SQL 目录。
+	// 传入 gormDB 让 runner 能识别"遗留 MySQL schema（AutoMigrate 起家、goose 无记录）"并 baseline。
 	dialect := req.Database.Driver
 	if dialect == "" {
-		dialect = "mysql" // 默认 MySQL
+		dialect = "mysql"
 	}
-	if err := migrations.RunGooseMigrations(sqlDB, dialect, nil); err != nil {
+	if err := migrations.RunGooseMigrationsWithGorm(sqlDB, testDB, dialect, nil); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "数据库迁移失败: "+err.Error())
 		return
 	}
