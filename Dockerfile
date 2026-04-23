@@ -10,10 +10,15 @@ WORKDIR /app
 COPY . /app
 
 # 安装 pnpm 并构建前端项目
+#   - admin-web (monorepo)：管理后台 web-antd、安装向导 web-install
+#   - frontend-oidc (独立 repo)：OIDC 登录/同意 UI，Vite outDir 直指 ../static/auth
 RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
     cd /app/admin-web && \
     pnpm install && \
-    pnpm build:antd && pnpm build:install && pnpm build:oidc && \
+    pnpm build:antd && pnpm build:install && \
+    cd /app/frontend-oidc && \
+    pnpm install && \
+    pnpm build && \
     ls /app && ls /app/static && ls /app/static/auth
 
 

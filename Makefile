@@ -10,7 +10,7 @@ help:
 	@echo "  make install-frontend   - 安装前端依赖（pnpm install）"
 	@echo "  make build-frontend     - 编译所有前端应用（包含核心包）"
 	@echo "  make build-packages     - 仅编译 @vben-core 核心包"
-	@echo "  make build-oidc         - 编译 web-oidc 前端"
+	@echo "  make build-oidc         - 编译 frontend-oidc（OIDC 登录/同意 UI）"
 	@echo "  make build-install      - 编译 web-install 前端"
 	@echo "  make build-antd         - 编译 web-antd 前端"
 	@echo "  make build-go           - 编译 Go 后端"
@@ -20,7 +20,7 @@ help:
 	@echo "  make dev                - 开发模式（前端 watch + Go 后端）"
 	@echo "  make run                - 编译前端并运行 Go 后端"
 	@echo "  make clean              - 清理所有编译产物"
-	@echo "  make clean-oidc         - 清理 web-oidc 编译产物"
+	@echo "  make clean-oidc         - 清理 frontend-oidc 编译产物"
 	@echo "  make clean-antd         - 清理 web-antd 编译产物"
 	@echo "  make clean-packages     - 清理核心包编译产物"
 	@echo "  make clean-go           - 清理 Go 二进制文件"
@@ -29,8 +29,8 @@ help:
 # 安装前端依赖
 install-frontend:
 	@echo "==> 开始安装前端依赖..."
-	@echo "==> 安装 web-oidc 前端依赖..."
-	@cd admin-web/apps/web-oidc && pnpm install
+	@echo "==> 安装 frontend-oidc 前端依赖（独立项目，OIDC 登录 UI）..."
+	@cd frontend-oidc && pnpm install
 	@echo "==> 安装 web-antd 前端依赖..."
 	@cd admin-web/apps/web-antd && pnpm install
 	@echo "==> 前端依赖安装完成！"
@@ -46,20 +46,14 @@ build-frontend: build-packages
 	@$(MAKE) build-oidc-only
 	@$(MAKE) build-antd-only
 
-# 编译 web-oidc 前端（包含核心包依赖）
-build-oidc: build-packages build-oidc-only
+# 编译 OIDC 登录 UI（frontend-oidc，独立项目，不依赖 @vben-core）
+# vite.config.ts 的 outDir 已指向 ../static/auth，且 emptyOutDir=true 会自动清理
+build-oidc: build-oidc-only
 
-# 编译 web-oidc 前端（仅应用本身，不构建核心包）
 build-oidc-only:
-	@echo "==> 开始编译 web-oidc 前端..."
-	@echo "==> 清理 static/auth 目录..."
-	@rm -rf static/auth
-	@mkdir -p static/auth
-	@echo "==> 切换到 admin-web/apps/web-oidc 目录并编译..."
-	@cd admin-web/apps && pnpm build:oidc
-	@echo "==> 复制编译产物到 static/auth..."
-	@cp -r admin-web/apps/web-oidc/dist/* static/auth/
-	@echo "==> web-oidc 前端编译完成！"
+	@echo "==> 开始编译 frontend-oidc..."
+	@cd frontend-oidc && pnpm build
+	@echo "==> frontend-oidc 编译完成！产物已写入 static/auth"
 
 # 编译 web-antd 前端（包含核心包依赖）
 build-antd: build-packages build-antd-only
@@ -90,8 +84,8 @@ release:
 
 dev-build-frontend:
 	@echo "==> 启动开发模式..."
-	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 frontend-oidc watch 模式（后台运行）..."
+	@cd frontend-oidc && pnpm dev &
 	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
@@ -104,8 +98,8 @@ dev-go:
 # 开发模式：启动前端 watch 模式和 Go 后端
 dev:
 	@echo "==> 启动开发模式..."
-	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 frontend-oidc watch 模式（后台运行）..."
+	@cd frontend-oidc && pnpm dev &
 	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
@@ -128,11 +122,11 @@ run-go:
 clean: clean-oidc clean-antd clean-packages clean-go
 	@echo "==> 所有编译产物已清理完成！"
 
-# 清理 web-oidc 编译产物
+# 清理 frontend-oidc 编译产物
 clean-oidc:
-	@echo "==> 清理 web-oidc 编译产物..."
+	@echo "==> 清理 frontend-oidc 编译产物..."
 	@rm -rf static/auth
-	@rm -rf admin-web/apps/web-oidc/dist
+	@rm -rf frontend-oidc/dist
 
 # 清理 web-antd 编译产物
 clean-antd:
