@@ -346,7 +346,13 @@ func (s *OIDCIDTokenService) addEmailClaims(claims *IDTokenClaims, user *model.U
 	if user.Email != nil {
 		claims.Email = *user.Email
 	}
+	// 默认由 EmailVerifiedAt 派生；attributes 可覆盖（与 /userinfo 行为一致）
 	claims.EmailVerified = user.EmailVerified()
+	if user.Attributes != nil {
+		if emailVerified, ok := user.Attributes["email_verified"].(bool); ok {
+			claims.EmailVerified = emailVerified
+		}
+	}
 }
 
 // addPhoneClaims 添加phone scope的claims
@@ -354,8 +360,8 @@ func (s *OIDCIDTokenService) addPhoneClaims(claims *IDTokenClaims, user *model.U
 	if user.Phone != nil {
 		claims.PhoneNumber = *user.Phone
 	}
-
-	// 从扩展属性中获取手机号验证状态
+	// 默认由 PhoneVerifiedAt 派生；attributes 可覆盖
+	claims.PhoneNumberVerified = user.PhoneVerified()
 	if user.Attributes != nil {
 		if phoneVerified, ok := user.Attributes["phone_number_verified"].(bool); ok {
 			claims.PhoneNumberVerified = phoneVerified
