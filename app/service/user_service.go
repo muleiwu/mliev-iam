@@ -102,7 +102,6 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		PasswordHash: passwordHash,
 		Status:       model.UserStatusActive,
 		IsActivated:  true,
-		IsVerified:   false,
 		Remark:       req.Remark,
 	}
 
@@ -206,6 +205,32 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	}
 	if req.Attributes != nil {
 		user.Attributes = req.Attributes
+	}
+	if req.IsActivated != nil {
+		user.IsActivated = *req.IsActivated
+	}
+	if req.Status != nil {
+		user.Status = *req.Status
+	}
+	if req.EmailVerified != nil {
+		if *req.EmailVerified {
+			if user.EmailVerifiedAt == nil {
+				now := time.Now()
+				user.EmailVerifiedAt = &now
+			}
+		} else {
+			user.EmailVerifiedAt = nil
+		}
+	}
+	if req.PhoneVerified != nil {
+		if *req.PhoneVerified {
+			if user.PhoneVerifiedAt == nil {
+				now := time.Now()
+				user.PhoneVerifiedAt = &now
+			}
+		} else {
+			user.PhoneVerifiedAt = nil
+		}
 	}
 
 	// 保存更新

@@ -379,20 +379,29 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 		phone = &adminInfo.Phone
 	}
 
-	// 创建管理员用户
+	// 创建管理员用户，管理员首帐号默认视为已验证
+	now := time.Now()
+	var adminEmailVerifiedAt, adminPhoneVerifiedAt *time.Time
+	if email != nil {
+		adminEmailVerifiedAt = &now
+	}
+	if phone != nil {
+		adminPhoneVerifiedAt = &now
+	}
 	admin := &model.User{
-		Username:     adminInfo.Username,
-		Email:        email,
-		Phone:        phone,
-		Nickname:     adminInfo.RealName,
-		RealName:     adminInfo.RealName,
-		Salt:         salt,
-		PasswordHash: passwordHash,
-		Status:       model.UserStatusActive,
-		IsActivated:  true,
-		IsVerified:   true,
-		LoginCount:   0,
-		Remark:       "系统管理员账户",
+		Username:        adminInfo.Username,
+		Email:           email,
+		Phone:           phone,
+		Nickname:        adminInfo.RealName,
+		RealName:        adminInfo.RealName,
+		Salt:            salt,
+		PasswordHash:    passwordHash,
+		Status:          model.UserStatusActive,
+		IsActivated:     true,
+		EmailVerifiedAt: adminEmailVerifiedAt,
+		PhoneVerifiedAt: adminPhoneVerifiedAt,
+		LoginCount:      0,
+		Remark:          "系统管理员账户",
 	}
 
 	if err := tx.Create(admin).Error; err != nil {
@@ -400,7 +409,6 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 	}
 
 	// 建立用户和部门的关联关系
-	now := time.Now()
 	userDepartment := &model.UserDepartment{
 		UserID:       admin.ID,
 		DepartmentID: deptID,

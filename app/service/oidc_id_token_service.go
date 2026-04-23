@@ -346,7 +346,7 @@ func (s *OIDCIDTokenService) addEmailClaims(claims *IDTokenClaims, user *model.U
 	if user.Email != nil {
 		claims.Email = *user.Email
 	}
-	claims.EmailVerified = user.IsVerified
+	claims.EmailVerified = user.EmailVerified()
 }
 
 // addPhoneClaims 添加phone scope的claims

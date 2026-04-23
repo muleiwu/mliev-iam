@@ -49,8 +49,11 @@ type User struct {
 	// 状态管理
 	Status      UserStatus `gorm:"default:0;not null" json:"status"`
 	IsActivated bool       `gorm:"default:false;not null" json:"isActivated"`
-	IsVerified  bool       `gorm:"default:false;not null" json:"isVerified"`
-	LoginCount  int64      `gorm:"default:0" json:"loginCount"`
+	// Deprecated: 保留列以兼容历史数据，新逻辑读取 EmailVerifiedAt / PhoneVerifiedAt 判定。
+	IsVerified      bool       `gorm:"default:false;not null" json:"-"`
+	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
+	PhoneVerifiedAt *time.Time `json:"phoneVerifiedAt"`
+	LoginCount      int64      `gorm:"default:0" json:"loginCount"`
 
 	// 时间信息
 	LastLoginAt    *time.Time     `json:"lastLoginAt"`
@@ -94,6 +97,16 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 // IsActive checks if user is active
 func (u *User) IsActive() bool {
 	return u.Status == UserStatusActive
+}
+
+// EmailVerified 是否已验证邮箱（派生自 EmailVerifiedAt 时间戳）
+func (u *User) EmailVerified() bool {
+	return u.EmailVerifiedAt != nil
+}
+
+// PhoneVerified 是否已验证手机（派生自 PhoneVerifiedAt 时间戳）
+func (u *User) PhoneVerified() bool {
+	return u.PhoneVerifiedAt != nil
 }
 
 // IsDisabled checks if user is disabled

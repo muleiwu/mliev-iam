@@ -19,14 +19,19 @@ type CreateUserRequest struct {
 }
 
 // UpdateUserRequest 更新用户请求
+// 指针字段 (*bool / *UserStatus) 用于区分"未提供"(nil) 与 "置为 false/零值"。
 type UpdateUserRequest struct {
-	Email      string                 `json:"email" validate:"email,max=100" binding:"omitempty,email"`
-	Phone      string                 `json:"phone" validate:"max=20" binding:"omitempty"`
-	Nickname   string                 `json:"nickname" validate:"max=50" binding:"omitempty"`
-	RealName   string                 `json:"realName" validate:"max=50" binding:"omitempty"`
-	Avatar     string                 `json:"avatar" validate:"max=255" binding:"omitempty"`
-	Remark     string                 `json:"remark" binding:"omitempty"`
-	Attributes map[string]interface{} `json:"attributes" binding:"omitempty"`
+	Email         string                 `json:"email" validate:"email,max=100" binding:"omitempty,email"`
+	Phone         string                 `json:"phone" validate:"max=20" binding:"omitempty"`
+	Nickname      string                 `json:"nickname" validate:"max=50" binding:"omitempty"`
+	RealName      string                 `json:"realName" validate:"max=50" binding:"omitempty"`
+	Avatar        string                 `json:"avatar" validate:"max=255" binding:"omitempty"`
+	Remark        string                 `json:"remark" binding:"omitempty"`
+	Attributes    map[string]interface{} `json:"attributes" binding:"omitempty"`
+	IsActivated   *bool                  `json:"isActivated" binding:"omitempty"`
+	Status        *model.UserStatus      `json:"status" binding:"omitempty,oneof=1 2"`
+	EmailVerified *bool                  `json:"emailVerified" binding:"omitempty"`
+	PhoneVerified *bool                  `json:"phoneVerified" binding:"omitempty"`
 }
 
 // ChangePasswordRequest 修改密码请求
@@ -51,25 +56,29 @@ type UserQueryRequest struct {
 
 // UserResponse 用户响应信息
 type UserResponse struct {
-	ID          uint                   `json:"id"`
-	UUID        string                 `json:"uuid"`
-	Username    string                 `json:"username"`
-	Email       string                 `json:"email"`
-	Phone       string                 `json:"phone"`
-	Nickname    string                 `json:"nickname"`
-	RealName    string                 `json:"realName"`
-	Avatar      string                 `json:"avatar"`
-	Status      model.UserStatus       `json:"status"`
-	StatusText  string                 `json:"statusText"`
-	IsActivated bool                   `json:"isActivated"`
-	IsVerified  bool                   `json:"isVerified"`
-	LoginCount  int64                  `json:"loginCount"`
-	LastLoginAt *time.Time             `json:"lastLoginAt"`
-	LastLoginIP string                 `json:"lastLoginIP"`
-	Attributes  map[string]interface{} `json:"attributes,omitempty"`
-	Remark      string                 `json:"remark"`
-	CreatedAt   time.Time              `json:"createdAt"`
-	UpdatedAt   time.Time              `json:"updatedAt"`
+	ID              uint                   `json:"id"`
+	UUID            string                 `json:"uuid"`
+	Username        string                 `json:"username"`
+	Email           string                 `json:"email"`
+	Phone           string                 `json:"phone"`
+	Nickname        string                 `json:"nickname"`
+	RealName        string                 `json:"realName"`
+	Avatar          string                 `json:"avatar"`
+	Status          model.UserStatus       `json:"status"`
+	StatusText      string                 `json:"statusText"`
+	IsActivated     bool                   `json:"isActivated"`
+	IsVerified      bool                   `json:"isVerified"` // 派生：EmailVerifiedAt 或 PhoneVerifiedAt 任一非空
+	EmailVerified   bool                   `json:"emailVerified"`
+	PhoneVerified   bool                   `json:"phoneVerified"`
+	EmailVerifiedAt *time.Time             `json:"emailVerifiedAt"`
+	PhoneVerifiedAt *time.Time             `json:"phoneVerifiedAt"`
+	LoginCount      int64                  `json:"loginCount"`
+	LastLoginAt     *time.Time             `json:"lastLoginAt"`
+	LastLoginIP     string                 `json:"lastLoginIP"`
+	Attributes      map[string]interface{} `json:"attributes,omitempty"`
+	Remark          string                 `json:"remark"`
+	CreatedAt       time.Time              `json:"createdAt"`
+	UpdatedAt       time.Time              `json:"updatedAt"`
 }
 
 // UserListResponse 用户列表响应
@@ -105,26 +114,33 @@ func ConvertToUserResponse(user *model.User) UserResponse {
 		phone = *user.Phone
 	}
 
+	emailVerified := user.EmailVerified()
+	phoneVerified := user.PhoneVerified()
+
 	return UserResponse{
-		ID:          user.ID,
-		UUID:        user.UUID,
-		Username:    user.Username,
-		Email:       email,
-		Phone:       phone,
-		Nickname:    user.Nickname,
-		RealName:    user.RealName,
-		Avatar:      user.Avatar,
-		Status:      user.Status,
-		StatusText:  user.Status.String(),
-		IsActivated: user.IsActivated,
-		IsVerified:  user.IsVerified,
-		LoginCount:  user.LoginCount,
-		LastLoginAt: user.LastLoginAt,
-		LastLoginIP: user.LastLoginIP,
-		Attributes:  user.Attributes,
-		Remark:      user.Remark,
-		CreatedAt:   user.CreatedAt,
-		UpdatedAt:   user.UpdatedAt,
+		ID:              user.ID,
+		UUID:            user.UUID,
+		Username:        user.Username,
+		Email:           email,
+		Phone:           phone,
+		Nickname:        user.Nickname,
+		RealName:        user.RealName,
+		Avatar:          user.Avatar,
+		Status:          user.Status,
+		StatusText:      user.Status.String(),
+		IsActivated:     user.IsActivated,
+		IsVerified:      emailVerified || phoneVerified,
+		EmailVerified:   emailVerified,
+		PhoneVerified:   phoneVerified,
+		EmailVerifiedAt: user.EmailVerifiedAt,
+		PhoneVerifiedAt: user.PhoneVerifiedAt,
+		LoginCount:      user.LoginCount,
+		LastLoginAt:     user.LastLoginAt,
+		LastLoginIP:     user.LastLoginIP,
+		Attributes:      user.Attributes,
+		Remark:          user.Remark,
+		CreatedAt:       user.CreatedAt,
+		UpdatedAt:       user.UpdatedAt,
 	}
 }
 

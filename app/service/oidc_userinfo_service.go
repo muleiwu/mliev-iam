@@ -100,15 +100,12 @@ func (s *OIDCUserInfoService) BuildUserInfoResponse(user *model.User, scopes []s
 		if user.Email != nil {
 			response.Email = *user.Email
 		}
-		// 优先从扩展属性中获取email_verified，否则使用IsVerified作为fallback
+		// 优先从扩展属性覆盖，否则由 EmailVerifiedAt 派生
+		response.EmailVerified = user.EmailVerified()
 		if user.Attributes != nil {
 			if emailVerified, ok := user.Attributes["email_verified"].(bool); ok {
 				response.EmailVerified = emailVerified
-			} else {
-				response.EmailVerified = user.IsVerified
 			}
-		} else {
-			response.EmailVerified = user.IsVerified
 		}
 	}
 
@@ -116,7 +113,7 @@ func (s *OIDCUserInfoService) BuildUserInfoResponse(user *model.User, scopes []s
 		if user.Phone != nil {
 			response.PhoneNumber = *user.Phone
 		}
-		// 可以添加phone_number_verified字段
+		response.PhoneNumberVerified = user.PhoneVerified()
 		if user.Attributes != nil {
 			if phoneVerified, ok := user.Attributes["phone_number_verified"].(bool); ok {
 				response.PhoneNumberVerified = phoneVerified
