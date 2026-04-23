@@ -34,7 +34,7 @@ const (
 const (
 	qrSessionTTL      = 5 * time.Minute
 	qrSessionKey      = "social:mp_qrcode:"
-	qrDefaultPage     = "pages/login/index"
+	qrDefaultPage     = "pages/login-confirm/login-confirm"
 	qrDefaultEnvVer   = "release"
 	weChatWXACodeAPI  = "https://api.weixin.qq.com/wxa/getwxacodeunlimit"
 )
