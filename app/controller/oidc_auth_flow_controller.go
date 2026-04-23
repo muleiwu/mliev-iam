@@ -953,9 +953,12 @@ func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface
 
 // FlowStatusResponse 流程状态响应
 type FlowStatusResponse struct {
-	SessionID     string            `json:"sessionId"`
-	Status        string            `json:"status"` // needs_login | needs_consent | needs_profile | error
-	Prompt        string            `json:"prompt,omitempty"`
+	SessionID string `json:"sessionId"`
+	Status    string `json:"status"` // needs_login | needs_consent | needs_profile | error
+	Prompt    string `json:"prompt,omitempty"`
+	// CsrfToken 仅在 status=needs_consent 时下发，供前端在 /oidc/consent approve/reject
+	// 时回传做常量时间校验；其它状态留空。
+	CsrfToken     string            `json:"csrfToken,omitempty"`
 	Client        *FlowStatusClient `json:"client,omitempty"`
 	User          *FlowStatusUser   `json:"user,omitempty"`
 	Scopes        []FlowStatusScope `json:"scopes,omitempty"`
@@ -1087,6 +1090,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		SessionID: sessionID,
 		Status:    "needs_consent",
 		Prompt:    session.Prompt,
+		CsrfToken: session.CsrfToken,
 		Client:    clientInfo,
 		User:      userInfo,
 		Scopes:    scopes,
