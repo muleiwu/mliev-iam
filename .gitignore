@@ -6,6 +6,8 @@ config/config.yaml
 /keys/
 /dist/
 /mliev-iam
+# IDE/test build binaries（GoLand 等会生成）
+/go_build_*
 /static/install/
 /.kiro/
 .pnpm-store/
