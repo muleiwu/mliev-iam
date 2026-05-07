@@ -1,16 +1,17 @@
 package admin
 
 import (
+	"strconv"
+
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"gorm.io/datatypes"
-	"strconv"
 )
 
 // CaptchaConfigController 验证码配置管理控制器
@@ -20,7 +21,7 @@ type CaptchaConfigController struct {
 
 // GetCaptchaConfigs 获取验证码配置列表
 // GET /api/admin/captcha-configs
-func (c CaptchaConfigController) GetCaptchaConfigs(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) GetCaptchaConfigs(ctx httpInterfaces.RouterContextInterface) {
 	configDao := dao.NewCaptchaConfigDao(helper.GetDatabase())
 
 	configs, err := configDao.GetAll()
@@ -40,7 +41,7 @@ func (c CaptchaConfigController) GetCaptchaConfigs(ctx *gin.Context, helper inte
 
 // GetCaptchaConfig 获取单个验证码配置
 // GET /api/admin/captcha-configs/:id
-func (c CaptchaConfigController) GetCaptchaConfig(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) GetCaptchaConfig(ctx httpInterfaces.RouterContextInterface) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -60,7 +61,7 @@ func (c CaptchaConfigController) GetCaptchaConfig(ctx *gin.Context, helper inter
 
 // CreateCaptchaConfig 创建验证码配置
 // POST /api/admin/captcha-configs
-func (c CaptchaConfigController) CreateCaptchaConfig(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) CreateCaptchaConfig(ctx httpInterfaces.RouterContextInterface) {
 	var req dto.CreateCaptchaConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, 400, "请求参数错误: "+err.Error())
@@ -104,7 +105,7 @@ func (c CaptchaConfigController) CreateCaptchaConfig(ctx *gin.Context, helper in
 
 // UpdateCaptchaConfig 更新验证码配置
 // PUT /api/admin/captcha-configs/:id
-func (c CaptchaConfigController) UpdateCaptchaConfig(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) UpdateCaptchaConfig(ctx httpInterfaces.RouterContextInterface) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -161,7 +162,7 @@ func (c CaptchaConfigController) UpdateCaptchaConfig(ctx *gin.Context, helper in
 
 // DeleteCaptchaConfig 删除验证码配置
 // DELETE /api/admin/captcha-configs/:id
-func (c CaptchaConfigController) DeleteCaptchaConfig(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) DeleteCaptchaConfig(ctx httpInterfaces.RouterContextInterface) {
 	idStr := ctx.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -187,12 +188,12 @@ func (c CaptchaConfigController) DeleteCaptchaConfig(ctx *gin.Context, helper in
 		return
 	}
 
-	c.Success(ctx, gin.H{"message": "删除成功"})
+	c.Success(ctx, map[string]any{"message": "删除成功"})
 }
 
 // GetCaptchaProviders 获取支持的验证码提供商列表
 // GET /api/admin/captcha-configs/providers
-func (c CaptchaConfigController) GetCaptchaProviders(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) GetCaptchaProviders(ctx httpInterfaces.RouterContextInterface) {
 	manager := captcha.NewManager(helper.GetDatabase())
 	providers := manager.GetSupportedProviders()
 
@@ -201,7 +202,7 @@ func (c CaptchaConfigController) GetCaptchaProviders(ctx *gin.Context, helper in
 
 // GetCaptchaSceneBindings 获取场景绑定配置
 // GET /api/admin/settings/captcha/bindings
-func (c CaptchaConfigController) GetCaptchaSceneBindings(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) GetCaptchaSceneBindings(ctx httpInterfaces.RouterContextInterface) {
 	settingService := service.NewSettingService(helper.GetDatabase())
 
 	bindings, err := settingService.GetCaptchaSceneBindings()
@@ -215,7 +216,7 @@ func (c CaptchaConfigController) GetCaptchaSceneBindings(ctx *gin.Context, helpe
 
 // UpdateCaptchaSceneBindings 更新场景绑定配置
 // PUT /api/admin/settings/captcha/bindings
-func (c CaptchaConfigController) UpdateCaptchaSceneBindings(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaConfigController) UpdateCaptchaSceneBindings(ctx httpInterfaces.RouterContextInterface) {
 	var req dto.UpdateCaptchaSceneBindingsRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, 400, "请求参数错误: "+err.Error())
@@ -229,7 +230,7 @@ func (c CaptchaConfigController) UpdateCaptchaSceneBindings(ctx *gin.Context, he
 		return
 	}
 
-	c.Success(ctx, gin.H{"message": "更新成功"})
+	c.Success(ctx, map[string]any{"message": "更新成功"})
 }
 
 // convertToResponse 转换为响应格式

@@ -7,8 +7,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // RoleController 管理员角色控制器
@@ -18,7 +18,7 @@ type RoleController struct {
 
 // CreateRole 创建角色
 // POST /api/admin/roles
-func (rc RoleController) CreateRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) CreateRole(c httpInterfaces.RouterContextInterface) {
 	var req dto.CreateRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		rc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -49,7 +49,7 @@ func (rc RoleController) CreateRole(c *gin.Context, helper interfaces.HelperInte
 
 // GetRole 获取角色详情
 // GET /api/admin/roles/:id
-func (rc RoleController) GetRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) GetRole(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -73,7 +73,7 @@ func (rc RoleController) GetRole(c *gin.Context, helper interfaces.HelperInterfa
 
 // UpdateRole 更新角色信息
 // PUT /api/admin/roles/:id
-func (rc RoleController) UpdateRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) UpdateRole(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -88,14 +88,19 @@ func (rc RoleController) UpdateRole(c *gin.Context, helper interfaces.HelperInte
 	}
 
 	// 获取当前用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userIDVal := c.Get("user_id")
+	if userIDVal == nil {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+	userID, ok := userIDVal.(uint)
+	if !ok {
 		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
 		return
 	}
 
 	roleService := service.NewRoleService(helper.GetDatabase())
-	response, err := roleService.UpdateRole(uint(id), &req, userID.(uint))
+	response, err := roleService.UpdateRole(uint(id), &req, userID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -119,7 +124,7 @@ func (rc RoleController) UpdateRole(c *gin.Context, helper interfaces.HelperInte
 
 // DeleteRole 删除角色
 // DELETE /api/admin/roles/:id
-func (rc RoleController) DeleteRole(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) DeleteRole(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -128,14 +133,19 @@ func (rc RoleController) DeleteRole(c *gin.Context, helper interfaces.HelperInte
 	}
 
 	// 获取当前用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userIDVal := c.Get("user_id")
+	if userIDVal == nil {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+	userID, ok := userIDVal.(uint)
+	if !ok {
 		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
 		return
 	}
 
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err = roleService.DeleteRole(uint(id), userID.(uint))
+	err = roleService.DeleteRole(uint(id), userID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -161,7 +171,7 @@ func (rc RoleController) DeleteRole(c *gin.Context, helper interfaces.HelperInte
 
 // GetRoleList 获取角色列表
 // GET /api/admin/roles
-func (rc RoleController) GetRoleList(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) GetRoleList(c httpInterfaces.RouterContextInterface) {
 	var req dto.RoleQueryRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		rc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
@@ -180,7 +190,7 @@ func (rc RoleController) GetRoleList(c *gin.Context, helper interfaces.HelperInt
 
 // GetRoleTree 获取角色树形结构
 // GET /api/admin/roles/tree
-func (rc RoleController) GetRoleTree(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) GetRoleTree(c httpInterfaces.RouterContextInterface) {
 	roleService := service.NewRoleService(helper.GetDatabase())
 	response, err := roleService.GetRoleTree()
 	if err != nil {
@@ -193,7 +203,7 @@ func (rc RoleController) GetRoleTree(c *gin.Context, helper interfaces.HelperInt
 
 // UpdateRoleStatus 更新角色状态
 // PUT /api/admin/roles/:id/status
-func (rc RoleController) UpdateRoleStatus(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) UpdateRoleStatus(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -208,14 +218,19 @@ func (rc RoleController) UpdateRoleStatus(c *gin.Context, helper interfaces.Help
 	}
 
 	// 获取当前用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userIDVal := c.Get("user_id")
+	if userIDVal == nil {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+	userID, ok := userIDVal.(uint)
+	if !ok {
 		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
 		return
 	}
 
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err = roleService.UpdateRoleStatus(uint(id), &req, userID.(uint))
+	err = roleService.UpdateRoleStatus(uint(id), &req, userID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -237,7 +252,7 @@ func (rc RoleController) UpdateRoleStatus(c *gin.Context, helper interfaces.Help
 
 // BatchOperation 批量操作角色
 // POST /api/admin/roles/batch
-func (rc RoleController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) BatchOperation(c httpInterfaces.RouterContextInterface) {
 	var req dto.BatchRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		rc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -245,14 +260,19 @@ func (rc RoleController) BatchOperation(c *gin.Context, helper interfaces.Helper
 	}
 
 	// 获取当前用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userIDVal := c.Get("user_id")
+	if userIDVal == nil {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+	userID, ok := userIDVal.(uint)
+	if !ok {
 		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
 		return
 	}
 
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err := roleService.BatchOperation(&req, userID.(uint))
+	err := roleService.BatchOperation(&req, userID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -278,7 +298,7 @@ func (rc RoleController) BatchOperation(c *gin.Context, helper interfaces.Helper
 
 // AssignPermissions 为角色分配权限
 // POST /api/admin/roles/:id/permissions
-func (rc RoleController) AssignPermissions(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) AssignPermissions(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -293,14 +313,19 @@ func (rc RoleController) AssignPermissions(c *gin.Context, helper interfaces.Hel
 	}
 
 	// 获取当前登录用户ID
-	userID, exists := c.Get("user_id")
-	if !exists {
+	userIDVal := c.Get("user_id")
+	if userIDVal == nil {
+		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
+		return
+	}
+	userID, ok := userIDVal.(uint)
+	if !ok {
 		rc.Error(c, constants.ErrCodeUnauthorized, "未找到当前用户信息")
 		return
 	}
 
 	roleService := service.NewRoleService(helper.GetDatabase())
-	err = roleService.AssignPermissions(uint(id), &req, userID.(uint))
+	err = roleService.AssignPermissions(uint(id), &req, userID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -320,7 +345,7 @@ func (rc RoleController) AssignPermissions(c *gin.Context, helper interfaces.Hel
 
 // GetRolePermissions 获取角色的权限列表
 // GET /api/admin/roles/:id/permissions
-func (rc RoleController) GetRolePermissions(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) GetRolePermissions(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -344,7 +369,7 @@ func (rc RoleController) GetRolePermissions(c *gin.Context, helper interfaces.He
 
 // GetRoleStats 获取角色统计信息
 // GET /api/admin/roles/stats
-func (rc RoleController) GetRoleStats(c *gin.Context, helper interfaces.HelperInterface) {
+func (rc RoleController) GetRoleStats(c httpInterfaces.RouterContextInterface) {
 	roleService := service.NewRoleService(helper.GetDatabase())
 	response, err := roleService.GetRoleStats()
 	if err != nil {

@@ -1,14 +1,17 @@
 package autoload
 
-import envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+import (
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+)
 
 type Base struct {
 }
 
-func (receiver Base) InitConfig(helper envInterface.HelperInterface) map[string]any {
+func (receiver Base) InitConfig() map[string]any {
+	env := helper.GetEnv()
 	return map[string]any{
-		"app.name":      helper.GetEnv().GetString("app.app_name", "mliev-iam"),
-		"app.installed": helper.GetEnv().GetBool("app.installed", false),
-		"mode":          helper.GetEnv().GetString("mode", "release"),
+		"app.name":      env.GetString("app.app_name", "mliev-iam"),
+		"app.installed": env.GetBool("app.installed", false),
+		"app.mode":      env.GetString("app.mode", "release"),
 	}
 }

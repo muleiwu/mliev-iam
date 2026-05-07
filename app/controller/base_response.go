@@ -5,14 +5,14 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
-	"github.com/gin-gonic/gin"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 type BaseResponse struct {
 }
 
 // Success 成功响应
-func (receiver BaseResponse) Success(c *gin.Context, data any) {
+func (receiver BaseResponse) Success(c httpInterfaces.RouterContextInterface, data any) {
 	c.JSON(http.StatusOK, dto.Response{
 		Code:    constants.ErrCodeSuccess,
 		Message: constants.GetErrMessage(constants.ErrCodeSuccess),
@@ -21,7 +21,7 @@ func (receiver BaseResponse) Success(c *gin.Context, data any) {
 }
 
 // SuccessWithMessage 带自定义消息的成功响应
-func (receiver BaseResponse) SuccessWithMessage(c *gin.Context, message string, data any) {
+func (receiver BaseResponse) SuccessWithMessage(c httpInterfaces.RouterContextInterface, message string, data any) {
 	c.JSON(http.StatusOK, dto.Response{
 		Code:    constants.ErrCodeSuccess,
 		Message: message,
@@ -30,7 +30,7 @@ func (receiver BaseResponse) SuccessWithMessage(c *gin.Context, message string, 
 }
 
 // Error 错误响应
-func (receiver BaseResponse) Error(c *gin.Context, code int, message string) {
+func (receiver BaseResponse) Error(c httpInterfaces.RouterContextInterface, code int, message string) {
 	httpStatus := receiver.getHTTPStatus(code)
 	if message == "" {
 		message = constants.GetErrMessage(code)
@@ -43,7 +43,7 @@ func (receiver BaseResponse) Error(c *gin.Context, code int, message string) {
 }
 
 // ErrorWithData 带数据的错误响应
-func (receiver BaseResponse) ErrorWithData(c *gin.Context, code int, message string, data any) {
+func (receiver BaseResponse) ErrorWithData(c httpInterfaces.RouterContextInterface, code int, message string, data any) {
 	httpStatus := receiver.getHTTPStatus(code)
 	if message == "" {
 		message = constants.GetErrMessage(code)
@@ -58,10 +58,8 @@ func (receiver BaseResponse) ErrorWithData(c *gin.Context, code int, message str
 
 // getHTTPStatus 根据业务错误码获取HTTP状态码
 func (receiver BaseResponse) getHTTPStatus(code int) int {
-	// 如果是标准HTTP状态码，直接返回
 	if code >= 400 && code < 600 {
 		return code
 	}
-	// 其他情况返回200
 	return http.StatusOK
 }

@@ -1,0 +1,66 @@
+# mliev-iam 配置示例
+# 复制为 config.yaml 并按需修改；首次安装会由安装向导写入大部分字段。
+
+app:
+  # 首次安装完成后由安装向导置为 true；未安装时所有业务路由会被重定向到 /install/
+  installed: false
+  # 应用名（可选）
+  app_name: mliev-iam
+  # 运行模式：debug | release；debug 下会从磁盘加载静态资源并启用 GORM AutoMigrate
+  mode: release
+
+http:
+  # 监听地址
+  addr: ":8080"
+  # 静态资源来源：embed（编译进二进制） | disk（从 ./static 实时读取，用于开发）
+  # release 模式默认 embed；debug 模式默认 disk
+  static_mode: embed
+  # 需要挂载的静态子目录（对应 static/ 下的一级目录）
+  static_dir: [admin, auth, install, static]
+
+database:
+  # 驱动：mysql | postgresql | sqlite
+  driver: mysql
+  host: 127.0.0.1
+  port: 3306
+  # 数据库名。Viper 读 key "database.database"，go-web 内部映射为 database.dbname。
+  database: iam
+  username: root
+  # 生产环境不要把 password 写在这里。推荐通过环境变量覆盖（env 优先于 yaml）：
+  #   DB_DRIVER / DB_HOST / DB_PORT / DB_USERNAME / DB_PASSWORD / DB_DATABASE / DB_CHARSET / DB_FILEPATH
+  password: ""
+  charset: utf8mb4
+  # sqlite 专用路径（driver=sqlite 时生效）
+  filepath: "./config/mliev_iam.db"
+  # 是否允许运行时 GORM AutoMigrate；默认 release=false，debug=true
+  # 生产环境请通过 migrations/ 下的 goose 迁移文件升级 schema
+  auto_migrate: false
+  # goose 迁移目录（go-web migration server 使用；本项目迁移走 migrations/ 下的 Go init()）
+  migration:
+    dir: migrations
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  # 支持环境变量覆盖：REDIS_HOST / REDIS_PASSWORD
+  password: ""
+  db: 0
+
+cache:
+  # 缓存驱动：redis | memory | none
+  driver: redis
+
+push:
+  baseUrl: https://push.mliev.com
+  appId: ""
+  appSecret: ""
+  smsChannelId: 1
+  emailChannelId: 2
+  smsSignature: ""
+  emailSignature: ""
+
+# JWT 密钥通过环境变量覆盖（推荐）：
+#   JWT_SECRET_KEY=your-strong-random-key
+#   JWT_ISSUER=mliev-iam
+#   JWT_ACCESS_TOKEN_TTL=1       # 小时
+#   JWT_REFRESH_TOKEN_TTL=30     # 天

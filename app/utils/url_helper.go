@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // GetBaseURL 获取基础URL，支持反向代理场景
-// 优先级：X-Forwarded headers > 配置文件 > 请求headers
-func GetBaseURL(c *gin.Context, helper interfaces.HelperInterface, path string) string {
-	// 1. 检查反向代理 headers
+// 优先级：X-Forwarded-{Proto,Host} > TLS 探测 + Request.Host
+func GetBaseURL(c httpInterfaces.RouterContextInterface, path string) string {
 	forwardedProto := c.GetHeader("X-Forwarded-Proto")
 	forwardedHost := c.GetHeader("X-Forwarded-Host")
 
@@ -19,18 +17,15 @@ func GetBaseURL(c *gin.Context, helper interfaces.HelperInterface, path string) 
 		return strings.TrimSuffix(fmt.Sprintf("%s://%s%s", forwardedProto, forwardedHost, path), "/")
 	}
 
-	// 2. 回退到请求信息
 	scheme := "http"
-	if c.Request.TLS != nil {
+	if c.Request().TLS != nil {
 		scheme = "https"
 	}
-
-	// 如果有 X-Forwarded-Proto 但没有 X-Forwarded-Host
 	if forwardedProto != "" {
 		scheme = forwardedProto
 	}
 
-	host := c.Request.Host
+	host := c.Request().Host
 	if forwardedHost != "" {
 		host = forwardedHost
 	}

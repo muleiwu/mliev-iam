@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"time"
 
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 type IndexController struct {
@@ -52,7 +52,7 @@ type Advantage struct {
 	Description string
 }
 
-func (receiver IndexController) GetIndex(c *gin.Context, helper interfaces.HelperInterface) {
+func (receiver IndexController) GetIndex(c httpInterfaces.RouterContextInterface) {
 	helper.GetLogger().Info("访问首页")
 
 	// 准备首页数据

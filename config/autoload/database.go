@@ -1,18 +1,42 @@
 package autoload
 
-import envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
+import (
+	"os"
+
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+)
 
 type Database struct {
 }
 
-func (receiver Database) InitConfig(helper envInterface.HelperInterface) map[string]any {
+// envOr 返回环境变量值；若未设置或为空则回落到 fallback。
+// 用于把机密（DB_PASSWORD 等）从 config.yaml 中移出，优先来自运行环境。
+func envOr(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return v
+	}
+	return fallback
+}
+
+func (receiver Database) InitConfig() map[string]any {
+	env := helper.GetEnv()
+	driver := envOr("DB_DRIVER", env.GetString("database.driver", "mysql"))
+
+	// sqlite 特例：go-web 的 sqlite 驱动把 DatabaseConfig.Host 当作 DSN（文件路径），
+	// 所以这里把 database.filepath 映射到 database.host，避免误用 IP/localhost 作为文件名。
+	host := envOr("DB_HOST", env.GetString("database.host", "127.0.0.1"))
+	if driver == "sqlite" {
+		host = envOr("DB_FILEPATH", env.GetString("database.filepath", "./config/mliev_iam.db"))
+	}
+
 	return map[string]any{
-		"database.driver":   helper.GetEnv().GetString("database.driver", "mysql"),
-		"database.host":     helper.GetEnv().GetString("database.host", "127.0.0.1"),
-		"database.filepath": helper.GetEnv().GetString("database.filepath", "./config/mliev_iam.db"),
-		"database.port":     helper.GetEnv().GetInt("database.port", 3306),
-		"database.database": helper.GetEnv().GetString("database.database", "test"),
-		"database.username": helper.GetEnv().GetString("database.username", "test"),
-		"database.password": helper.GetEnv().GetString("database.password", "123456"),
+		"database.driver":   driver,
+		"database.host":     host,
+		"database.filepath": envOr("DB_FILEPATH", env.GetString("database.filepath", "./config/mliev_iam.db")),
+		"database.port":     env.GetInt("database.port", 3306),
+		"database.dbname":   envOr("DB_DATABASE", env.GetString("database.database", "test")),
+		"database.username": envOr("DB_USERNAME", env.GetString("database.username", "test")),
+		"database.password": envOr("DB_PASSWORD", env.GetString("database.password", "123456")),
+		"database.charset":  envOr("DB_CHARSET", env.GetString("database.charset", "utf8mb4")),
 	}
 }

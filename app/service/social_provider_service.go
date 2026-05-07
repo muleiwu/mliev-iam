@@ -7,20 +7,24 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 // SocialProviderService 社会化登录提供商服务
 type SocialProviderService struct {
 	db          *gorm.DB
+	redis       *redis.Client
 	providerDAO *dao.SocialProviderDAO
 	accountDAO  *dao.UserSocialAccountDAO
 }
 
-// NewSocialProviderService 创建服务实例
-func NewSocialProviderService(db *gorm.DB) *SocialProviderService {
+// NewSocialProviderService 创建服务实例。
+// redisClient 可为 nil；OIDC discovery 缓存会降级为每次重新抓取。
+func NewSocialProviderService(db *gorm.DB, redisClient *redis.Client) *SocialProviderService {
 	return &SocialProviderService{
 		db:          db,
+		redis:       redisClient,
 		providerDAO: dao.NewSocialProviderDAO(db),
 		accountDAO:  dao.NewUserSocialAccountDAO(db),
 	}
@@ -226,7 +230,10 @@ func (s *SocialProviderService) GetProviderList(page, pageSize int, status *mode
 	return items, total, nil
 }
 
-// GetEnabledProviders 获取所有启用的提供商（用于前端展示）
+// GetEnabledProviders 获取所有启用的提供商（供登录页按钮列表展示）。
+// 所有类型都会返回，前端根据 type 字段决定交互方式——
+// 浏览器流（github/google/oidc/qq/wechat）点按钮打开弹窗走 /social/auth；
+// 小程序（wechat_miniprogram）点按钮弹扫码 Modal 走 /social/miniprogram/qrcode。
 func (s *SocialProviderService) GetEnabledProviders() ([]*dto.PublicProviderInfo, error) {
 	providers, err := s.providerDAO.GetEnabledProviders()
 	if err != nil {
@@ -241,6 +248,7 @@ func (s *SocialProviderService) GetEnabledProviders() ([]*dto.PublicProviderInfo
 			Icon:       provider.Icon,
 			SortOrder:  provider.SortOrder,
 			IsDefault:  provider.IsDefault,
+			Type:       provider.Type,
 		})
 	}
 
@@ -305,13 +313,10 @@ func (s *SocialProviderService) GetProviderStats() (*dto.SocialProviderStatsResp
 
 // validateProviderConfig 验证提供商配置
 func (s *SocialProviderService) validateProviderConfig(provider *model.SocialProvider) error {
-	// 创建适配器
-	adapter, err := protocol.NewSocialProviderAdapter(provider)
+	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
 	if err != nil {
 		return err
 	}
-
-	// 验证配置
 	return adapter.ValidateConfig()
 }
 

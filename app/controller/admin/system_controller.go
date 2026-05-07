@@ -1,9 +1,9 @@
 package admin
 
 import (
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/reload"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"cnb.cool/mliev/open/go-web/pkg/server/reload"
 )
 
 // SystemController 系统管理控制器
@@ -19,16 +19,12 @@ type ReloadConfigResponse struct {
 
 // ReloadConfig 重新加载配置并重启服务
 // POST /api/admin/system/reload
-func (sc SystemController) ReloadConfig(c *gin.Context, helper interfaces.HelperInterface) {
+func (sc SystemController) ReloadConfig(c httpInterfaces.RouterContextInterface) {
 	// 记录操作日志
 	helper.GetLogger().Info("管理员触发配置重载")
 
-	// 异步触发重启
-	go func() {
-		if !reload.TriggerReload() {
-			helper.GetLogger().Warn("重启请求已在队列中，忽略此次请求")
-		}
-	}()
+	// 异步触发重启。go-web 的 TriggerReload 不返回状态；若通道已满会静默丢弃。
+	go reload.TriggerReload()
 
 	// 立即返回响应
 	sc.Success(c, ReloadConfigResponse{
@@ -39,8 +35,8 @@ func (sc SystemController) ReloadConfig(c *gin.Context, helper interfaces.Helper
 
 // GetSystemInfo 获取系统信息
 // GET /api/admin/system/info
-func (sc SystemController) GetSystemInfo(c *gin.Context, helper interfaces.HelperInterface) {
-	sc.Success(c, gin.H{
+func (sc SystemController) GetSystemInfo(c httpInterfaces.RouterContextInterface) {
+	sc.Success(c, map[string]any{
 		"version": "1.0.0",
 		"status":  "running",
 	})

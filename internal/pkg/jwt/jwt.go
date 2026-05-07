@@ -4,9 +4,17 @@ import (
 	"errors"
 	"time"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// TokenSubject 是 JWTService.GenerateToken 所需的最小用户凭据。
+// 原先直接依赖 app/dto.UserResponse，解耦后改为本包独立的轻量类型，
+// 便于未来将 jwt 包抽取为独立 SDK。
+type TokenSubject struct {
+	UserID   uint
+	Username string
+	Role     string // 可为空；为空时回退到 "admin"
+}
 
 // Claims JWT声明结构
 type Claims struct {
@@ -31,21 +39,26 @@ func NewJWTService(secretKey, issuer string) *JWTService {
 }
 
 // GenerateToken 生成JWT token
-func (j *JWTService) GenerateToken(user *dto.UserResponse, expirationHours int) (string, error) {
+func (j *JWTService) GenerateToken(sub TokenSubject, expirationHours int) (string, error) {
 	// 设置过期时间
 	expirationTime := time.Now().Add(time.Duration(expirationHours) * time.Hour)
 
+	role := sub.Role
+	if role == "" {
+		role = "admin"
+	}
+
 	// 创建声明
 	claims := &Claims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Role:     "admin", // 根据实际业务逻辑设置角色
+		UserID:   sub.UserID,
+		Username: sub.Username,
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 			Issuer:    j.issuer,
-			Subject:   user.Username,
+			Subject:   sub.Username,
 		},
 	}
 

@@ -2,20 +2,15 @@ package autoload
 
 import (
 	"embed"
-
-	envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
 )
 
 type StaticFs struct {
 }
 
-func (receiver StaticFs) InitConfig(helper envInterface.HelperInterface) map[string]any {
+func (receiver StaticFs) InitConfig() map[string]any {
 	return map[string]any{
-		"static.fs": func() map[string]embed.FS {
-			return map[string]embed.FS{
-				// 这里会在启动的时候在 main.go 注入静态资源进来，请在main.go 添加静态资源
-				//"tempe": embed.FS{},
-			}
-		},
+		// 实际静态资源在 main.go 中通过 cmd.WithTemplateFs / cmd.WithWebStaticFs 注入，
+		// 并由 cmd.Start 写入 config.Set("static.fs", staticFs) 覆盖此占位。
+		"static.fs": map[string]embed.FS{},
 	}
 }

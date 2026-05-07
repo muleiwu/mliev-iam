@@ -1,19 +1,16 @@
 package service
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
 	"fmt"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	redisImpl "cnb.cool/mliev/iam/mliev-iam/internal/pkg/redis/impl"
 	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/datatypes"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -22,13 +19,12 @@ import (
 
 // InstallService 安装服务
 type InstallService struct {
-	db     *gorm.DB
-	helper interfaces.HelperInterface
+	db *gorm.DB
 }
 
 // NewInstallService 创建安装服务实例
-func NewInstallService(db *gorm.DB, helper interfaces.HelperInterface) *InstallService {
-	return &InstallService{db: db, helper: helper}
+func NewInstallService(db *gorm.DB) *InstallService {
+	return &InstallService{db: db}
 }
 
 // CheckInstallStatus 检查安装状态
@@ -148,13 +144,18 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gor
 
 // TestRedisConnection 测试Redis连接
 func (s *InstallService) TestRedisConnection(config dto.RedisConfig) (*redis.Client, error) {
-	// 使用已有的Redis实现进行连接测试
-	client, err := redisImpl.NewRedis(s.helper, config.Host, config.Port, config.DB, config.Password)
-	if err != nil {
+	client := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%d", config.Host, config.Port),
+		Password: config.Password,
+		DB:       config.DB,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("Redis连接失败: %w", err)
 	}
 
-	// 返回Redis客户端供后续使用
 	return client, nil
 }
 
@@ -377,20 +378,29 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 		phone = &adminInfo.Phone
 	}
 
-	// 创建管理员用户
+	// 创建管理员用户，管理员首帐号默认视为已验证
+	now := time.Now()
+	var adminEmailVerifiedAt, adminPhoneVerifiedAt *time.Time
+	if email != nil {
+		adminEmailVerifiedAt = &now
+	}
+	if phone != nil {
+		adminPhoneVerifiedAt = &now
+	}
 	admin := &model.User{
-		Username:     adminInfo.Username,
-		Email:        email,
-		Phone:        phone,
-		Nickname:     adminInfo.RealName,
-		RealName:     adminInfo.RealName,
-		Salt:         salt,
-		PasswordHash: passwordHash,
-		Status:       model.UserStatusActive,
-		IsActivated:  true,
-		IsVerified:   true,
-		LoginCount:   0,
-		Remark:       "系统管理员账户",
+		Username:        adminInfo.Username,
+		Email:           email,
+		Phone:           phone,
+		Nickname:        adminInfo.RealName,
+		RealName:        adminInfo.RealName,
+		Salt:            salt,
+		PasswordHash:    passwordHash,
+		Status:          model.UserStatusActive,
+		IsActivated:     true,
+		EmailVerifiedAt: adminEmailVerifiedAt,
+		PhoneVerifiedAt: adminPhoneVerifiedAt,
+		LoginCount:      0,
+		Remark:          "系统管理员账户",
 	}
 
 	if err := tx.Create(admin).Error; err != nil {
@@ -398,7 +408,6 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 	}
 
 	// 建立用户和部门的关联关系
-	now := time.Now()
 	userDepartment := &model.UserDepartment{
 		UserID:       admin.ID,
 		DepartmentID: deptID,
@@ -435,21 +444,14 @@ func (s *InstallService) createAdminAccount(tx *gorm.DB, adminInfo dto.AdminAcco
 	return nil
 }
 
-// generatePasswordHash 生成密码哈希
+// generatePasswordHash 生成密码哈希（bcrypt）。
+// 与 UserService 保持一致：salt 留空，bcrypt 自带 salt。
 func (s *InstallService) generatePasswordHash(password string) (salt, hash string, err error) {
-	// 生成盐值
-	saltBytes := make([]byte, 16)
-	if _, err := rand.Read(saltBytes); err != nil {
-		return "", "", err
+	b, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	if err != nil {
+		return "", "", fmt.Errorf("bcrypt hash failed: %w", err)
 	}
-	salt = hex.EncodeToString(saltBytes)
-
-	// 生成密码哈希
-	h := sha256.New()
-	h.Write([]byte(password + salt))
-	hash = hex.EncodeToString(h.Sum(nil))
-
-	return salt, hash, nil
+	return "", string(b), nil
 }
 
 // UpdateDatabaseConfig 更新数据库配置到配置文件
@@ -539,43 +541,3 @@ func (s *InstallService) MarkAsInstalled() error {
 	return nil
 }
 
-// createDatabaseTables 创建数据库表结构
-func (s *InstallService) createDatabaseTables() error {
-	// 从配置中获取迁移模型列表（与 config/autoload/migration.go 保持一致）
-	migrationConfig := s.helper.GetConfig().Get("database.migration", []any{})
-	if migrationConfig == nil {
-		return fmt.Errorf("未找到数据库迁移配置")
-	}
-
-	models, ok := migrationConfig.([]interface{})
-	if !ok {
-		return fmt.Errorf("数据库迁移配置格式错误")
-	}
-
-	if len(models) == 0 {
-		return fmt.Errorf("数据库迁移配置为空")
-	}
-
-	// 获取数据库驱动类型
-	driver := s.helper.GetConfig().GetString("database.driver", "mysql")
-
-	// 根据不同的数据库类型，执行相应的外键检查设置
-	if driver == "mysql" {
-		// MySQL: 禁用外键检查
-		s.db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
-	}
-
-	// 执行自动迁移（仅安装流程，生产运行时请用 goose 迁移文件）
-	s.helper.GetLogger().Warn("[install] 执行 GORM AutoMigrate 建表；后续 schema 变更请用 migrations/*.go 而非 AutoMigrate")
-	if err := s.db.AutoMigrate(models...); err != nil {
-		return fmt.Errorf("数据库表结构迁移失败: %w", err)
-	}
-
-	// 根据不同的数据库类型，恢复外键检查设置
-	if driver == "mysql" {
-		// MySQL: 重新启用外键检查
-		s.db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
-	}
-
-	return nil
-}

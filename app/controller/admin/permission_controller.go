@@ -7,8 +7,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // PermissionController 管理员权限控制器
@@ -18,7 +18,7 @@ type PermissionController struct {
 
 // CreatePermission 创建权限
 // POST /api/admin/permissions
-func (pc PermissionController) CreatePermission(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) CreatePermission(c httpInterfaces.RouterContextInterface) {
 	var req dto.CreatePermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -51,7 +51,7 @@ func (pc PermissionController) CreatePermission(c *gin.Context, helper interface
 
 // GetPermission 获取权限详情
 // GET /api/admin/permissions/:id
-func (pc PermissionController) GetPermission(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) GetPermission(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -75,7 +75,7 @@ func (pc PermissionController) GetPermission(c *gin.Context, helper interfaces.H
 
 // UpdatePermission 更新权限信息
 // PUT /api/admin/permissions/:id
-func (pc PermissionController) UpdatePermission(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) UpdatePermission(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -110,7 +110,7 @@ func (pc PermissionController) UpdatePermission(c *gin.Context, helper interface
 
 // DeletePermission 删除权限
 // DELETE /api/admin/permissions/:id
-func (pc PermissionController) DeletePermission(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) DeletePermission(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -141,7 +141,7 @@ func (pc PermissionController) DeletePermission(c *gin.Context, helper interface
 
 // GetPermissionList 获取权限列表
 // GET /api/admin/permissions
-func (pc PermissionController) GetPermissionList(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) GetPermissionList(c httpInterfaces.RouterContextInterface) {
 	var req dto.PermissionQueryRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		pc.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
@@ -160,7 +160,7 @@ func (pc PermissionController) GetPermissionList(c *gin.Context, helper interfac
 
 // GetPermissionTree 获取权限树形结构
 // GET /api/admin/permissions/tree
-func (pc PermissionController) GetPermissionTree(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) GetPermissionTree(c httpInterfaces.RouterContextInterface) {
 	permissionService := service.NewPermissionService(helper.GetDatabase())
 	response, err := permissionService.GetPermissionTree()
 	if err != nil {
@@ -173,7 +173,7 @@ func (pc PermissionController) GetPermissionTree(c *gin.Context, helper interfac
 
 // GetMenuTree 获取菜单树形结构
 // GET /api/admin/permissions/menu-tree
-func (pc PermissionController) GetMenuTree(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) GetMenuTree(c httpInterfaces.RouterContextInterface) {
 	permissionService := service.NewPermissionService(helper.GetDatabase())
 	response, err := permissionService.GetMenuTree()
 	if err != nil {
@@ -186,7 +186,7 @@ func (pc PermissionController) GetMenuTree(c *gin.Context, helper interfaces.Hel
 
 // UpdatePermissionStatus 更新权限状态
 // PUT /api/admin/permissions/:id/status
-func (pc PermissionController) UpdatePermissionStatus(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) UpdatePermissionStatus(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -217,7 +217,7 @@ func (pc PermissionController) UpdatePermissionStatus(c *gin.Context, helper int
 
 // BatchOperation 批量操作权限
 // POST /api/admin/permissions/batch
-func (pc PermissionController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) BatchOperation(c httpInterfaces.RouterContextInterface) {
 	var req dto.BatchPermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		pc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -247,7 +247,7 @@ func (pc PermissionController) BatchOperation(c *gin.Context, helper interfaces.
 
 // GetPermissionStats 获取权限统计信息
 // GET /api/admin/permissions/stats
-func (pc PermissionController) GetPermissionStats(c *gin.Context, helper interfaces.HelperInterface) {
+func (pc PermissionController) GetPermissionStats(c httpInterfaces.RouterContextInterface) {
 	permissionService := service.NewPermissionService(helper.GetDatabase())
 	response, err := permissionService.GetPermissionStats()
 	if err != nil {

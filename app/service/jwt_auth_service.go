@@ -2,19 +2,18 @@ package service
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/config"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 )
 
 // JWTAuthService JWT认证服务
 type JWTAuthService struct {
 	jwtService *jwt.JWTService
-	config     *config.JWTConfig
+	config     *jwt.Config
 }
 
 // NewJWTAuthService 创建JWT认证服务实例
 func NewJWTAuthService() *JWTAuthService {
-	jwtConfig := config.GetJWTConfig()
+	jwtConfig := jwt.GetConfig()
 	jwtService := jwt.NewJWTService(jwtConfig.SecretKey, jwtConfig.Issuer)
 
 	return &JWTAuthService{
@@ -25,7 +24,10 @@ func NewJWTAuthService() *JWTAuthService {
 
 // GenerateToken 生成JWT token
 func (s *JWTAuthService) GenerateToken(user *dto.UserResponse) (string, error) {
-	return s.jwtService.GenerateToken(user, s.config.GetAccessTokenHours())
+	return s.jwtService.GenerateToken(jwt.TokenSubject{
+		UserID:   user.ID,
+		Username: user.Username,
+	}, s.config.GetAccessTokenHours())
 }
 
 // ValidateToken 验证JWT token
@@ -44,6 +46,6 @@ func (s *JWTAuthService) GetJWTService() *jwt.JWTService {
 }
 
 // GetConfig 获取JWT配置
-func (s *JWTAuthService) GetConfig() *config.JWTConfig {
+func (s *JWTAuthService) GetConfig() *jwt.Config {
 	return s.config
 }

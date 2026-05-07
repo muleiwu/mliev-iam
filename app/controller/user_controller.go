@@ -7,8 +7,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // UserController 普通用户控制器（非管理员操作）
@@ -18,7 +18,7 @@ type UserController struct {
 
 // ChangePassword 修改用户密码（用户修改自己的密码）
 // PUT /api/user/password
-func (uc UserController) ChangePassword(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) ChangePassword(c httpInterfaces.RouterContextInterface) {
 	// 这里需要从认证中间件或JWT中获取当前用户ID
 	// 暂时使用查询参数模拟
 	userIdStr := c.Query("userId")
@@ -60,7 +60,7 @@ func (uc UserController) ChangePassword(c *gin.Context, helper interfaces.Helper
 
 // ValidateLogin 用户登录验证
 // POST /api/user/login
-func (uc UserController) ValidateLogin(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) {
 	var req struct {
 		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
@@ -98,7 +98,7 @@ func (uc UserController) ValidateLogin(c *gin.Context, helper interfaces.HelperI
 
 // GetUserProfile 获取当前用户信息
 // GET /api/user/profile
-func (uc UserController) GetUserProfile(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) GetUserProfile(c httpInterfaces.RouterContextInterface) {
 	// 这里需要从认证中间件或JWT中获取当前用户ID
 	// 暂时使用查询参数模拟
 	userIdStr := c.Query("userId")
@@ -129,7 +129,7 @@ func (uc UserController) GetUserProfile(c *gin.Context, helper interfaces.Helper
 
 // UpdateUserProfile 更新当前用户信息
 // PUT /api/user/profile
-func (uc UserController) UpdateUserProfile(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) UpdateUserProfile(c httpInterfaces.RouterContextInterface) {
 	// 这里需要从认证中间件或JWT中获取当前用户ID
 	// 暂时使用查询参数模拟
 	userIdStr := c.Query("userId")
@@ -173,7 +173,7 @@ func (uc UserController) UpdateUserProfile(c *gin.Context, helper interfaces.Hel
 
 // Logout 用户退出登录
 // POST /api/auth/logout
-func (uc UserController) Logout(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) Logout(c httpInterfaces.RouterContextInterface) {
 	// 这里可以添加令牌失效逻辑
 	// 例如将令牌加入黑名单或从Redis中删除
 
@@ -182,7 +182,7 @@ func (uc UserController) Logout(c *gin.Context, helper interfaces.HelperInterfac
 
 // RefreshToken 刷新访问令牌
 // POST /api/auth/refresh
-func (uc UserController) RefreshToken(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) RefreshToken(c httpInterfaces.RouterContextInterface) {
 	// 从请求头或请求体中获取刷新令牌
 	refreshToken := c.GetHeader("Refresh-Token")
 	if refreshToken == "" {
@@ -204,7 +204,7 @@ func (uc UserController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 		return
 	}
 
-	response := gin.H{
+	response := map[string]any{
 		"accessToken": newAccessToken,
 		"tokenType":   "Bearer",
 		"expiresIn":   jwtAuthService.GetConfig().GetAccessTokenHours() * 3600, // 转换为秒
@@ -215,7 +215,7 @@ func (uc UserController) RefreshToken(c *gin.Context, helper interfaces.HelperIn
 
 // GetAccessCodes 获取用户权限码
 // GET /api/auth/codes
-func (uc UserController) GetAccessCodes(c *gin.Context, helper interfaces.HelperInterface) {
+func (uc UserController) GetAccessCodes(c httpInterfaces.RouterContextInterface) {
 	// 这里需要从认证中间件或JWT中获取当前用户ID
 	// 暂时使用查询参数模拟
 	userIdStr := c.Query("userId")

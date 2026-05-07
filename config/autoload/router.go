@@ -1,360 +1,263 @@
 package autoload
 
 import (
-	"net/http"
-
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
-	envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/http_server/impl"
-	"github.com/gin-gonic/gin"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
+// Router 注册所有 HTTP 路由。
+//
+// 约定：
+//   - go-web 的 RouterInterface.Group(path) 只接收 path；中间件通过返回组的 Use(...) 注入。
+//   - 公开与受保护路由共享前缀时，拆成两个同名 Group（不同实例）分别挂载 vs 不挂载中间件。
+//   - 原 Gin 的 .Match(GET|POST, ...) 拆成 .GET 和 .POST 两次注册。
 type Router struct {
 }
 
-func (receiver Router) InitConfig(helper envInterface.HelperInterface) map[string]any {
+func (receiver Router) InitConfig() map[string]any {
 	return map[string]any{
-		"http.router": func(router *gin.Engine, deps *impl.HttpDeps) {
-
+		"http.router": func(router httpInterfaces.RouterInterface) {
 			// 首页
-			router.GET("/", deps.WrapHandler(controller.IndexController{}.GetIndex))
+			router.GET("/", controller.IndexController{}.GetIndex)
 
+			// 健康检查
 			health := router.Group("/health")
-			{
-				// 健康检查接口
-				health.GET("", deps.WrapHandler(controller.HealthController{}.GetHealth))
-				health.GET("/simple", deps.WrapHandler(controller.HealthController{}.GetHealthSimple))
-			}
+			health.GET("", controller.HealthController{}.GetHealth)
+			health.GET("/simple", controller.HealthController{}.GetHealthSimple)
 
 			// API 路由组
 			api := router.Group("/api")
-			{
-				// 系统安装路由（公开访问，但已安装后会拒绝）
-				install := api.Group("/install")
-				{
-					install.GET("/check", deps.WrapHandler(controller.InstallController{}.CheckInstall))              // 检查安装状态
-					install.POST("/test-connection", deps.WrapHandler(controller.InstallController{}.TestConnection)) // 测试数据库连接
-					install.POST("/test-redis", deps.WrapHandler(controller.InstallController{}.TestRedisConnection)) // 测试Redis连接
-					install.POST("/submit", deps.WrapHandler(controller.InstallController{}.SubmitInstall))           // 提交安装
-				}
 
-				// 系统管理路由
-				adminSystem := api.Group("/system")
-				{
-					adminSystem.GET("/reload", deps.WrapHandler(AdminController.SystemController{}.ReloadConfig)) // 重新加载配置
-					adminSystem.GET("/info", deps.WrapHandler(AdminController.SystemController{}.GetSystemInfo))  // 获取系统信息
-				}
+			// 系统安装（公开访问，中间件 InstallCheckMiddleware 会放行 /api/install/*）
+			install := api.Group("/install")
+			install.GET("/check", controller.InstallController{}.CheckInstall)
+			install.POST("/test-connection", controller.InstallController{}.TestConnection)
+			install.POST("/test-redis", controller.InstallController{}.TestRedisConnection)
+			install.POST("/submit", controller.InstallController{}.SubmitInstall)
 
-				// 管理员路由组
-				admin := api.Group("/admin")
-				{
-					// 管理员认证路由
-					adminAuth := admin.Group("/auth")
-					{
-						adminAuth.POST("/login", deps.WrapHandler(AdminController.AuthController{}.Login))                                                    // 管理员登录
-						adminAuth.POST("/logout", middleware.AdminAuthMiddleware(helper), deps.WrapHandler(AdminController.AuthController{}.Logout))          // 管理员退出登录
-						adminAuth.POST("/refresh", middleware.AdminAuthMiddleware(helper), deps.WrapHandler(AdminController.AuthController{}.RefreshToken))   // 刷新令牌
-						adminAuth.GET("/profile", middleware.AdminAuthMiddleware(helper), deps.WrapHandler(AdminController.AuthController{}.GetAdminProfile)) // 获取管理员个人信息
-					}
+			// 系统级路由（非 /admin 命名空间，仅管理员可访问）
+			adminSystem := api.Group("/system")
+			adminSystem.Use(middleware.AdminAuthMiddleware())
+			adminSystem.GET("/reload", AdminController.SystemController{}.ReloadConfig)
+			adminSystem.GET("/info", AdminController.SystemController{}.GetSystemInfo)
 
-					// 管理员用户管理路由
-					adminUsers := admin.Group("/users", middleware.AdminAuthMiddleware(helper))
-					{
-						// 用户基础CRUD操作（管理员）
-						adminUsers.POST("", deps.WrapHandler(AdminController.UserController{}.CreateUser))       // 创建用户
-						adminUsers.GET("", deps.WrapHandler(AdminController.UserController{}.GetUserList))       // 获取用户列表
-						adminUsers.GET("/:id", deps.WrapHandler(AdminController.UserController{}.GetUser))       // 获取用户详情
-						adminUsers.PUT("/:id", deps.WrapHandler(AdminController.UserController{}.UpdateUser))    // 更新用户信息
-						adminUsers.DELETE("/:id", deps.WrapHandler(AdminController.UserController{}.DeleteUser)) // 删除用户
+			// === 管理员路由 ===
+			admin := api.Group("/admin")
 
-						// 用户状态管理（管理员）
-						adminUsers.PUT("/:id/status", deps.WrapHandler(AdminController.UserController{}.UpdateUserStatus)) // 更新用户状态
+			// 管理员认证：login 公开，其余需要 AdminAuth
+			adminAuthPublic := admin.Group("/auth")
+			adminAuthPublic.POST("/login", AdminController.AuthController{}.Login)
 
-						// 密码管理（管理员）
-						adminUsers.PUT("/:id/reset-password", deps.WrapHandler(AdminController.UserController{}.ResetPassword)) // 重置密码
+			adminAuthProtected := admin.Group("/auth")
+			adminAuthProtected.Use(middleware.AdminAuthMiddleware())
+			adminAuthProtected.POST("/logout", AdminController.AuthController{}.Logout)
+			adminAuthProtected.POST("/refresh", AdminController.AuthController{}.RefreshToken)
+			adminAuthProtected.GET("/profile", AdminController.AuthController{}.GetAdminProfile)
 
-						// 批量操作（管理员）
-						adminUsers.POST("/batch", deps.WrapHandler(AdminController.UserController{}.BatchOperation)) // 批量操作用户
+			// 管理员用户管理
+			adminUsers := admin.Group("/users")
+			adminUsers.Use(middleware.AdminAuthMiddleware())
+			adminUsers.POST("", AdminController.UserController{}.CreateUser)
+			adminUsers.GET("", AdminController.UserController{}.GetUserList)
+			adminUsers.GET("/:id", AdminController.UserController{}.GetUser)
+			adminUsers.PUT("/:id", AdminController.UserController{}.UpdateUser)
+			adminUsers.DELETE("/:id", AdminController.UserController{}.DeleteUser)
+			adminUsers.PUT("/:id/status", AdminController.UserController{}.UpdateUserStatus)
+			adminUsers.PUT("/:id/reset-password", AdminController.UserController{}.ResetPassword)
+			adminUsers.POST("/batch", AdminController.UserController{}.BatchOperation)
+			adminUsers.GET("/stats/active-count", AdminController.UserController{}.GetActiveUsersCount)
+			adminUsers.GET("/:id/departments", AdminController.UserController{}.GetUserDepartments)
+			adminUsers.POST("/:id/roles/:roleId", AdminController.UserController{}.AssignUserRole)
+			adminUsers.DELETE("/:id/roles/:roleId", AdminController.UserController{}.RemoveUserRole)
+			adminUsers.GET("/:id/roles", AdminController.UserController{}.GetUserRoles)
+			adminUsers.GET("/:id/with-roles", AdminController.UserController{}.GetUserWithRoles)
+			adminUsers.POST("/:id/roles/batch", AdminController.UserController{}.BatchAssignUserRoles)
+			adminUsers.DELETE("/:id/roles/batch", AdminController.UserController{}.BatchRemoveUserRoles)
+			adminUsers.PUT("/:id/roles/:roleId/primary", AdminController.UserController{}.SetUserPrimaryRole)
+			adminUsers.GET("/:id/permissions", AdminController.UserController{}.GetUserPermissions)
+			adminUsers.GET("/:id/menu-tree", AdminController.UserController{}.GetUserMenuTree)
 
-						// 统计信息（管理员）
-						adminUsers.GET("/stats/active-count", deps.WrapHandler(AdminController.UserController{}.GetActiveUsersCount)) // 活跃用户统计
+			// 管理员角色管理
+			adminRoles := admin.Group("/roles")
+			adminRoles.Use(middleware.AdminAuthMiddleware())
+			adminRoles.POST("", AdminController.RoleController{}.CreateRole)
+			adminRoles.GET("", AdminController.RoleController{}.GetRoleList)
+			adminRoles.GET("/tree", AdminController.RoleController{}.GetRoleTree)
+			adminRoles.GET("/:id", AdminController.RoleController{}.GetRole)
+			adminRoles.PUT("/:id", AdminController.RoleController{}.UpdateRole)
+			adminRoles.DELETE("/:id", AdminController.RoleController{}.DeleteRole)
+			adminRoles.PUT("/:id/status", AdminController.RoleController{}.UpdateRoleStatus)
+			adminRoles.POST("/batch", AdminController.RoleController{}.BatchOperation)
+			adminRoles.POST("/:id/permissions", AdminController.RoleController{}.AssignPermissions)
+			adminRoles.GET("/:id/permissions", AdminController.RoleController{}.GetRolePermissions)
+			adminRoles.GET("/stats", AdminController.RoleController{}.GetRoleStats)
 
-						// 用户部门管理（管理员）
-						adminUsers.GET("/:id/departments", deps.WrapHandler(AdminController.UserController{}.GetUserDepartments)) // 获取用户部门
+			// 管理员权限管理
+			adminPermissions := admin.Group("/permissions")
+			adminPermissions.Use(middleware.AdminAuthMiddleware())
+			adminPermissions.POST("", AdminController.PermissionController{}.CreatePermission)
+			adminPermissions.GET("", AdminController.PermissionController{}.GetPermissionList)
+			adminPermissions.GET("/tree", AdminController.PermissionController{}.GetPermissionTree)
+			adminPermissions.GET("/menu-tree", AdminController.PermissionController{}.GetMenuTree)
+			adminPermissions.GET("/:id", AdminController.PermissionController{}.GetPermission)
+			adminPermissions.PUT("/:id", AdminController.PermissionController{}.UpdatePermission)
+			adminPermissions.DELETE("/:id", AdminController.PermissionController{}.DeletePermission)
+			adminPermissions.PUT("/:id/status", AdminController.PermissionController{}.UpdatePermissionStatus)
+			adminPermissions.POST("/batch", AdminController.PermissionController{}.BatchOperation)
+			adminPermissions.GET("/stats", AdminController.PermissionController{}.GetPermissionStats)
 
-						// 用户角色管理（管理员）
-						adminUsers.POST("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.AssignUserRole))            // 分配角色
-						adminUsers.DELETE("/:id/roles/:roleId", deps.WrapHandler(AdminController.UserController{}.RemoveUserRole))          // 移除角色
-						adminUsers.GET("/:id/roles", deps.WrapHandler(AdminController.UserController{}.GetUserRoles))                       // 获取用户角色
-						adminUsers.GET("/:id/with-roles", deps.WrapHandler(AdminController.UserController{}.GetUserWithRoles))              // 获取用户及角色
-						adminUsers.POST("/:id/roles/batch", deps.WrapHandler(AdminController.UserController{}.BatchAssignUserRoles))        // 批量分配角色
-						adminUsers.DELETE("/:id/roles/batch", deps.WrapHandler(AdminController.UserController{}.BatchRemoveUserRoles))      // 批量移除角色
-						adminUsers.PUT("/:id/roles/:roleId/primary", deps.WrapHandler(AdminController.UserController{}.SetUserPrimaryRole)) // 设置主要角色
-						adminUsers.GET("/:id/permissions", deps.WrapHandler(AdminController.UserController{}.GetUserPermissions))           // 获取用户权限
-						adminUsers.GET("/:id/menu-tree", deps.WrapHandler(AdminController.UserController{}.GetUserMenuTree))                // 获取用户菜单树
-					}
+			// 管理员部门管理
+			adminDepartments := admin.Group("/departments")
+			adminDepartments.Use(middleware.AdminAuthMiddleware())
+			adminDepartments.POST("", AdminController.DepartmentController{}.CreateDepartment)
+			adminDepartments.GET("", AdminController.DepartmentController{}.GetDepartmentList)
+			adminDepartments.GET("/tree", AdminController.DepartmentController{}.GetDepartmentTree)
+			adminDepartments.GET("/roots", AdminController.DepartmentController{}.GetRootDepartments)
+			adminDepartments.GET("/:id", AdminController.DepartmentController{}.GetDepartment)
+			adminDepartments.PUT("/:id", AdminController.DepartmentController{}.UpdateDepartment)
+			adminDepartments.DELETE("/:id", AdminController.DepartmentController{}.DeleteDepartment)
+			adminDepartments.PUT("/:id/status", AdminController.DepartmentController{}.UpdateDepartmentStatus)
+			adminDepartments.PUT("/:id/move", AdminController.DepartmentController{}.MoveDepartment)
+			adminDepartments.GET("/:id/children", AdminController.DepartmentController{}.GetChildrenDepartments)
+			adminDepartments.GET("/:id/descendants", AdminController.DepartmentController{}.GetDescendantDepartments)
+			adminDepartments.POST("/batch", AdminController.DepartmentController{}.BatchOperation)
+			adminDepartments.GET("/stats/active-count", AdminController.DepartmentController{}.GetActiveDepartmentsCount)
+			adminDepartments.POST("/validate-hierarchy", AdminController.DepartmentController{}.ValidateHierarchy)
+			adminDepartments.POST("/repair-hierarchy", AdminController.DepartmentController{}.RepairHierarchy)
+			adminDepartments.GET("/:id/users", AdminController.UserController{}.GetUsersByDepartment)
 
-					// 角色管理路由（管理员）
-					adminRoles := admin.Group("/roles", middleware.AdminAuthMiddleware(helper))
-					{
-						// 角色基础CRUD操作（管理员）
-						adminRoles.POST("", deps.WrapHandler(AdminController.RoleController{}.CreateRole))       // 创建角色
-						adminRoles.GET("", deps.WrapHandler(AdminController.RoleController{}.GetRoleList))       // 获取角色列表
-						adminRoles.GET("/tree", deps.WrapHandler(AdminController.RoleController{}.GetRoleTree))  // 获取角色树形结构
-						adminRoles.GET("/:id", deps.WrapHandler(AdminController.RoleController{}.GetRole))       // 获取角色详情
-						adminRoles.PUT("/:id", deps.WrapHandler(AdminController.RoleController{}.UpdateRole))    // 更新角色信息
-						adminRoles.DELETE("/:id", deps.WrapHandler(AdminController.RoleController{}.DeleteRole)) // 删除角色
+			// 管理员 managers 子域
+			adminManagers := admin.Group("/managers")
+			adminManagers.Use(middleware.AdminAuthMiddleware())
+			adminManagers.GET("/:managerId/departments", AdminController.DepartmentController{}.GetDepartmentsByManager)
 
-						// 角色状态管理（管理员）
-						adminRoles.PUT("/:id/status", deps.WrapHandler(AdminController.RoleController{}.UpdateRoleStatus)) // 更新角色状态
+			// 管理员应用管理
+			adminApps := admin.Group("/applications")
+			adminApps.Use(middleware.AdminAuthMiddleware())
+			adminApps.POST("", AdminController.ApplicationController{}.CreateApplication)
+			adminApps.GET("", AdminController.ApplicationController{}.GetApplicationList)
+			adminApps.GET("/:id", AdminController.ApplicationController{}.GetApplication)
+			adminApps.PUT("/:id", AdminController.ApplicationController{}.UpdateApplication)
+			adminApps.DELETE("/:id", AdminController.ApplicationController{}.DeleteApplication)
+			adminApps.GET("/:id/keys", AdminController.ApplicationController{}.GetApplicationKeys)
+			adminApps.POST("/:id/keys/rotate", AdminController.ApplicationController{}.RotateApplicationKey)
+			adminApps.POST("/:id/secret/reset", AdminController.ApplicationController{}.ResetClientSecret)
+			adminApps.GET("/:id/access-scope", AdminController.ApplicationController{}.GetApplicationAccessScope)
+			adminApps.PUT("/:id/access-scope", AdminController.ApplicationController{}.UpdateApplicationAccessScope)
+			adminApps.POST("/batch", AdminController.ApplicationController{}.BatchOperation)
+			adminApps.GET("/stats", AdminController.ApplicationController{}.GetStats)
 
-						// 批量操作（管理员）
-						adminRoles.POST("/batch", deps.WrapHandler(AdminController.RoleController{}.BatchOperation)) // 批量操作角色
+			// 管理员社会化登录提供商
+			adminSocialProviders := admin.Group("/social-providers")
+			adminSocialProviders.Use(middleware.AdminAuthMiddleware())
+			adminSocialProviders.POST("", AdminController.SocialProviderController{}.CreateProvider)
+			adminSocialProviders.GET("", AdminController.SocialProviderController{}.GetProviderList)
+			adminSocialProviders.GET("/:id", AdminController.SocialProviderController{}.GetProvider)
+			adminSocialProviders.PUT("/:id", AdminController.SocialProviderController{}.UpdateProvider)
+			adminSocialProviders.DELETE("/:id", AdminController.SocialProviderController{}.DeleteProvider)
+			adminSocialProviders.POST("/batch", AdminController.SocialProviderController{}.BatchOperation)
+			adminSocialProviders.GET("/stats", AdminController.SocialProviderController{}.GetProviderStats)
+			adminSocialProviders.POST("/discover-oidc", AdminController.SocialProviderController{}.DiscoverOIDC)
 
-						// 角色权限管理（管理员）
-						adminRoles.POST("/:id/permissions", deps.WrapHandler(AdminController.RoleController{}.AssignPermissions)) // 分配权限
-						adminRoles.GET("/:id/permissions", deps.WrapHandler(AdminController.RoleController{}.GetRolePermissions)) // 获取角色权限
+			// 管理员系统设置
+			adminSettings := admin.Group("/settings")
+			adminSettings.Use(middleware.AdminAuthMiddleware())
+			adminSettings.GET("", AdminController.SettingController{}.GetAllSettings)
+			adminSettings.GET("/:key", AdminController.SettingController{}.GetSettingByKey)
+			adminSettings.POST("", AdminController.SettingController{}.CreateSetting)
+			adminSettings.PUT("/:key", AdminController.SettingController{}.UpdateSetting)
+			adminSettings.DELETE("/:key", AdminController.SettingController{}.DeleteSetting)
+			adminSettings.GET("/register-fields/config", AdminController.SettingController{}.GetRegisterFieldsSettings)
+			adminSettings.PUT("/register-fields/config", AdminController.SettingController{}.UpdateRegisterFieldsSettings)
+			adminSettings.GET("/push/config", AdminController.SettingController{}.GetPushSettings)
+			adminSettings.PUT("/push/config", AdminController.SettingController{}.UpdatePushSettings)
+			adminSettings.GET("/captcha/bindings", AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings)
+			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
 
-						// 统计信息（管理员）
-						adminRoles.GET("/stats", deps.WrapHandler(AdminController.RoleController{}.GetRoleStats)) // 获取角色统计信息
-					}
+			// 管理员验证码配置
+			adminCaptchaConfigs := admin.Group("/captcha-configs")
+			adminCaptchaConfigs.Use(middleware.AdminAuthMiddleware())
+			adminCaptchaConfigs.GET("", AdminController.CaptchaConfigController{}.GetCaptchaConfigs)
+			adminCaptchaConfigs.GET("/providers", AdminController.CaptchaConfigController{}.GetCaptchaProviders)
+			adminCaptchaConfigs.GET("/:id", AdminController.CaptchaConfigController{}.GetCaptchaConfig)
+			adminCaptchaConfigs.POST("", AdminController.CaptchaConfigController{}.CreateCaptchaConfig)
+			adminCaptchaConfigs.PUT("/:id", AdminController.CaptchaConfigController{}.UpdateCaptchaConfig)
+			adminCaptchaConfigs.DELETE("/:id", AdminController.CaptchaConfigController{}.DeleteCaptchaConfig)
 
-					// 权限管理路由（管理员）
-					adminPermissions := admin.Group("/permissions", middleware.AdminAuthMiddleware(helper))
-					{
-						// 权限基础CRUD操作（管理员）
-						adminPermissions.POST("", deps.WrapHandler(AdminController.PermissionController{}.CreatePermission))       // 创建权限
-						adminPermissions.GET("", deps.WrapHandler(AdminController.PermissionController{}.GetPermissionList))       // 获取权限列表
-						adminPermissions.GET("/tree", deps.WrapHandler(AdminController.PermissionController{}.GetPermissionTree))  // 获取权限树形结构
-						adminPermissions.GET("/menu-tree", deps.WrapHandler(AdminController.PermissionController{}.GetMenuTree))   // 获取菜单树形结构
-						adminPermissions.GET("/:id", deps.WrapHandler(AdminController.PermissionController{}.GetPermission))       // 获取权限详情
-						adminPermissions.PUT("/:id", deps.WrapHandler(AdminController.PermissionController{}.UpdatePermission))    // 更新权限信息
-						adminPermissions.DELETE("/:id", deps.WrapHandler(AdminController.PermissionController{}.DeletePermission)) // 删除权限
+			// === 普通用户路由 ===
+			// 公开：/api/user/login
+			userPublic := api.Group("/user")
+			userPublic.POST("/login", controller.UserController{}.ValidateLogin)
 
-						// 权限状态管理（管理员）
-						adminPermissions.PUT("/:id/status", deps.WrapHandler(AdminController.PermissionController{}.UpdatePermissionStatus)) // 更新权限状态
+			// 受保护：/api/user/*
+			userAuth := api.Group("/user")
+			userAuth.Use(middleware.AuthMiddleware())
+			userAuth.GET("/profile", controller.UserController{}.GetUserProfile)
+			userAuth.PUT("/profile", controller.UserController{}.UpdateUserProfile)
+			userAuth.PUT("/password", controller.UserController{}.ChangePassword)
+			userAuth.GET("/social-accounts", controller.SocialAuthController{}.GetUserSocialAccounts)
 
-						// 批量操作（管理员）
-						adminPermissions.POST("/batch", deps.WrapHandler(AdminController.PermissionController{}.BatchOperation)) // 批量操作权限
+			// 用户 JWT 令牌管理
+			auth := api.Group("/auth")
+			auth.Use(middleware.AuthMiddleware())
+			auth.POST("/logout", controller.UserController{}.Logout)
+			auth.POST("/refresh", controller.UserController{}.RefreshToken)
+			auth.GET("/codes", controller.UserController{}.GetAccessCodes)
 
-						// 统计信息（管理员）
-						adminPermissions.GET("/stats", deps.WrapHandler(AdminController.PermissionController{}.GetPermissionStats)) // 获取权限统计信息
-					}
+			// 验证码公开接口
+			captcha := api.Group("/captcha")
+			captcha.POST("/params", controller.CaptchaController{}.GetCaptchaParams)
 
-					// 部门管理路由（管理员）
-					adminDepartments := admin.Group("/departments", middleware.AdminAuthMiddleware(helper))
-					{
-						// 部门基础CRUD操作（管理员）
-						adminDepartments.POST("", deps.WrapHandler(AdminController.DepartmentController{}.CreateDepartment))        // 创建部门
-						adminDepartments.GET("", deps.WrapHandler(AdminController.DepartmentController{}.GetDepartmentList))        // 获取部门列表
-						adminDepartments.GET("/tree", deps.WrapHandler(AdminController.DepartmentController{}.GetDepartmentTree))   // 获取部门树形结构
-						adminDepartments.GET("/roots", deps.WrapHandler(AdminController.DepartmentController{}.GetRootDepartments)) // 获取根部门列表
-						adminDepartments.GET("/:id", deps.WrapHandler(AdminController.DepartmentController{}.GetDepartment))        // 获取部门详情
-						adminDepartments.PUT("/:id", deps.WrapHandler(AdminController.DepartmentController{}.UpdateDepartment))     // 更新部门信息
-						adminDepartments.DELETE("/:id", deps.WrapHandler(AdminController.DepartmentController{}.DeleteDepartment))  // 删除部门
+			// OIDC 授权流程 API（服务于 /auth 登录 UI）
+			apiOidc := api.Group("/oidc")
+			apiOidc.POST("/login", controller.OIDCAuthFlowController{}.Login)
+			apiOidc.POST("/register", controller.OIDCAuthFlowController{}.Register)
+			apiOidc.GET("/auth-info", controller.OIDCAuthFlowController{}.GetAuthInfo)
+			apiOidc.GET("/flow-status", controller.OIDCAuthFlowController{}.GetFlowStatus)
+			apiOidc.POST("/send-verification-code", controller.OIDCAuthFlowController{}.SendVerificationCode)
+			apiOidc.POST("/send-register-verification-code", controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)
+			apiOidc.POST("/complete-profile", controller.OIDCAuthFlowController{}.CompleteProfile)
+			apiOidc.GET("/register-settings", controller.OIDCAuthFlowController{}.GetRegisterSettings)
+			apiOidc.POST("/init-session", controller.OIDCAuthFlowController{}.InitSession)
 
-						// 部门状态管理（管理员）
-						adminDepartments.PUT("/:id/status", deps.WrapHandler(AdminController.DepartmentController{}.UpdateDepartmentStatus)) // 更新部门状态
-
-						// 部门结构管理（管理员）
-						adminDepartments.PUT("/:id/move", deps.WrapHandler(AdminController.DepartmentController{}.MoveDepartment))                  // 移动部门
-						adminDepartments.GET("/:id/children", deps.WrapHandler(AdminController.DepartmentController{}.GetChildrenDepartments))      // 获取子部门列表
-						adminDepartments.GET("/:id/descendants", deps.WrapHandler(AdminController.DepartmentController{}.GetDescendantDepartments)) // 获取所有后代部门
-
-						// 批量操作（管理员）
-						adminDepartments.POST("/batch", deps.WrapHandler(AdminController.DepartmentController{}.BatchOperation)) // 批量操作部门
-
-						// 统计信息（管理员）
-						adminDepartments.GET("/stats/active-count", deps.WrapHandler(AdminController.DepartmentController{}.GetActiveDepartmentsCount)) // 启用部门统计
-
-						// 维护操作（管理员）
-						adminDepartments.POST("/validate-hierarchy", deps.WrapHandler(AdminController.DepartmentController{}.ValidateHierarchy)) // 验证部门层级结构
-						adminDepartments.POST("/repair-hierarchy", deps.WrapHandler(AdminController.DepartmentController{}.RepairHierarchy))     // 修复部门层级结构
-
-						// 部门相关的用户路由（管理员）
-						adminDepartments.GET("/:id/users", deps.WrapHandler(AdminController.UserController{}.GetUsersByDepartment)) // 根据部门获取用户
-					}
-
-					// 负责人相关路由（管理员）
-					adminManagers := admin.Group("/managers", middleware.AdminAuthMiddleware(helper))
-					{
-						adminManagers.GET("/:managerId/departments", deps.WrapHandler(AdminController.DepartmentController{}.GetDepartmentsByManager)) // 根据负责人获取部门
-					}
-
-					// 应用管理路由（管理员）- 支持多协议
-					adminApps := admin.Group("/applications", middleware.AdminAuthMiddleware(helper))
-					{
-						// 应用基础CRUD操作（管理员）
-						adminApps.POST("", deps.WrapHandler(AdminController.ApplicationController{}.CreateApplication))       // 创建应用
-						adminApps.GET("", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationList))       // 获取应用列表
-						adminApps.GET("/:id", deps.WrapHandler(AdminController.ApplicationController{}.GetApplication))       // 获取应用详情
-						adminApps.PUT("/:id", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplication))    // 更新应用
-						adminApps.DELETE("/:id", deps.WrapHandler(AdminController.ApplicationController{}.DeleteApplication)) // 删除应用
-
-						// 应用密钥管理（管理员）- 仅OIDC应用
-						adminApps.GET("/:id/keys", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationKeys))           // 获取应用密钥列表
-						adminApps.POST("/:id/keys/rotate", deps.WrapHandler(AdminController.ApplicationController{}.RotateApplicationKey)) // 轮转应用密钥
-
-						// 客户端密钥管理（管理员）- 仅OIDC应用
-						adminApps.POST("/:id/secret/reset", deps.WrapHandler(AdminController.ApplicationController{}.ResetClientSecret)) // 重置客户端密钥
-
-						// 应用授权范围管理（管理员）
-						adminApps.GET("/:id/access-scope", deps.WrapHandler(AdminController.ApplicationController{}.GetApplicationAccessScope))    // 获取应用授权范围
-						adminApps.PUT("/:id/access-scope", deps.WrapHandler(AdminController.ApplicationController{}.UpdateApplicationAccessScope)) // 更新应用授权范围
-
-						// 批量操作（管理员）
-						adminApps.POST("/batch", deps.WrapHandler(AdminController.ApplicationController{}.BatchOperation)) // 批量操作应用
-
-						// 统计信息（管理员）
-						adminApps.GET("/stats", deps.WrapHandler(AdminController.ApplicationController{}.GetStats)) // 获取应用统计信息
-					}
-
-					// 社会化登录提供商管理路由（管理员）
-					adminSocialProviders := admin.Group("/social-providers", middleware.AdminAuthMiddleware(helper))
-					{
-						// 提供商基础CRUD操作（管理员）
-						adminSocialProviders.POST("", deps.WrapHandler(AdminController.SocialProviderController{}.CreateProvider))       // 创建提供商
-						adminSocialProviders.GET("", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderList))       // 获取提供商列表
-						adminSocialProviders.GET("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.GetProvider))       // 获取提供商详情
-						adminSocialProviders.PUT("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.UpdateProvider))    // 更新提供商
-						adminSocialProviders.DELETE("/:id", deps.WrapHandler(AdminController.SocialProviderController{}.DeleteProvider)) // 删除提供商
-
-						// 批量操作（管理员）
-						adminSocialProviders.POST("/batch", deps.WrapHandler(AdminController.SocialProviderController{}.BatchOperation)) // 批量操作提供商
-
-						// 统计信息（管理员）
-						adminSocialProviders.GET("/stats", deps.WrapHandler(AdminController.SocialProviderController{}.GetProviderStats)) // 获取提供商统计信息
-					}
-
-					// 系统设置管理路由（管理员）
-					adminSettings := admin.Group("/settings", middleware.AdminAuthMiddleware(helper))
-					{
-						// 设置基础CRUD操作（管理员）
-						adminSettings.GET("", deps.WrapHandler(AdminController.SettingController{}.GetAllSettings))        // 获取所有设置
-						adminSettings.GET("/:key", deps.WrapHandler(AdminController.SettingController{}.GetSettingByKey))  // 获取单个设置
-						adminSettings.POST("", deps.WrapHandler(AdminController.SettingController{}.CreateSetting))        // 创建设置
-						adminSettings.PUT("/:key", deps.WrapHandler(AdminController.SettingController{}.UpdateSetting))    // 更新设置
-						adminSettings.DELETE("/:key", deps.WrapHandler(AdminController.SettingController{}.DeleteSetting)) // 删除设置
-
-						// 注册字段配置管理（管理员）
-						adminSettings.GET("/register-fields/config", deps.WrapHandler(AdminController.SettingController{}.GetRegisterFieldsSettings))    // 获取注册字段配置
-						adminSettings.PUT("/register-fields/config", deps.WrapHandler(AdminController.SettingController{}.UpdateRegisterFieldsSettings)) // 更新注册字段配置
-
-						// 推送服务配置管理（管理员）
-						adminSettings.GET("/push/config", deps.WrapHandler(AdminController.SettingController{}.GetPushSettings))    // 获取推送服务配置
-						adminSettings.PUT("/push/config", deps.WrapHandler(AdminController.SettingController{}.UpdatePushSettings)) // 更新推送服务配置
-
-						// 验证码场景绑定配置（管理员）
-						adminSettings.GET("/captcha/bindings", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings))    // 获取场景绑定配置
-						adminSettings.PUT("/captcha/bindings", deps.WrapHandler(AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)) // 更新场景绑定配置
-					}
-
-					// 验证码配置管理路由（管理员）
-					adminCaptchaConfigs := admin.Group("/captcha-configs", middleware.AdminAuthMiddleware(helper))
-					{
-						adminCaptchaConfigs.GET("", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaConfigs))             // 获取配置列表
-						adminCaptchaConfigs.GET("/providers", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaProviders)) // 获取支持的提供商
-						adminCaptchaConfigs.GET("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.GetCaptchaConfig))          // 获取单个配置
-						adminCaptchaConfigs.POST("", deps.WrapHandler(AdminController.CaptchaConfigController{}.CreateCaptchaConfig))          // 创建配置
-						adminCaptchaConfigs.PUT("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.UpdateCaptchaConfig))       // 更新配置
-						adminCaptchaConfigs.DELETE("/:id", deps.WrapHandler(AdminController.CaptchaConfigController{}.DeleteCaptchaConfig))    // 删除配置
-					}
-				}
-
-				// 普通用户路由组
-				user := api.Group("/user")
-				{
-					// 公开端点：用户认证相关
-					user.POST("/login", deps.WrapHandler(controller.UserController{}.ValidateLogin)) // 用户登录验证
-
-					// 需要用户认证的端点（使用JWT认证中间件）
-					userAuth := user.Group("", middleware.AuthMiddleware(helper))
-					{
-						// 用户个人信息管理
-						userAuth.GET("/profile", deps.WrapHandler(controller.UserController{}.GetUserProfile))    // 获取当前用户信息
-						userAuth.PUT("/profile", deps.WrapHandler(controller.UserController{}.UpdateUserProfile)) // 更新当前用户信息
-
-						// 用户密码管理
-						userAuth.PUT("/password", deps.WrapHandler(controller.UserController{}.ChangePassword)) // 修改密码
-
-						// 用户社交账号管理
-						userAuth.GET("/social-accounts", deps.WrapHandler(controller.SocialAuthController{}.GetUserSocialAccounts)) // 获取已绑定社交账号
-					}
-				}
-
-				// 用户认证路由组（JWT令牌管理）
-				auth := api.Group("/auth")
-				{
-					auth.POST("/logout", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.Logout))        // 用户退出登录
-					auth.POST("/refresh", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.RefreshToken)) // 刷新访问令牌
-					auth.GET("/codes", middleware.AuthMiddleware(helper), deps.WrapHandler(controller.UserController{}.GetAccessCodes))  // 获取用户权限码
-				}
-
-				// 验证码公开路由组
-				captcha := api.Group("/captcha")
-				{
-					captcha.POST("/params", deps.WrapHandler(controller.CaptchaController{}.GetCaptchaParams)) // 获取验证码前端参数
-				}
-
-				apiOidc := api.Group("/oidc")
-				{
-					// OIDC 授权流程端点
-					apiOidc.POST("/login", deps.WrapHandler(controller.OIDCAuthFlowController{}.Login))                                                  // 登录接口
-					apiOidc.POST("/register", deps.WrapHandler(controller.OIDCAuthFlowController{}.Register))                                            // 注册接口
-					apiOidc.GET("/auth-info", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetAuthInfo))                                         // 获取授权信息接口
-					apiOidc.GET("/flow-status", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetFlowStatus))                                     // 获取授权流程状态（统一入口编排器使用）
-					apiOidc.POST("/send-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendVerificationCode))                  // 发送验证码接口（需要认证）
-					apiOidc.POST("/send-register-verification-code", deps.WrapHandler(controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)) // 发送注册验证码接口（公开）
-					apiOidc.POST("/complete-profile", deps.WrapHandler(controller.OIDCAuthFlowController{}.CompleteProfile))                             // 完善信息接口
-					apiOidc.GET("/register-settings", deps.WrapHandler(controller.OIDCAuthFlowController{}.GetRegisterSettings))                         // 获取注册字段配置（公开接口）
-					apiOidc.POST("/init-session", deps.WrapHandler(controller.OIDCAuthFlowController{}.InitSession))                                     // 初始化OIDC会话（用于iframe嵌入方式，无需浏览器跳转）
-				}
-			}
-
-			// 社会化登录路由组
+			// === 社会化登录 ===
 			social := router.Group("/social")
-			{
-				// 公开端点
-				social.GET("/providers", deps.WrapHandler(controller.SocialAuthController{}.GetEnabledProviders))     // 获取可用提供商列表
-				social.GET("/auth/:provider", deps.WrapHandler(controller.SocialAuthController{}.InitiateAuth))       // 发起OAuth授权
-				social.GET("/callback/:provider", deps.WrapHandler(controller.SocialAuthController{}.HandleCallback)) // OAuth回调处理
+			social.GET("/providers", controller.SocialAuthController{}.GetEnabledProviders)
+			social.GET("/auth/:provider", controller.SocialAuthController{}.InitiateAuth)
+			social.GET("/callback/:provider", controller.SocialAuthController{}.HandleCallback)
+			social.POST("/bind-with-login", controller.SocialAuthController{}.BindWithLogin)
+			social.POST("/register-with-social", controller.SocialAuthController{}.RegisterWithSocial)
+			social.POST("/miniprogram/login/:provider", controller.SocialAuthController{}.MiniProgramLogin)
+			// 小程序扫码登录（PC 展示小程序码 + 手机端确认）
+			social.POST("/miniprogram/qrcode/:provider", controller.SocialAuthController{}.CreateMPQRCode)
+			social.GET("/miniprogram/qrcode/status/:ticket", controller.SocialAuthController{}.GetMPQRCodeStatus)
+			social.POST("/miniprogram/qrcode/scan", controller.SocialAuthController{}.ScanMPQRCode)
+			social.POST("/miniprogram/qrcode/confirm", controller.SocialAuthController{}.ConfirmMPQRCode)
 
-				// 绑定/注册端点（公开，用于OIDC流程）
-				social.POST("/bind-with-login", deps.WrapHandler(controller.SocialAuthController{}.BindWithLogin))           // 用社交账号绑定已有账户
-				social.POST("/register-with-social", deps.WrapHandler(controller.SocialAuthController{}.RegisterWithSocial)) // 用社交账号注册新账户
+			socialAuth := router.Group("/social")
+			socialAuth.Use(middleware.AuthMiddleware())
+			socialAuth.POST("/bind/:provider", controller.SocialAuthController{}.BindAccount)
+			socialAuth.DELETE("/unbind/:accountId", controller.SocialAuthController{}.UnbindAccount)
 
-				// 需要用户认证的端点（使用JWT认证中间件）
-				socialAuth := social.Group("", middleware.AuthMiddleware(helper))
-				{
-					socialAuth.POST("/bind/:provider", deps.WrapHandler(controller.SocialAuthController{}.BindAccount))        // 绑定社交账号（需认证）
-					socialAuth.DELETE("/unbind/:accountId", deps.WrapHandler(controller.SocialAuthController{}.UnbindAccount)) // 解绑社交账号（需认证）
-				}
-			}
-
-			// OIDC 路由组（公开端点）
+			// === OIDC 协议端点（公开，按 RFC 规范） ===
+			// 原 Gin .Match(GET|POST, ...) 在此拆成 .GET 和 .POST 双注册
 			oidc := router.Group("/oidc")
-			{
-				// OIDC 核心端点
-				MethodGetPost := []string{http.MethodGet, http.MethodPost}
-				oidc.Match(MethodGetPost, "/:client_id/authorize", deps.WrapHandler(controller.OIDCController{}.Authorize))       // 授权端点
-				oidc.Match(MethodGetPost, "/:client_id/token", deps.WrapHandler(controller.OIDCController{}.Token))               // 令牌端点
-				oidc.Match(MethodGetPost, "/:client_id/userinfo", deps.WrapHandler(controller.OIDCController{}.UserInfo))         // 用户信息端点
-				oidc.POST("/:client_id/introspect", deps.WrapHandler(controller.OIDCController{}.Introspect))                     // 令牌内省端点
-				oidc.POST("/:client_id/revoke", deps.WrapHandler(controller.OIDCController{}.Revoke))                             // 令牌撤销端点
-				oidc.GET("/:client_id/jwks", deps.WrapHandler(controller.OIDCController{}.JWKS))                                  // JSON Web Key Set端点
-				oidc.GET("/:client_id/.well-known/openid-configuration", deps.WrapHandler(controller.OIDCController{}.Discovery)) // OIDC发现文档
-			}
+			oidc.GET("/:client_id/authorize", controller.OIDCController{}.Authorize)
+			oidc.POST("/:client_id/authorize", controller.OIDCController{}.Authorize)
+			oidc.GET("/:client_id/token", controller.OIDCController{}.Token)
+			oidc.POST("/:client_id/token", controller.OIDCController{}.Token)
+			oidc.GET("/:client_id/userinfo", controller.OIDCController{}.UserInfo)
+			oidc.POST("/:client_id/userinfo", controller.OIDCController{}.UserInfo)
+			oidc.POST("/:client_id/introspect", controller.OIDCController{}.Introspect)
+			oidc.POST("/:client_id/revoke", controller.OIDCController{}.Revoke)
+			oidc.GET("/:client_id/jwks", controller.OIDCController{}.JWKS)
+			oidc.GET("/:client_id/.well-known/openid-configuration", controller.OIDCController{}.Discovery)
 
-			webhook := router.Group("/webhook")
-			{
-				webhookOidc := webhook.Group("/oidc")
-				{
-					webhookOidc.POST("/consent", deps.WrapHandler(controller.OIDCAuthFlowController{}.Consent)) // 授权确认接口
-				}
-			}
-
+			// === Webhook ===
+			webhookOidc := router.Group("/webhook/oidc")
+			webhookOidc.POST("/consent", controller.OIDCAuthFlowController{}.Consent)
 		},
 	}
 }

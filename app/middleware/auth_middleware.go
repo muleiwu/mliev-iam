@@ -7,8 +7,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // AdminCookieName 管理员 Access Token 的 HttpOnly Cookie 名
@@ -16,7 +15,7 @@ const AdminCookieName = "admin_access_token"
 
 // extractBearerToken 从 Authorization 头或 HttpOnly Cookie 提取 JWT
 // 优先 Authorization 头（便于 API 调试与移动端），其次 Cookie（浏览器端防 XSS）
-func extractBearerToken(c *gin.Context) string {
+func extractBearerToken(c httpInterfaces.RouterContextInterface) string {
 	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) == 2 && parts[0] == "Bearer" {
@@ -34,33 +33,27 @@ func extractBearerToken(c *gin.Context) string {
 // 支持两种凭据来源（任选其一）：
 //  1. Authorization: Bearer <token>
 //  2. HttpOnly Cookie admin_access_token（浏览器推荐，防 XSS 窃取）
-func AuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func AuthMiddleware() httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
 		tokenString := extractBearerToken(c)
 		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, dto.Response{
+			c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
 				Code:    constants.ErrCodeUnauthorized,
 				Message: "缺少认证令牌",
 			})
-			c.Abort()
 			return
 		}
 
-		// 创建JWT认证服务实例
 		jwtAuthService := service.NewJWTAuthService()
-
-		// 验证token
 		claims, err := jwtAuthService.ValidateToken(tokenString)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, dto.Response{
+			c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
 				Code:    constants.ErrCodeUnauthorized,
 				Message: "认证令牌无效: " + err.Error(),
 			})
-			c.Abort()
 			return
 		}
 
-		// 将用户信息存储到上下文中
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
@@ -71,24 +64,20 @@ func AuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 }
 
 // AdminAuthMiddleware 管理员认证中间件
-func AdminAuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 先执行基础认证
-		AuthMiddleware(helper)(c)
-
-		// 如果基础认证失败，直接返回
+func AdminAuthMiddleware() httpInterfaces.HandlerFunc {
+	authMw := AuthMiddleware()
+	return func(c httpInterfaces.RouterContextInterface) {
+		authMw(c)
 		if c.IsAborted() {
 			return
 		}
 
-		// 检查是否为管理员角色
-		role, exists := c.Get("role")
-		if !exists || role != "admin" {
-			c.JSON(http.StatusForbidden, dto.Response{
+		role := c.Get("role")
+		if role == nil || role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, dto.Response{
 				Code:    constants.ErrCodeForbidden,
 				Message: "权限不足，仅限管理员访问",
 			})
-			c.Abort()
 			return
 		}
 
@@ -98,22 +87,20 @@ func AdminAuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 
 // OptionalAuthMiddleware 可选认证中间件
 // 如果提供了token则验证，如果没有提供则继续执行，但不设置用户信息
-func OptionalAuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
-	return func(c *gin.Context) {
+func OptionalAuthMiddleware() httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
 		tokenString := extractBearerToken(c)
 		if tokenString == "" {
 			c.Next()
 			return
 		}
 		jwtAuthService := service.NewJWTAuthService()
-
 		claims, err := jwtAuthService.ValidateToken(tokenString)
 		if err != nil {
 			c.Next()
 			return
 		}
 
-		// 将用户信息存储到上下文中
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
@@ -124,31 +111,36 @@ func OptionalAuthMiddleware(helper interfaces.HelperInterface) gin.HandlerFunc {
 }
 
 // GetCurrentUser 从上下文中获取当前用户信息
-func GetCurrentUser(c *gin.Context) (uint, string, bool) {
-	userID, exists1 := c.Get("user_id")
-	username, exists2 := c.Get("username")
-
-	if !exists1 || !exists2 {
+func GetCurrentUser(c httpInterfaces.RouterContextInterface) (uint, string, bool) {
+	userID := c.Get("user_id")
+	username := c.Get("username")
+	if userID == nil || username == nil {
 		return 0, "", false
 	}
-
-	return userID.(uint), username.(string), true
+	uid, ok1 := userID.(uint)
+	uname, ok2 := username.(string)
+	if !ok1 || !ok2 {
+		return 0, "", false
+	}
+	return uid, uname, true
 }
 
 // GetCurrentUserID 从上下文中获取当前用户ID
-func GetCurrentUserID(c *gin.Context) (uint, bool) {
-	userID, exists := c.Get("user_id")
-	if !exists {
+func GetCurrentUserID(c httpInterfaces.RouterContextInterface) (uint, bool) {
+	v := c.Get("user_id")
+	if v == nil {
 		return 0, false
 	}
-	return userID.(uint), true
+	id, ok := v.(uint)
+	return id, ok
 }
 
 // GetCurrentRole 从上下文中获取当前用户角色
-func GetCurrentRole(c *gin.Context) (string, bool) {
-	role, exists := c.Get("role")
-	if !exists {
+func GetCurrentRole(c httpInterfaces.RouterContextInterface) (string, bool) {
+	v := c.Get("role")
+	if v == nil {
 		return "", false
 	}
-	return role.(string), true
+	role, ok := v.(string)
+	return role, ok
 }

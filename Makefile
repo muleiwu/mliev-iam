@@ -10,7 +10,7 @@ help:
 	@echo "  make install-frontend   - 安装前端依赖（pnpm install）"
 	@echo "  make build-frontend     - 编译所有前端应用（包含核心包）"
 	@echo "  make build-packages     - 仅编译 @vben-core 核心包"
-	@echo "  make build-oidc         - 编译 web-oidc 前端"
+	@echo "  make build-oidc         - 编译 frontend-oidc（OIDC 登录/同意 UI）"
 	@echo "  make build-install      - 编译 web-install 前端"
 	@echo "  make build-antd         - 编译 web-antd 前端"
 	@echo "  make build-go           - 编译 Go 后端"
@@ -20,7 +20,7 @@ help:
 	@echo "  make dev                - 开发模式（前端 watch + Go 后端）"
 	@echo "  make run                - 编译前端并运行 Go 后端"
 	@echo "  make clean              - 清理所有编译产物"
-	@echo "  make clean-oidc         - 清理 web-oidc 编译产物"
+	@echo "  make clean-oidc         - 清理 frontend-oidc 编译产物"
 	@echo "  make clean-antd         - 清理 web-antd 编译产物"
 	@echo "  make clean-packages     - 清理核心包编译产物"
 	@echo "  make clean-go           - 清理 Go 二进制文件"
@@ -29,8 +29,8 @@ help:
 # 安装前端依赖
 install-frontend:
 	@echo "==> 开始安装前端依赖..."
-	@echo "==> 安装 web-oidc 前端依赖..."
-	@cd admin-web/apps/web-oidc && pnpm install
+	@echo "==> 安装 frontend-oidc 前端依赖（独立项目，OIDC 登录 UI）..."
+	@cd frontend-oidc && pnpm install
 	@echo "==> 安装 web-antd 前端依赖..."
 	@cd admin-web/apps/web-antd && pnpm install
 	@echo "==> 前端依赖安装完成！"
@@ -46,20 +46,14 @@ build-frontend: build-packages
 	@$(MAKE) build-oidc-only
 	@$(MAKE) build-antd-only
 
-# 编译 web-oidc 前端（包含核心包依赖）
-build-oidc: build-packages build-oidc-only
+# 编译 OIDC 登录 UI（frontend-oidc，独立项目，不依赖 @vben-core）
+# vite.config.ts 的 outDir 已指向 ../static/auth，且 emptyOutDir=true 会自动清理
+build-oidc: build-oidc-only
 
-# 编译 web-oidc 前端（仅应用本身，不构建核心包）
 build-oidc-only:
-	@echo "==> 开始编译 web-oidc 前端..."
-	@echo "==> 清理 static/auth 目录..."
-	@rm -rf static/auth
-	@mkdir -p static/auth
-	@echo "==> 切换到 admin-web/apps/web-oidc 目录并编译..."
-	@cd admin-web/apps && pnpm build:oidc
-	@echo "==> 复制编译产物到 static/auth..."
-	@cp -r admin-web/apps/web-oidc/dist/* static/auth/
-	@echo "==> web-oidc 前端编译完成！"
+	@echo "==> 开始编译 frontend-oidc..."
+	@cd frontend-oidc && pnpm build
+	@echo "==> frontend-oidc 编译完成！产物已写入 static/auth"
 
 # 编译 web-antd 前端（包含核心包依赖）
 build-antd: build-packages build-antd-only
@@ -90,8 +84,8 @@ release:
 
 dev-build-frontend:
 	@echo "==> 启动开发模式..."
-	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 frontend-oidc watch 模式（后台运行）..."
+	@cd frontend-oidc && pnpm dev &
 	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
@@ -104,8 +98,8 @@ dev-go:
 # 开发模式：启动前端 watch 模式和 Go 后端
 dev:
 	@echo "==> 启动开发模式..."
-	@echo "==> 启动 web-oidc 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-oidc && pnpm dev:static &
+	@echo "==> 启动 frontend-oidc watch 模式（后台运行）..."
+	@cd frontend-oidc && pnpm dev &
 	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
 	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
@@ -128,11 +122,11 @@ run-go:
 clean: clean-oidc clean-antd clean-packages clean-go
 	@echo "==> 所有编译产物已清理完成！"
 
-# 清理 web-oidc 编译产物
+# 清理 frontend-oidc 编译产物
 clean-oidc:
-	@echo "==> 清理 web-oidc 编译产物..."
+	@echo "==> 清理 frontend-oidc 编译产物..."
 	@rm -rf static/auth
-	@rm -rf admin-web/apps/web-oidc/dist
+	@rm -rf frontend-oidc/dist
 
 # 清理 web-antd 编译产物
 clean-antd:
@@ -152,21 +146,23 @@ clean-go:
 	@rm -f mliev-iam mliev-iam-test go_build_cnb_cool_mliev_iam_mliev_iam
 
 # ============================================================
-# 数据库迁移（Goose）
-#   生产环境 database.auto_migrate=false，schema 变更必须通过 migrations/*.go
-#   新增迁移步骤：
-#     1. make migrate-new NAME=add_xxx_field  创建迁移文件
-#     2. 在生成的 migrations/YYYYMMDDHHMMSS_add_xxx_field.go 中写 up/down
-#     3. 启动服务即自动执行（或 make migrate-up 手动）
+# 数据库迁移（Goose, 多方言）
+#   每次 schema 变更，在 migrations/{mysql,postgresql,sqlite} 下各生成一份 .sql。
+#   流程：
+#     1. make migrate-new NAME=add_xxx_field   三个方言各生成一个空模板
+#     2. 按各方言语法分别填写 -- +goose Up / -- +goose Down
+#     3. 启动服务（install 流程）自动执行对应方言目录下的 goose.Up
 # ============================================================
 
 migrate-new:
 	@if [ -z "$(NAME)" ]; then echo "用法: make migrate-new NAME=add_xxx_field"; exit 1; fi
 	@TS=$$(date +%Y%m%d%H%M%S); \
-	FILE="migrations/$${TS}_$(NAME).go"; \
-	echo "==> 生成迁移文件 $$FILE"; \
-	printf 'package migrations\n\nimport (\n\t"context"\n\t"database/sql"\n\n\t"github.com/pressly/goose/v3"\n)\n\nfunc init() {\n\tgoose.AddMigrationContext(up%s, down%s)\n}\n\nfunc up%s(ctx context.Context, tx *sql.Tx) error {\n\t// TODO: up\n\treturn nil\n}\n\nfunc down%s(ctx context.Context, tx *sql.Tx) error {\n\t// TODO: down\n\treturn nil\n}\n' "$(NAME)" "$(NAME)" "$(NAME)" "$(NAME)" > $$FILE; \
-	echo "==> 完成，记得实现 up/down"
+	for D in mysql postgresql sqlite; do \
+	  FILE="migrations/$$D/$${TS}_$(NAME).sql"; \
+	  printf -- '-- +goose Up\n-- +goose StatementBegin\n\n-- +goose StatementEnd\n\n-- +goose Down\n-- +goose StatementBegin\n\n-- +goose StatementEnd\n' > $$FILE; \
+	  echo "==> $$FILE"; \
+	done; \
+	echo "==> 三份模板已生成，记得按方言语法填写 up/down"
 
 migrate-status:
 	@echo "==> 启动服务前请使用 admin 后台查询 goose_db_version 表"

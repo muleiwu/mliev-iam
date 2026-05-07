@@ -3,8 +3,8 @@ package controller
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // CaptchaController 验证码公开接口控制器
@@ -14,7 +14,7 @@ type CaptchaController struct {
 
 // GetCaptchaParams 获取指定场景的验证码前端参数
 // POST /api/captcha/params
-func (c CaptchaController) GetCaptchaParams(ctx *gin.Context, helper interfaces.HelperInterface) {
+func (c CaptchaController) GetCaptchaParams(ctx httpInterfaces.RouterContextInterface) {
 	var req dto.CaptchaParamsRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, 400, "请求参数错误: "+err.Error())

@@ -8,8 +8,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // ApplicationController 应用管理控制器（管理员）
@@ -19,7 +19,7 @@ type ApplicationController struct {
 
 // CreateApplication 创建应用
 // POST /api/admin/applications
-func (ac ApplicationController) CreateApplication(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) CreateApplication(c httpInterfaces.RouterContextInterface) {
 	var req dto.CreateApplicationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
@@ -27,8 +27,8 @@ func (ac ApplicationController) CreateApplication(c *gin.Context, helper interfa
 	}
 
 	// 从认证中间件获取当前管理员用户ID
-	adminUserID, exists := c.Get("user_id")
-	if !exists {
+	adminUserID := c.Get("user_id")
+	if adminUserID == nil {
 		ac.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
 	}
@@ -60,7 +60,7 @@ func (ac ApplicationController) CreateApplication(c *gin.Context, helper interfa
 
 // GetApplicationList 获取应用列表
 // GET /api/admin/applications
-func (ac ApplicationController) GetApplicationList(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) GetApplicationList(c httpInterfaces.RouterContextInterface) {
 	// 解析分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
@@ -109,7 +109,7 @@ func (ac ApplicationController) GetApplicationList(c *gin.Context, helper interf
 
 // GetApplication 获取应用详情
 // GET /api/admin/applications/:id
-func (ac ApplicationController) GetApplication(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) GetApplication(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -133,7 +133,7 @@ func (ac ApplicationController) GetApplication(c *gin.Context, helper interfaces
 
 // UpdateApplication 更新应用
 // PUT /api/admin/applications/:id
-func (ac ApplicationController) UpdateApplication(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) UpdateApplication(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -167,7 +167,7 @@ func (ac ApplicationController) UpdateApplication(c *gin.Context, helper interfa
 
 // DeleteApplication 删除应用
 // DELETE /api/admin/applications/:id
-func (ac ApplicationController) DeleteApplication(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) DeleteApplication(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -191,7 +191,7 @@ func (ac ApplicationController) DeleteApplication(c *gin.Context, helper interfa
 
 // GetStats 获取应用统计信息
 // GET /api/admin/applications/stats
-func (ac ApplicationController) GetStats(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) GetStats(c httpInterfaces.RouterContextInterface) {
 	appService := service.NewApplicationService(helper.GetDatabase())
 	stats, err := appService.GetStats()
 	if err != nil {
@@ -204,7 +204,7 @@ func (ac ApplicationController) GetStats(c *gin.Context, helper interfaces.Helpe
 
 // BatchOperation 批量操作应用
 // POST /api/admin/applications/batch
-func (ac ApplicationController) BatchOperation(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) BatchOperation(c httpInterfaces.RouterContextInterface) {
 	var req struct {
 		Action string `json:"action" binding:"required,oneof=enable disable delete"`
 		IDs    []uint `json:"ids" binding:"required,min=1"`
@@ -258,7 +258,7 @@ func (ac ApplicationController) BatchOperation(c *gin.Context, helper interfaces
 
 // GetApplicationKeys 获取应用的密钥列表
 // GET /api/admin/applications/:id/keys
-func (ac ApplicationController) GetApplicationKeys(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) GetApplicationKeys(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -320,7 +320,7 @@ func (ac ApplicationController) GetApplicationKeys(c *gin.Context, helper interf
 
 // RotateApplicationKey 轮转应用密钥
 // POST /api/admin/applications/:id/keys/rotate
-func (ac ApplicationController) RotateApplicationKey(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) RotateApplicationKey(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -414,7 +414,7 @@ func (ac ApplicationController) RotateApplicationKey(c *gin.Context, helper inte
 
 // ResetClientSecret 重置应用的客户端密钥
 // POST /api/admin/applications/:id/secret/reset
-func (ac ApplicationController) ResetClientSecret(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) ResetClientSecret(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -445,7 +445,7 @@ func (ac ApplicationController) ResetClientSecret(c *gin.Context, helper interfa
 
 // GetApplicationAccessScope 获取应用的授权范围
 // GET /api/admin/applications/:id/access-scope
-func (ac ApplicationController) GetApplicationAccessScope(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) GetApplicationAccessScope(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -469,7 +469,7 @@ func (ac ApplicationController) GetApplicationAccessScope(c *gin.Context, helper
 
 // UpdateApplicationAccessScope 更新应用的授权范围
 // PUT /api/admin/applications/:id/access-scope
-func (ac ApplicationController) UpdateApplicationAccessScope(c *gin.Context, helper interfaces.HelperInterface) {
+func (ac ApplicationController) UpdateApplicationAccessScope(c httpInterfaces.RouterContextInterface) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {

@@ -6,11 +6,10 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/reload"
-	"cnb.cool/mliev/iam/mliev-iam/internal/service/migration"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
-	"github.com/gin-gonic/gin"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"cnb.cool/mliev/open/go-web/pkg/server/reload"
 )
 
 // InstallController 系统安装控制器
@@ -20,8 +19,8 @@ type InstallController struct {
 
 // CheckInstall 检查系统安装状态
 // GET /api/install/check
-func (ic InstallController) CheckInstall(c *gin.Context, helper interfaces.HelperInterface) {
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+func (ic InstallController) CheckInstall(c httpInterfaces.RouterContextInterface) {
+	installService := service.NewInstallService(helper.GetDatabase())
 	response := installService.CheckInstallStatus()
 
 	ic.Success(c, response)
@@ -29,14 +28,14 @@ func (ic InstallController) CheckInstall(c *gin.Context, helper interfaces.Helpe
 
 // TestConnection 测试数据库连接
 // POST /api/install/test-connection
-func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.HelperInterface) {
+func (ic InstallController) TestConnection(c httpInterfaces.RouterContextInterface) {
 	var req dto.DatabaseConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ic.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 
 	// 测试数据库连接
 	testDB, err := installService.TestDatabaseConnection(req)
@@ -54,14 +53,14 @@ func (ic InstallController) TestConnection(c *gin.Context, helper interfaces.Hel
 
 // TestRedisConnection 测试Redis连接
 // POST /api/install/test-redis
-func (ic InstallController) TestRedisConnection(c *gin.Context, helper interfaces.HelperInterface) {
+func (ic InstallController) TestRedisConnection(c httpInterfaces.RouterContextInterface) {
 	var req dto.RedisConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ic.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 
 	// 测试Redis连接
 	testRedis, err := installService.TestRedisConnection(req)
@@ -79,14 +78,14 @@ func (ic InstallController) TestRedisConnection(c *gin.Context, helper interface
 
 // SubmitInstall 提交系统安装
 // POST /api/install/submit
-func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.HelperInterface) {
+func (ic InstallController) SubmitInstall(c httpInterfaces.RouterContextInterface) {
 	var req dto.InstallSubmitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ic.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
 
-	installService := service.NewInstallService(helper.GetDatabase(), helper)
+	installService := service.NewInstallService(helper.GetDatabase())
 
 	// 1. 检查系统是否已安装
 	status := installService.CheckInstallStatus()
@@ -122,7 +121,7 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 	}()
 
 	// 4. 使用测试成功的数据库连接创建新的 service 实例
-	newInstallService := service.NewInstallService(testDB, helper)
+	newInstallService := service.NewInstallService(testDB)
 
 	// 5. 更新数据库配置到配置文件
 	if err := newInstallService.UpdateDatabaseConfig(req.Database); err != nil {
@@ -143,16 +142,13 @@ func (ic InstallController) SubmitInstall(c *gin.Context, helper interfaces.Help
 		return
 	}
 
-	// 设置外部数据库连接供 initial_schema 迁移使用
-	migrations.SetExternalDB(testDB)
-	defer migrations.ClearExternalDB()
-
-	// 执行 goose 迁移，使用用户选择的数据库驱动作为方言
+	// 执行 goose 迁移，使用用户选择的数据库驱动分派到对应方言 SQL 目录。
+	// 传入 gormDB 让 runner 能识别"遗留 MySQL schema（AutoMigrate 起家、goose 无记录）"并 baseline。
 	dialect := req.Database.Driver
 	if dialect == "" {
-		dialect = "mysql" // 默认 MySQL
+		dialect = "mysql"
 	}
-	if err := migration.RunGooseMigrations(sqlDB, dialect, nil); err != nil {
+	if err := migrations.RunGooseMigrationsWithGorm(sqlDB, testDB, dialect, nil); err != nil {
 		ic.Error(c, constants.ErrCodeInternal, "数据库迁移失败: "+err.Error())
 		return
 	}

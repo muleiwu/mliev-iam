@@ -2,18 +2,17 @@ package autoload
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
-	envInterface "cnb.cool/mliev/iam/mliev-iam/internal/interfaces"
-	"github.com/gin-gonic/gin"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 type Middleware struct {
 }
 
-func (receiver Middleware) InitConfig(helper envInterface.HelperInterface) map[string]any {
+func (receiver Middleware) InitConfig() map[string]any {
 	return map[string]any{
-		"http.middleware": []gin.HandlerFunc{
-			middleware.CorsMiddleware(helper),         // 跨域中间件
-			middleware.InstallCheckMiddleware(helper), // 安装检查中间件
+		"http.middleware": []httpInterfaces.HandlerFunc{
+			middleware.CorsMiddleware(),         // 跨域中间件（读取 app.cors.* 配置）
+			middleware.InstallCheckMiddleware(), // 安装检查中间件（未安装时拦截）
 		},
 	}
 }

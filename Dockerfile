@@ -10,6 +10,8 @@ WORKDIR /app
 COPY . /app
 
 # 安装 pnpm 并构建前端项目
+#   - admin-web (monorepo)：管理后台 web-antd、安装向导 web-install
+#   - frontend-oidc (独立 repo)：OIDC 登录/同意 UI，Vite outDir 直指 ../static/auth
 RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
     cd /app/admin-web && \
     pnpm install && \
@@ -47,7 +49,7 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
-RUN rm -rf /app/admin-web /app/frontend-oidc && ls /app/static
+RUN rm -rf /app/admin-web && ls /app/static
 
 # 下载依赖
 # 复制构建产物到 nginx 的默认静态文件目录
@@ -88,4 +90,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health/simple || exit 1
 
 # 启动应用
-CMD ["./mliev-iam"]
+CMD ["./mliev-iam", "start"]

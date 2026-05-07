@@ -116,34 +116,8 @@ func ToUserDepartmentResponseDto(ud *model.UserDepartment) *UserDepartmentRespon
 
 	// Include user if loaded
 	if ud.User.ID != 0 {
-		// 处理指针类型字段
-		email := ""
-		if ud.User.Email != nil {
-			email = *ud.User.Email
-		}
-		phone := ""
-		if ud.User.Phone != nil {
-			phone = *ud.User.Phone
-		}
-
-		resp.User = &UserResponse{
-			ID:          ud.User.ID,
-			Username:    ud.User.Username,
-			Email:       email,
-			Phone:       phone,
-			Nickname:    ud.User.Nickname,
-			RealName:    ud.User.RealName,
-			Avatar:      ud.User.Avatar,
-			Status:      ud.User.Status,
-			StatusText:  ud.User.Status.String(),
-			IsActivated: ud.User.IsActivated,
-			IsVerified:  ud.User.IsVerified,
-			LoginCount:  ud.User.LoginCount,
-			LastLoginAt: ud.User.LastLoginAt,
-			LastLoginIP: ud.User.LastLoginIP,
-			CreatedAt:   ud.User.CreatedAt,
-			UpdatedAt:   ud.User.UpdatedAt,
-		}
+		userResp := ConvertToUserResponse(&ud.User)
+		resp.User = &userResp
 	}
 
 	return resp
