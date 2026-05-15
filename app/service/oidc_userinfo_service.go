@@ -161,7 +161,20 @@ func NewOIDCDiscoveryService(baseURL string) *OIDCDiscoveryService {
 }
 
 // GetDiscoveryDocument 获取OIDC发现文档
+//
+// 该响应需与服务端实际能力严格一致：
+//   - response_types_supported 只声明已实现的单值类型（hybrid flow 尚未实现）
+//   - grant_types_supported 显式声明，避免依赖 OIDC Discovery 1.0 默认值
+//     (默认为 ["authorization_code", "implicit"]，会遗漏本服务支持的
+//     refresh_token / client_credentials)
+//   - code_challenge_methods_supported 跟随 oidc.pkce.allow_plain 动态生成，
+//     plain 默认禁用时只声明 S256
 func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse {
+	codeChallengeMethods := []string{"S256"}
+	if pkcePlainAllowed() {
+		codeChallengeMethods = append(codeChallengeMethods, "plain")
+	}
+
 	return &dto.OIDCDiscoveryResponse{
 		Issuer:                            s.baseURL,
 		AuthorizationEndpoint:             fmt.Sprintf("%s/authorize", s.baseURL),
@@ -170,7 +183,9 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse
 		JwksURI:                           fmt.Sprintf("%s/jwks", s.baseURL),
 		RevocationEndpoint:                fmt.Sprintf("%s/revoke", s.baseURL),
 		IntrospectionEndpoint:             fmt.Sprintf("%s/introspect", s.baseURL),
-		ResponseTypesSupported:            []string{"code", "token", "id_token", "code token", "code id_token", "token id_token", "code token id_token"},
+		ResponseTypesSupported:            []string{"code", "token", "id_token"},
+		ResponseModesSupported:            []string{"query", "fragment"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "client_credentials", "implicit"},
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  []string{"RS256", "HS256"},
 		ScopesSupported:                   []string{"openid", "profile", "email", "phone", "address", "offline_access"},
@@ -184,7 +199,7 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse
 			"phone_number", "phone_number_verified",
 			"address",
 		},
-		CodeChallengeMethodsSupported: []string{"plain", "S256"},
+		CodeChallengeMethodsSupported: codeChallengeMethods,
 	}
 }
 
