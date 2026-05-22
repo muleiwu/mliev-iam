@@ -4,6 +4,10 @@
 
 ## 文档列表
 
+### 企业身份源对接评估 - `ENTERPRISE_IDENTITY_PROVIDER_INTEGRATION_ASSESSMENT.md`
+
+评估飞书、企业微信、钉钉作为 IAM 上游企业身份源的对接方案，包含当前项目能力盘点、平台差异、建议领域模型、同步流程、IAM 统一认证服务能力清单和实施路线。
+
 ### 1. 部门管理API - `department_api.yaml`
 
 部门管理模块的完整API文档，包含以下功能：

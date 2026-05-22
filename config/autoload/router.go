@@ -161,6 +161,17 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSocialProviders.GET("/stats", AdminController.SocialProviderController{}.GetProviderStats)
 			adminSocialProviders.POST("/discover-oidc", AdminController.SocialProviderController{}.DiscoverOIDC)
 
+			// 管理员企业身份源
+			adminIdentityProviders := admin.Group("/identity-providers")
+			adminIdentityProviders.Use(middleware.AdminAuthMiddleware())
+			adminIdentityProviders.POST("", AdminController.IdentityProviderController{}.CreateProvider)
+			adminIdentityProviders.GET("", AdminController.IdentityProviderController{}.GetProviderList)
+			adminIdentityProviders.POST("/batch", AdminController.IdentityProviderController{}.BatchOperation)
+			adminIdentityProviders.GET("/stats", AdminController.IdentityProviderController{}.GetProviderStats)
+			adminIdentityProviders.GET("/:id", AdminController.IdentityProviderController{}.GetProvider)
+			adminIdentityProviders.PUT("/:id", AdminController.IdentityProviderController{}.UpdateProvider)
+			adminIdentityProviders.DELETE("/:id", AdminController.IdentityProviderController{}.DeleteProvider)
+
 			// 管理员系统设置
 			adminSettings := admin.Group("/settings")
 			adminSettings.Use(middleware.AdminAuthMiddleware())
@@ -198,6 +209,7 @@ func (receiver Router) InitConfig() map[string]any {
 			userAuth.PUT("/profile", controller.UserController{}.UpdateUserProfile)
 			userAuth.PUT("/password", controller.UserController{}.ChangePassword)
 			userAuth.GET("/social-accounts", controller.SocialAuthController{}.GetUserSocialAccounts)
+			userAuth.GET("/identity-accounts", controller.IdentityAuthController{}.GetUserIdentityAccounts)
 
 			// 用户 JWT 令牌管理
 			auth := api.Group("/auth")
@@ -240,6 +252,19 @@ func (receiver Router) InitConfig() map[string]any {
 			socialAuth.Use(middleware.AuthMiddleware())
 			socialAuth.POST("/bind/:provider", controller.SocialAuthController{}.BindAccount)
 			socialAuth.DELETE("/unbind/:accountId", controller.SocialAuthController{}.UnbindAccount)
+
+			// === 企业身份源登录 ===
+			identity := router.Group("/identity")
+			identity.GET("/providers", controller.IdentityAuthController{}.GetEnabledProviders)
+			identity.GET("/auth/:provider", controller.IdentityAuthController{}.InitiateAuth)
+			identity.GET("/callback/:provider", controller.IdentityAuthController{}.HandleCallback)
+			identity.POST("/bind-with-login", controller.IdentityAuthController{}.BindWithLogin)
+			identity.POST("/register-with-provider", controller.IdentityAuthController{}.RegisterWithProvider)
+
+			identityAuth := router.Group("/identity")
+			identityAuth.Use(middleware.AuthMiddleware())
+			identityAuth.POST("/bind/:provider", controller.IdentityAuthController{}.BindAccount)
+			identityAuth.DELETE("/unbind/:accountId", controller.IdentityAuthController{}.UnbindAccount)
 
 			// === OIDC 协议端点（公开，按 RFC 规范） ===
 			// 原 Gin .Match(GET|POST, ...) 在此拆成 .GET 和 .POST 双注册

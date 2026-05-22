@@ -47,7 +47,13 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatalf("captcha_configs 未创建: %v", err)
 	}
 
-	const expectedMaxVersion int64 = 20260424040609
+	for _, table := range []string{"identity_providers", "user_identity_accounts"} {
+		if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name); err != nil {
+			t.Fatalf("%s 未创建: %v", table, err)
+		}
+	}
+
+	const expectedMaxVersion int64 = 20260522000001
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
