@@ -54,7 +54,7 @@ func NewIdentityAuthService(db *gorm.DB, redisClient *redis.Client) *IdentityAut
 		userDAO:           dao.NewUserDao(db),
 		providerService:   NewIdentityProviderService(db),
 		userService:       NewUserService(db),
-		jwtAuthService:    NewJWTAuthService(),
+		jwtAuthService:    newOptionalJWTAuthService(),
 		stateKeyPrefix:    "identity:state:",
 		tempUserKeyPrefix: "identity:temp_user:",
 	}
@@ -244,7 +244,12 @@ func (s *IdentityAuthService) BindWithExistingUser(bindToken, username, password
 	if err != nil {
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -349,7 +354,12 @@ func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterReques
 		return nil, fmt.Errorf("获取用户信息失败：响应为空")
 	}
 
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -415,7 +425,12 @@ func (s *IdentityAuthService) loginWithIdentityAccount(account *model.UserIdenti
 	if err != nil {
 		return nil, fmt.Errorf("获取用户信息失败: %w", err)
 	}
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}

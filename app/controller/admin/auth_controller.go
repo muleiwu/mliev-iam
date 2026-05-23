@@ -65,7 +65,11 @@ func (ac AuthController) Login(c httpInterfaces.RouterContextInterface) {
 	}
 
 	// 生成访问令牌
-	jwtAuthService := service.NewJWTAuthService()
+	jwtAuthService, err := service.NewJWTAuthServiceWithError()
+	if err != nil {
+		ac.Error(c, constants.ErrCodeInternal, "JWT配置错误: "+err.Error())
+		return
+	}
 	accessToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		ac.Error(c, constants.ErrCodeInternal, "生成访问令牌失败: "+err.Error())
@@ -133,7 +137,11 @@ func (ac AuthController) RefreshToken(c httpInterfaces.RouterContextInterface) {
 	}
 
 	// 验证刷新令牌并生成新的访问令牌
-	jwtAuthService := service.NewJWTAuthService()
+	jwtAuthService, err := service.NewJWTAuthServiceWithError()
+	if err != nil {
+		ac.Error(c, constants.ErrCodeInternal, "JWT配置错误: "+err.Error())
+		return
+	}
 	newAccessToken, err := jwtAuthService.RefreshToken(refreshToken)
 	if err != nil {
 		ac.Error(c, constants.ErrCodeUnauthorized, "刷新令牌无效或已过期: "+err.Error())

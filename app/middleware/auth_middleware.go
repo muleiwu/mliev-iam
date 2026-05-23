@@ -44,7 +44,14 @@ func AuthMiddleware() httpInterfaces.HandlerFunc {
 			return
 		}
 
-		jwtAuthService := service.NewJWTAuthService()
+		jwtAuthService, err := service.NewJWTAuthServiceWithError()
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, dto.Response{
+				Code:    constants.ErrCodeInternal,
+				Message: "JWT配置错误: " + err.Error(),
+			})
+			return
+		}
 		claims, err := jwtAuthService.ValidateToken(tokenString)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
@@ -94,7 +101,11 @@ func OptionalAuthMiddleware() httpInterfaces.HandlerFunc {
 			c.Next()
 			return
 		}
-		jwtAuthService := service.NewJWTAuthService()
+		jwtAuthService, err := service.NewJWTAuthServiceWithError()
+		if err != nil {
+			c.Next()
+			return
+		}
 		claims, err := jwtAuthService.ValidateToken(tokenString)
 		if err != nil {
 			c.Next()

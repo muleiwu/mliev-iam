@@ -55,7 +55,7 @@ func NewSocialAuthService(db *gorm.DB, redisClient *redis.Client) *SocialAuthSer
 		userDAO:           dao.NewUserDao(db),
 		providerService:   NewSocialProviderService(db, redisClient),
 		userService:       NewUserService(db),
-		jwtAuthService:    NewJWTAuthService(),
+		jwtAuthService:    newOptionalJWTAuthService(),
 		stateKeyPrefix:    "social:state:",
 		tempUserKeyPrefix: "social:temp_user:",
 	}
@@ -377,7 +377,12 @@ func (s *SocialAuthService) loginWithSocialAccount(account *model.UserSocialAcco
 	}
 
 	// 生成JWT令牌
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -491,7 +496,12 @@ func (s *SocialAuthService) registerWithSocialAccount(provider *model.SocialProv
 	fmt.Printf("DEBUG: 用户信息获取成功，用户ID: %d, 用户名: %s\n", userResponse.ID, userResponse.Username)
 
 	// 生成JWT令牌
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		fmt.Printf("DEBUG: 生成令牌失败: %v\n", err)
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
@@ -720,7 +730,12 @@ func (s *SocialAuthService) BindWithExistingUser(bindToken, username, password s
 	}
 
 	// 生成JWT令牌
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -833,7 +848,12 @@ func (s *SocialAuthService) RegisterWithSocial(req *dto.SocialRegisterRequest) (
 	}
 
 	// 生成JWT令牌
-	jwtToken, err := s.jwtAuthService.GenerateToken(userResponse)
+	jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+	if err != nil {
+		return nil, fmt.Errorf("JWT配置错误: %w", err)
+	}
+	s.jwtAuthService = jwtAuthService
+	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}

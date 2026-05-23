@@ -32,11 +32,11 @@ const (
 )
 
 const (
-	qrSessionTTL      = 5 * time.Minute
-	qrSessionKey      = "social:mp_qrcode:"
-	qrDefaultPage     = "pages/login-confirm/login-confirm"
-	qrDefaultEnvVer   = "release"
-	weChatWXACodeAPI  = "https://api.weixin.qq.com/wxa/getwxacodeunlimit"
+	qrSessionTTL     = 5 * time.Minute
+	qrSessionKey     = "social:mp_qrcode:"
+	qrDefaultPage    = "pages/login-confirm/login-confirm"
+	qrDefaultEnvVer  = "release"
+	weChatWXACodeAPI = "https://api.weixin.qq.com/wxa/getwxacodeunlimit"
 )
 
 // SocialQRCodeService 扫码登录编排。
@@ -64,7 +64,7 @@ func NewSocialQRCodeService(db *gorm.DB, rdb *redis.Client) *SocialQRCodeService
 		authService:     auth,
 		accountDAO:      dao.NewUserSocialAccountDAO(db),
 		userService:     NewUserService(db),
-		jwtAuthService:  NewJWTAuthService(),
+		jwtAuthService:  newOptionalJWTAuthService(),
 		tokenCache:      NewWeChatAccessTokenCache(rdb),
 		httpClient:      &http.Client{Timeout: 10 * time.Second},
 	}
@@ -166,7 +166,12 @@ func (s *SocialQRCodeService) GetStatus(
 		if err != nil {
 			return nil, fmt.Errorf("获取用户信息失败: %w", err)
 		}
-		token, err := s.jwtAuthService.GenerateToken(userResp)
+		jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
+		if err != nil {
+			return nil, fmt.Errorf("JWT配置错误: %w", err)
+		}
+		s.jwtAuthService = jwtAuthService
+		token, err := jwtAuthService.GenerateToken(userResp)
 		if err != nil {
 			return nil, fmt.Errorf("生成令牌失败: %w", err)
 		}

@@ -13,13 +13,40 @@ type JWTAuthService struct {
 
 // NewJWTAuthService 创建JWT认证服务实例
 func NewJWTAuthService() *JWTAuthService {
-	jwtConfig := jwt.GetConfig()
+	jwtAuthService, err := NewJWTAuthServiceWithError()
+	if err != nil {
+		panic(err)
+	}
+	return jwtAuthService
+}
+
+// NewJWTAuthServiceWithError 创建 JWT 认证服务实例，并将配置错误显式返回给调用方。
+func NewJWTAuthServiceWithError() (*JWTAuthService, error) {
+	jwtConfig, err := jwt.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
 	jwtService := jwt.NewJWTService(jwtConfig.SecretKey, jwtConfig.Issuer)
 
 	return &JWTAuthService{
 		jwtService: jwtService,
 		config:     jwtConfig,
+	}, nil
+}
+
+func newOptionalJWTAuthService() *JWTAuthService {
+	jwtAuthService, err := NewJWTAuthServiceWithError()
+	if err != nil {
+		return nil
 	}
+	return jwtAuthService
+}
+
+func ensureJWTAuthService(jwtAuthService *JWTAuthService) (*JWTAuthService, error) {
+	if jwtAuthService != nil {
+		return jwtAuthService, nil
+	}
+	return NewJWTAuthServiceWithError()
 }
 
 // GenerateToken 生成JWT token
