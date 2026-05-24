@@ -53,7 +53,20 @@ func TestSqliteSmoke(t *testing.T) {
 		}
 	}
 
-	const expectedMaxVersion int64 = 20260522000001
+	var providerCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM social_providers
+		WHERE identifier IN ('qq', 'wechat', 'wechat-miniprogram', 'github', 'google', 'oidc', 'generic-oauth2')
+		  AND status = 0
+	`).Scan(&providerCount); err != nil {
+		t.Fatal(err)
+	}
+	if providerCount != 7 {
+		t.Fatalf("预置 social provider 模板数量错误，期望 7，实际 %d", providerCount)
+	}
+
+	const expectedMaxVersion int64 = 20260524000001
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)

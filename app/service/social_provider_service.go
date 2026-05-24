@@ -259,6 +259,19 @@ func (s *SocialProviderService) GetEnabledProviders() ([]*dto.PublicProviderInfo
 func (s *SocialProviderService) BatchOperation(req *dto.SocialProviderBatchRequest) error {
 	switch req.Operation {
 	case "enable":
+		for _, id := range req.IDs {
+			provider, err := s.providerDAO.GetByID(id)
+			if err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return fmt.Errorf("提供商 %d 不存在", id)
+				}
+				return fmt.Errorf("获取提供商 %d 失败: %w", id, err)
+			}
+			provider.Status = model.ProviderStatusEnabled
+			if err := s.validateProviderConfig(provider); err != nil {
+				return fmt.Errorf("提供商 %s 配置验证失败: %w", provider.Identifier, err)
+			}
+		}
 		return s.providerDAO.BatchUpdateStatus(req.IDs, model.ProviderStatusEnabled)
 	case "disable":
 		return s.providerDAO.BatchUpdateStatus(req.IDs, model.ProviderStatusDisabled)
@@ -313,6 +326,10 @@ func (s *SocialProviderService) GetProviderStats() (*dto.SocialProviderStatsResp
 
 // validateProviderConfig 验证提供商配置
 func (s *SocialProviderService) validateProviderConfig(provider *model.SocialProvider) error {
+	if provider.Status != model.ProviderStatusEnabled {
+		return nil
+	}
+
 	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
 	if err != nil {
 		return err
