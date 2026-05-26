@@ -23,7 +23,7 @@ type CorsConfig struct {
 // DefaultCorsConfig 返回默认CORS配置（安全默认：本地开发白名单，非通配符）
 func DefaultCorsConfig() CorsConfig {
 	return CorsConfig{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:5174", "http://localhost:5777"},
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:5174", "http://localhost:5777", "http://localhost:5211"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Trace-Id"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Type", "X-Trace-Id"},

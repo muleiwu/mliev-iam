@@ -21,6 +21,7 @@ func (receiver Cors) InitConfig() map[string]any {
 			"http://localhost:5173",
 			"http://localhost:5174",
 			"http://localhost:5777",
+			"http://localhost:5211",
 		}),
 		"app.cors.allowed_methods": env.GetStringSlice("app.cors.allowed_methods", []string{
 			"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",

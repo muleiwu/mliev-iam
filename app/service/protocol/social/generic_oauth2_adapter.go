@@ -71,7 +71,11 @@ func (a *GenericOAuth2Adapter) GetUserInfo(ctx context.Context, token *oauth2.To
 		return nil, fmt.Errorf("failed to parse user info: %w", err)
 	}
 
-	return MapCommonUserFields(raw), nil
+	user := MapCommonUserFieldsWithAttributes(raw, a.Provider.Attributes)
+	if user.OpenID == "" {
+		return nil, fmt.Errorf("failed to map user id from user info")
+	}
+	return user, nil
 }
 
 func (a *GenericOAuth2Adapter) ValidateConfig() error {
@@ -90,36 +94,65 @@ func (a *GenericOAuth2Adapter) ValidateConfig() error {
 	if a.Provider.RedirectURL == "" {
 		return fmt.Errorf("redirect URL is required")
 	}
+	if a.Provider.UserInfoURL == "" {
+		return fmt.Errorf("user info URL is required")
+	}
 	return nil
 }
 
 // MapCommonUserFields 从原始用户信息里抽取常见字段，各类 OAuth2 适配器共用。
 func MapCommonUserFields(raw map[string]any) *SocialUser {
+	return MapCommonUserFieldsWithAttributes(raw, nil)
+}
+
+// MapCommonUserFieldsWithAttributes 支持通用 OAuth2 提供商通过 attributes 配置字段映射。
+// 支持的 key：openIdField、nicknameField、avatarField、emailField；值为空时使用常见字段兜底。
+func MapCommonUserFieldsWithAttributes(raw map[string]any, attrs map[string]any) *SocialUser {
 	u := &SocialUser{RawUserInfo: raw}
 
-	if id, ok := raw["id"]; ok {
-		u.OpenID = stringifyID(id)
-	} else if sub, ok := raw["sub"]; ok {
-		u.OpenID = stringifyID(sub)
+	if v, ok := mappedValue(raw, attrs, "openIdField", "id", "sub", "openid", "open_id"); ok {
+		u.OpenID = stringifyID(v)
 	}
 
-	if name, ok := raw["name"]; ok {
-		u.Nickname = fmt.Sprintf("%v", name)
-	} else if login, ok := raw["login"]; ok {
-		u.Nickname = fmt.Sprintf("%v", login)
+	if v, ok := mappedValue(raw, attrs, "nicknameField", "name", "login", "nickname"); ok {
+		u.Nickname = fmt.Sprintf("%v", v)
 	}
 
-	if avatar, ok := raw["avatar_url"]; ok {
-		u.Avatar = fmt.Sprintf("%v", avatar)
-	} else if picture, ok := raw["picture"]; ok {
-		u.Avatar = fmt.Sprintf("%v", picture)
+	if v, ok := mappedValue(raw, attrs, "avatarField", "avatar_url", "picture", "avatar", "headimgurl"); ok {
+		u.Avatar = fmt.Sprintf("%v", v)
 	}
 
-	if email, ok := raw["email"]; ok {
-		u.Email = fmt.Sprintf("%v", email)
+	if v, ok := mappedValue(raw, attrs, "emailField", "email", "mail"); ok {
+		u.Email = fmt.Sprintf("%v", v)
 	}
 
 	return u
+}
+
+func mappedValue(raw map[string]any, attrs map[string]any, attrKey string, fallbackKeys ...string) (any, bool) {
+	if field, ok := getAttrStringValue(attrs, attrKey); ok {
+		if v, exists := raw[field]; exists && v != nil {
+			return v, true
+		}
+	}
+	for _, key := range fallbackKeys {
+		if v, exists := raw[key]; exists && v != nil {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func getAttrStringValue(attrs map[string]any, key string) (string, bool) {
+	if attrs == nil {
+		return "", false
+	}
+	v, ok := attrs[key]
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok && s != ""
 }
 
 func stringifyID(v any) string {
