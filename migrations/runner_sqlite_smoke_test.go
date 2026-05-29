@@ -22,7 +22,7 @@ func TestSqliteSmoke(t *testing.T) {
 	}
 
 	// 新代码读写依赖的列都存在
-	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at"} {
+	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at", "failure_count"} {
 		var count int
 		q := fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = '%s'`, col)
 		if err := db.QueryRow(q).Scan(&count); err != nil {
@@ -66,7 +66,7 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatalf("预置 social provider 模板数量错误，期望 7，实际 %d", providerCount)
 	}
 
-	const expectedMaxVersion int64 = 20260524000001
+	const expectedMaxVersion int64 = 20260529000001
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)

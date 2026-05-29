@@ -52,6 +52,7 @@ type User struct {
 	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
 	PhoneVerifiedAt *time.Time `json:"phoneVerifiedAt"`
 	LoginCount      int64      `gorm:"default:0" json:"loginCount"`
+	FailureCount    int64      `gorm:"default:0" json:"failureCount"`
 
 	// 时间信息
 	LastLoginAt    *time.Time     `json:"lastLoginAt"`
