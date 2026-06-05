@@ -225,9 +225,11 @@ func (receiver Router) InitConfig() map[string]any {
 			// OIDC 授权流程 API（服务于 /auth 登录 UI）
 			apiOidc := api.Group("/oidc")
 			apiOidc.POST("/login", controller.OIDCAuthFlowController{}.Login)
+			apiOidc.POST("/login-by-code", controller.OIDCAuthFlowController{}.LoginByCode)
 			apiOidc.POST("/register", controller.OIDCAuthFlowController{}.Register)
 			apiOidc.GET("/auth-info", controller.OIDCAuthFlowController{}.GetAuthInfo)
 			apiOidc.GET("/flow-status", controller.OIDCAuthFlowController{}.GetFlowStatus)
+			apiOidc.POST("/send-login-verification-code", controller.OIDCAuthFlowController{}.SendLoginVerificationCode)
 			apiOidc.POST("/send-verification-code", controller.OIDCAuthFlowController{}.SendVerificationCode)
 			apiOidc.POST("/send-register-verification-code", controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)
 			apiOidc.POST("/complete-profile", controller.OIDCAuthFlowController{}.CompleteProfile)

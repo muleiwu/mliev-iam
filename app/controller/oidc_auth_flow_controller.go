@@ -14,6 +14,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"github.com/google/uuid"
 )
 
 // OIDCAuthFlowController OIDC授权流程控制器
@@ -28,6 +29,15 @@ type LoginRequest struct {
 	SessionID     string             `json:"sessionId" binding:"required"`
 	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 	RememberMe    bool               `json:"rememberMe"`              // 记住我
+}
+
+// LoginByCodeRequest 验证码登录请求
+type LoginByCodeRequest struct {
+	SessionID  string `json:"sessionId" binding:"required"`
+	Type       string `json:"type" binding:"required,oneof=email phone"`
+	Receiver   string `json:"receiver" binding:"required"`
+	Code       string `json:"code" binding:"required,len=6"`
+	RememberMe bool   `json:"rememberMe"` // 记住我
 }
 
 // RegisterRequest 注册请求
@@ -112,6 +122,14 @@ type SendVerificationCodeRequest struct {
 	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
+// SendLoginVerificationCodeRequest 发送登录验证码请求
+type SendLoginVerificationCodeRequest struct {
+	SessionID     string             `json:"sessionId" binding:"required"`
+	Type          string             `json:"type" binding:"required,oneof=email phone"`
+	Receiver      string             `json:"receiver" binding:"required"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
+}
+
 // SendRegisterVerificationCodeRequest 发送注册验证码请求（不需要sessionId和认证）
 type SendRegisterVerificationCodeRequest struct {
 	Type          string             `json:"type" binding:"required,oneof=email phone"`
@@ -123,6 +141,7 @@ type SendRegisterVerificationCodeRequest struct {
 type SendVerificationCodeResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+	TraceID string `json:"traceId,omitempty"`
 }
 
 // CompleteProfileRequest 完善信息请求
@@ -177,13 +196,22 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		return
 	}
 
-	// 3. 标记会话为已认证
-	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), req.SessionID, user.ID); err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, "更新会话失败: "+err.Error())
+	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
 		return
 	}
 
-	// 4. 立即生成 OIDC Token
+	c.Success(ctx, response)
+}
+
+func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterContextInterface, sessionService *service.OIDCSessionService, session *service.OIDCSession, sessionID string, user *dto.UserResponse, rememberMe bool) (*LoginResponse, error) {
+	// 标记会话为已认证
+	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID); err != nil {
+		return nil, fmt.Errorf("更新会话失败: %w", err)
+	}
+
+	// 立即生成 OIDC Token
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	appService := service.NewApplicationService(helper.GetDatabase())
 	app, err := appService.GetApplicationByClientID(session.ClientID)
@@ -206,9 +234,9 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 			accessToken = tokenResponse.AccessToken
 			expiresIn = tokenResponse.ExpiresIn
 
-			// 5. 设置 Refresh Token 到 HttpOnly Cookie
+			// 设置 Refresh Token 到 HttpOnly Cookie
 			maxAge := 0 // 默认会话期
-			if req.RememberMe {
+			if rememberMe {
 				maxAge = 7 * 24 * 60 * 60 // 7天
 			}
 
@@ -224,10 +252,9 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		}
 	}
 
-	// 6. 检查 scope 是否需要用户完善信息
+	// 检查 scope 是否需要用户完善信息
 	missingFields := c.checkMissingUserInfo(session.Scope, user)
 
-	// 7. 返回成功响应
 	response := LoginResponse{
 		Success: true,
 		Message: "登录成功",
@@ -248,10 +275,60 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		// 需要完善信息，跳转到信息完善页面
 		response.RequiresProfileCompletion = true
 		response.MissingFields = missingFields
-		response.NextURL = "/auth/#/oidc/complete-profile?session_id=" + req.SessionID + "&missing_fields=" + strings.Join(missingFields, ",")
+		response.NextURL = "/auth/#/oidc/complete-profile?session_id=" + sessionID + "&missing_fields=" + strings.Join(missingFields, ",")
 	} else {
 		// 信息完整，直接跳转到授权确认页面
-		response.NextURL = "/auth/#/oidc/consent?session_id=" + req.SessionID
+		response.NextURL = "/auth/#/oidc/consent?session_id=" + sessionID
+	}
+
+	return &response, nil
+}
+
+// LoginByCode OIDC 验证码登录接口
+// POST /api/oidc/login-by-code
+func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInterface) {
+	var req LoginByCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+
+	verificationType := requestVerificationType(req.Type)
+	userService := service.NewUserService(helper.GetDatabase())
+	user, err := userService.GetVerifiedUserForCodeLogin(verificationType, req.Receiver)
+	if err != nil {
+		code := constants.ErrCodeBadRequest
+		if strings.Contains(err.Error(), "禁用") {
+			code = constants.ErrCodeUnauthorized
+		}
+		c.Error(ctx, code, err.Error())
+		return
+	}
+
+	config := c.getVerificationCodeConfig()
+	if config == nil {
+		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		return
+	}
+
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+	loginVerificationSessionID := buildLoginVerificationSessionID(req.SessionID, verificationType, req.Receiver)
+	if err := verificationService.VerifyCode(ctx.Request().Context(), req.Receiver, verificationType, loginVerificationSessionID, req.Code); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "验证码错误或已过期")
+		return
+	}
+
+	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+		return
 	}
 
 	c.Success(ctx, response)
@@ -634,12 +711,139 @@ func (c OIDCAuthFlowController) getVerificationCodeConfig() *service.Verificatio
 	}
 }
 
+func newVerificationCodeTraceID() string {
+	v7, err := uuid.NewV7()
+	if err != nil {
+		v7 = uuid.New()
+	}
+	return v7.String()
+}
+
+func withTraceID(message, traceID string) string {
+	if traceID == "" {
+		return message
+	}
+	return fmt.Sprintf("%s（追踪ID：%s）", message, traceID)
+}
+
+func shortControllerLogValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:8] + "..." + value[len(value)-4:]
+}
+
+func requestVerificationType(value string) service.VerificationType {
+	if value == "email" {
+		return service.VerificationTypeEmail
+	}
+	return service.VerificationTypePhone
+}
+
+func buildLoginVerificationSessionID(sessionID string, verificationType service.VerificationType, receiver string) string {
+	return fmt.Sprintf("login:%s:%s:%s", sessionID, verificationType, receiver)
+}
+
+func (c OIDCAuthFlowController) logVerificationCodeControllerInfo(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Info(formatVerificationCodeControllerLog(traceID, format, args...))
+	}
+}
+
+func (c OIDCAuthFlowController) logVerificationCodeControllerWarn(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Warn(formatVerificationCodeControllerLog(traceID, format, args...))
+	}
+}
+
+func (c OIDCAuthFlowController) logVerificationCodeControllerError(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Error(formatVerificationCodeControllerLog(traceID, format, args...))
+	}
+}
+
+func formatVerificationCodeControllerLog(traceID, format string, args ...any) string {
+	if traceID == "" {
+		traceID = "-"
+	}
+	return fmt.Sprintf("[verification-code] traceId=%s %s", traceID, fmt.Sprintf(format, args...))
+}
+
+// SendLoginVerificationCode 发送登录验证码接口
+// POST /api/oidc/send-login-verification-code
+func (c OIDCAuthFlowController) SendLoginVerificationCode(ctx httpInterfaces.RouterContextInterface) {
+	traceID := newVerificationCodeTraceID()
+	var req SendLoginVerificationCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.logVerificationCodeControllerError(traceID, "登录验证码请求参数错误 err=%v", err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("请求参数错误: "+err.Error(), traceID))
+		return
+	}
+
+	verificationType := requestVerificationType(req.Type)
+	captchaScene := "sendSms"
+	if verificationType == service.VerificationTypeEmail {
+		captchaScene = "sendEmail"
+	}
+	c.logVerificationCodeControllerInfo(traceID, "发送登录验证码请求 scene=%s type=%s receiver=%s session=%s clientIp=%s", captchaScene, req.Type, service.MaskVerificationReceiver(req.Receiver), shortControllerLogValue(req.SessionID), ctx.ClientIP())
+
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
+		c.logVerificationCodeControllerWarn(traceID, "登录验证码校验失败 scene=%s err=%v", captchaScene, err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
+		return
+	}
+	c.logVerificationCodeControllerInfo(traceID, "登录验证码校验通过 scene=%s", captchaScene)
+
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	if _, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID); err != nil {
+		c.logVerificationCodeControllerWarn(traceID, "登录验证码OIDC会话不存在或过期 session=%s err=%v", shortControllerLogValue(req.SessionID), err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("无效的会话ID或会话已过期", traceID))
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	if _, err := userService.GetVerifiedUserForCodeLogin(verificationType, req.Receiver); err != nil {
+		c.logVerificationCodeControllerWarn(traceID, "登录验证码账号校验失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
+		return
+	}
+
+	config := c.getVerificationCodeConfig()
+	if config == nil {
+		c.logVerificationCodeControllerError(traceID, "登录验证码服务未配置")
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
+		return
+	}
+
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+	loginVerificationSessionID := buildLoginVerificationSessionID(req.SessionID, verificationType, req.Receiver)
+	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, loginVerificationSessionID, traceID); err != nil {
+		c.logVerificationCodeControllerError(traceID, "登录验证码发送失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID(err.Error(), traceID))
+		return
+	}
+
+	response := SendVerificationCodeResponse{
+		Success: true,
+		Message: "验证码已发送",
+		TraceID: traceID,
+	}
+
+	c.Success(ctx, response)
+}
+
 // SendVerificationCode 发送验证码接口
 // POST /api/oidc/send-verification-code
 func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterContextInterface) {
+	traceID := newVerificationCodeTraceID()
 	var req SendVerificationCodeRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		c.logVerificationCodeControllerError(traceID, "请求参数错误 err=%v", err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("请求参数错误: "+err.Error(), traceID))
 		return
 	}
 
@@ -648,29 +852,35 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterCo
 	if req.Type == "email" {
 		captchaScene = "sendEmail"
 	}
+	c.logVerificationCodeControllerInfo(traceID, "发送验证码请求 scene=%s type=%s receiver=%s session=%s clientIp=%s", captchaScene, req.Type, service.MaskVerificationReceiver(req.Receiver), shortControllerLogValue(req.SessionID), ctx.ClientIP())
 	captchaManager := captcha.NewManager(helper.GetDatabase())
 	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		c.logVerificationCodeControllerWarn(traceID, "验证码校验失败 scene=%s err=%v", captchaScene, err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
 		return
 	}
+	c.logVerificationCodeControllerInfo(traceID, "验证码校验通过 scene=%s", captchaScene)
 
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
 	if err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		c.logVerificationCodeControllerWarn(traceID, "OIDC会话不存在或过期 session=%s err=%v", shortControllerLogValue(req.SessionID), err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("无效的会话ID或会话已过期", traceID))
 		return
 	}
 
 	if !session.IsAuthenticated || session.UserID == nil {
-		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
+		c.logVerificationCodeControllerWarn(traceID, "OIDC会话未认证 session=%s", shortControllerLogValue(req.SessionID))
+		c.Error(ctx, constants.ErrCodeUnauthorized, withTraceID("用户尚未认证", traceID))
 		return
 	}
 
 	// 2. 获取验证码服务配置
 	config := c.getVerificationCodeConfig()
 	if config == nil {
-		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		c.logVerificationCodeControllerError(traceID, "验证码服务未配置")
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
 		return
 	}
 
@@ -684,14 +894,16 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterCo
 		verificationType = service.VerificationTypePhone
 	}
 
-	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, req.SessionID); err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, req.SessionID, traceID); err != nil {
+		c.logVerificationCodeControllerError(traceID, "验证码发送失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID(err.Error(), traceID))
 		return
 	}
 
 	response := SendVerificationCodeResponse{
 		Success: true,
 		Message: "验证码已发送",
+		TraceID: traceID,
 	}
 
 	c.Success(ctx, response)
@@ -820,9 +1032,11 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 // SendRegisterVerificationCode 发送注册验证码接口（无需登录认证）
 // POST /api/oidc/send-register-verification-code
 func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.RouterContextInterface) {
+	traceID := newVerificationCodeTraceID()
 	var req SendRegisterVerificationCodeRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		c.logVerificationCodeControllerError(traceID, "注册验证码请求参数错误 err=%v", err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("请求参数错误: "+err.Error(), traceID))
 		return
 	}
 
@@ -831,16 +1045,20 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.
 	if req.Type == "email" {
 		captchaScene = "sendEmail"
 	}
+	c.logVerificationCodeControllerInfo(traceID, "发送注册验证码请求 scene=%s type=%s receiver=%s clientIp=%s", captchaScene, req.Type, service.MaskVerificationReceiver(req.Receiver), ctx.ClientIP())
 	captchaManager := captcha.NewManager(helper.GetDatabase())
 	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		c.logVerificationCodeControllerWarn(traceID, "注册验证码校验失败 scene=%s err=%v", captchaScene, err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
 		return
 	}
+	c.logVerificationCodeControllerInfo(traceID, "注册验证码校验通过 scene=%s", captchaScene)
 
 	// 1. 获取验证码服务配置
 	config := c.getVerificationCodeConfig()
 	if config == nil {
-		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		c.logVerificationCodeControllerError(traceID, "注册验证码服务未配置")
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
 		return
 	}
 
@@ -858,14 +1076,16 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.
 	// 这样可以保证每个接收者有独立的验证码
 	sessionID := "register:" + req.Receiver
 
-	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, sessionID); err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, sessionID, traceID); err != nil {
+		c.logVerificationCodeControllerError(traceID, "注册验证码发送失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID(err.Error(), traceID))
 		return
 	}
 
 	response := SendVerificationCodeResponse{
 		Success: true,
 		Message: "验证码已发送",
+		TraceID: traceID,
 	}
 
 	c.Success(ctx, response)

@@ -467,6 +467,43 @@ func (s *UserService) ValidateUserForLogin(username, password string) (*dto.User
 	return &response, nil
 }
 
+// GetVerifiedUserForCodeLogin 根据已验证邮箱或手机号获取可登录用户。
+func (s *UserService) GetVerifiedUserForCodeLogin(verificationType VerificationType, receiver string) (*dto.UserResponse, error) {
+	var (
+		user *model.User
+		err  error
+	)
+	identifierLabel := "手机号"
+
+	switch verificationType {
+	case VerificationTypeEmail:
+		identifierLabel = "邮箱"
+		user, err = s.userDao.GetByEmail(receiver)
+	case VerificationTypePhone:
+		user, err = s.userDao.GetByPhone(receiver)
+	default:
+		return nil, fmt.Errorf("不支持的验证码登录类型")
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("%s未注册", identifierLabel)
+	}
+
+	if !user.CanLogin() {
+		return nil, fmt.Errorf("用户账户已禁用")
+	}
+
+	if verificationType == VerificationTypeEmail && user.EmailVerifiedAt == nil {
+		return nil, fmt.Errorf("邮箱未验证，无法使用验证码登录")
+	}
+	if verificationType == VerificationTypePhone && user.PhoneVerifiedAt == nil {
+		return nil, fmt.Errorf("手机号未验证，无法使用验证码登录")
+	}
+
+	response := dto.ConvertToUserResponse(user)
+	return &response, nil
+}
+
 // ============= RBAC权限相关方法 =============
 
 // CheckUserURLPermission 检查用户是否有URL访问权限
