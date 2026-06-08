@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
@@ -20,8 +21,9 @@ type AuthController struct {
 
 // AdminLoginRequest 管理员登录请求
 type AdminLoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username      string             `json:"username" binding:"required"`
+	Password      string             `json:"password" binding:"required"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"`
 }
 
 // AdminLoginResponse 管理员登录响应
@@ -38,6 +40,12 @@ func (ac AuthController) Login(c httpInterfaces.RouterContextInterface) {
 	var req AdminLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 
