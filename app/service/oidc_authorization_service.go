@@ -687,10 +687,10 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 
 // generateJWTAccessToken 生成 JWT 格式的 Access Token
 func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string) (string, error) {
-	// 获取全局配置
-	env := helper.GetEnv()
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
+		// 只有应用未配置 tokenLifetime 时才回退到全局配置。
+		env := helper.GetEnv()
 		accessTokenLifetime = env.GetInt("oidc.token_lifetime.access_token", 3600)
 	}
 
@@ -756,10 +756,10 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 
 // generateClientCredentialsJWTAccessToken 生成客户端凭据流程的 JWT Access Token
 func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string) (string, error) {
-	// 获取全局配置
-	env := helper.GetEnv()
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
+		// 只有应用未配置 tokenLifetime 时才回退到全局配置。
+		env := helper.GetEnv()
 		accessTokenLifetime = env.GetInt("oidc.token_lifetime.access_token", 3600)
 	}
 

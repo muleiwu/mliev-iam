@@ -85,15 +85,22 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 	return nil
 }
 
-// PrepareConfig 准备OIDC配置（生成ClientID和ClientSecret）
-// 注意：此方法返回的配置包含明文的ClientSecret，仅用于创建时返回给前端
+// PrepareConfig 准备OIDC配置（生成ClientID；机密客户端额外生成ClientSecret）
+// 注意：机密客户端会返回明文ClientSecret，仅用于创建时返回给前端。
 func (h *OIDCProtocolHandler) PrepareConfig(uuid string, config map[string]interface{}) (map[string]interface{}, error) {
 	// 使用传入的UUID作为ClientID
 	config["clientId"] = uuid
 
-	// 生成ClientSecret（明文）
-	clientSecret := h.generateClientSecret()
-	config["clientSecret"] = clientSecret
+	clientType, _ := config["clientType"].(string)
+	if clientType == "confidential" {
+		// 生成ClientSecret（明文）
+		clientSecret := h.generateClientSecret()
+		config["clientSecret"] = clientSecret
+	} else {
+		// 公开客户端不能安全保存密钥，强制走 PKCE。
+		delete(config, "clientSecret")
+		config["requirePkce"] = true
+	}
 
 	// 设置默认的Token有效期（如果未设置）
 	if _, ok := config["tokenLifetime"]; !ok {
@@ -106,6 +113,11 @@ func (h *OIDCProtocolHandler) PrepareConfig(uuid string, config map[string]inter
 // EncryptSensitiveFields 加密/哈希配置中的敏感字段（用于存储）
 // 此方法会直接修改传入的配置对象
 func (h *OIDCProtocolHandler) EncryptSensitiveFields(config map[string]interface{}) error {
+	if clientType, _ := config["clientType"].(string); clientType == "public" {
+		delete(config, "clientSecret")
+		return nil
+	}
+
 	// 对ClientSecret进行哈希处理
 	if clientSecret, ok := config["clientSecret"].(string); ok && clientSecret != "" {
 		config["clientSecret"] = h.hashClientSecret(clientSecret)
@@ -146,6 +158,12 @@ func (h *OIDCProtocolHandler) UpdateApplication(app *model.Application, updates 
 		// 验证合并后的配置
 		if err := h.ValidateConfig(currentConfig); err != nil {
 			return err
+		}
+
+		if clientType, _ := currentConfig["clientType"].(string); clientType == "public" {
+			// 从机密客户端切换为公开客户端时，清理历史密钥并强制 PKCE。
+			delete(currentConfig, "clientSecret")
+			currentConfig["requirePkce"] = true
 		}
 
 		app.ProtocolConfig = currentConfig
@@ -206,6 +224,9 @@ func (h *OIDCProtocolHandler) ValidateClient(app *model.Application, clientSecre
 
 	// 对于公开客户端，不需要验证客户端密钥
 	if clientType == "public" {
+		if clientSecret != "" {
+			return errors.New("公开客户端不能使用客户端密钥")
+		}
 		return nil
 	}
 
@@ -498,6 +519,15 @@ func (h *OIDCProtocolHandler) getDefaultKeySize(algorithm string) int {
 
 // ResetClientSecret 重置客户端密钥
 func (h *OIDCProtocolHandler) ResetClientSecret(appID uint) (string, error) {
+	appDAO := dao.NewApplicationDAO(h.db)
+	app, err := appDAO.GetByID(appID)
+	if err != nil {
+		return "", err
+	}
+	if clientType, _ := app.ProtocolConfig["clientType"].(string); clientType == "public" {
+		return "", errors.New("公开客户端没有客户端密钥")
+	}
+
 	// 生成新的客户端密钥（明文）
 	newClientSecret := h.generateClientSecret()
 
@@ -508,7 +538,6 @@ func (h *OIDCProtocolHandler) ResetClientSecret(appID uint) (string, error) {
 	}
 
 	// 更新数据库
-	appDAO := dao.NewApplicationDAO(h.db)
 	err = appDAO.UpdateClientSecret(appID, string(hashedSecret))
 	if err != nil {
 		return "", fmt.Errorf("更新客户端密钥失败: %w", err)

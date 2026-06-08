@@ -18,6 +18,8 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "GET", "/api/oidc/client-config")
 	router.assertRoute(t, "POST", "/api/oidc/auth/refresh")
 	router.assertRoute(t, "POST", "/api/oidc/auth/logout")
+	router.assertRoute(t, "POST", "/oidc/:client_id/token")
+	router.assertNoRoute(t, "GET", "/oidc/:client_id/token")
 
 	if router.middlewarePrefixes["/api/auth"] == 0 {
 		t.Fatal("/api/auth must keep AuthMiddleware protection")
@@ -45,6 +47,14 @@ func (r *recordingRouter) assertRoute(t *testing.T, method, path string) {
 	key := method + " " + path
 	if !r.routes[key] {
 		t.Fatalf("route %s was not registered", key)
+	}
+}
+
+func (r *recordingRouter) assertNoRoute(t *testing.T, method, path string) {
+	t.Helper()
+	key := method + " " + path
+	if r.routes[key] {
+		t.Fatalf("route %s should not be registered", key)
 	}
 }
 

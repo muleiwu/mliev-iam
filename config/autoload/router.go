@@ -273,11 +273,9 @@ func (receiver Router) InitConfig() map[string]any {
 			identityAuth.DELETE("/unbind/:accountId", controller.IdentityAuthController{}.UnbindAccount)
 
 			// === OIDC 协议端点（公开，按 RFC 规范） ===
-			// 原 Gin .Match(GET|POST, ...) 在此拆成 .GET 和 .POST 双注册
 			oidc := router.Group("/oidc")
 			oidc.GET("/:client_id/authorize", controller.OIDCController{}.Authorize)
 			oidc.POST("/:client_id/authorize", controller.OIDCController{}.Authorize)
-			oidc.GET("/:client_id/token", controller.OIDCController{}.Token)
 			oidc.POST("/:client_id/token", controller.OIDCController{}.Token)
 			oidc.GET("/:client_id/userinfo", controller.OIDCController{}.UserInfo)
 			oidc.POST("/:client_id/userinfo", controller.OIDCController{}.UserInfo)
