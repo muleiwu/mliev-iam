@@ -4,8 +4,12 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	_ "github.com/glebarez/go-sqlite"
+	"github.com/pressly/goose/v3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // TestSqliteSmoke 在内存 SQLite 上跑一遍 goose 迁移，验证 SQL 语法无误、所有关键列齐全。
@@ -73,5 +77,50 @@ func TestSqliteSmoke(t *testing.T) {
 	}
 	if maxV != expectedMaxVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", expectedMaxVersion, maxV)
+	}
+}
+
+func TestReconcileKnownSchemaDriftMarksExistingFailureCountMigration(t *testing.T) {
+	gormDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(FS)
+	if _, err := goose.EnsureDBVersion(sqlDB); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := gormDB.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, failure_count INTEGER NOT NULL DEFAULT 0)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gormDB.Exec(
+		"INSERT INTO "+goose.TableName()+" (version_id, is_applied, tstamp) VALUES (?, ?, ?)",
+		userFailureCountPreviousMigrationVersion, true, time.Now(),
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileKnownMySQLSchemaDrift(sqlDB, gormDB, "sqlite", stdoutLogger{}); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := gormDB.Raw(
+		"SELECT COUNT(*) FROM "+goose.TableName()+" WHERE version_id = ? AND is_applied = ?",
+		userFailureCountMigrationVersion, true,
+	).Scan(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("期望补写 failure_count 迁移版本记录，实际 %d", count)
 	}
 }

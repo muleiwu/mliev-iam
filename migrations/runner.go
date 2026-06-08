@@ -34,6 +34,12 @@ var dirByDriver = map[string]string{
 // users 表自 initial_schema 起就存在，后续所有版本都依赖它，实际上不会被删除。
 const legacySchemaSentinelTable = "users"
 
+const (
+	userFailureCountMigrationVersion         int64 = 20260529000001
+	userFailureCountPreviousMigrationVersion int64 = 20260524000001
+	userFailureCountColumn                         = "failure_count"
+)
+
 // baselineLegacyVersions 是本次重构之前已在生产 MySQL 上部署过的迁移版本集合。
 // 如果检测到 sentinel 表存在但 goose_db_version 里无任何记录（历史上通过
 // AutoMigrate 起家、还未引入 goose），把这些版本标记为 applied，避免
@@ -90,6 +96,9 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 		if err := baselineIfLegacyMySQL(db, gormDB, logger); err != nil {
 			logger.Warn("baseline 失败: " + err.Error())
 		}
+		if err := reconcileKnownMySQLSchemaDrift(db, gormDB, dir, logger); err != nil {
+			return err
+		}
 	}
 
 	currentVersion, _ := goose.GetDBVersion(db)
@@ -103,6 +112,57 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 		logger.Info(fmt.Sprintf("[db migration] goose 已是最新版本 (driver=%s)", driver))
 	}
 
+	return nil
+}
+
+// reconcileKnownMySQLSchemaDrift 修复"字段已存在但 goose 版本未记录"的历史漂移。
+// 这类库不能直接重跑 ADD COLUMN，也不能直接把最高版本写入，否则会跳过中间迁移。
+func reconcileKnownMySQLSchemaDrift(db *sql.DB, gormDB *gorm.DB, dir string, logger Logger) error {
+	if !gormDB.Migrator().HasColumn(legacySchemaSentinelTable, userFailureCountColumn) {
+		return nil
+	}
+
+	currentVersion, err := goose.GetDBVersion(db)
+	if err != nil {
+		return fmt.Errorf("检查 goose 当前版本失败: %w", err)
+	}
+	if currentVersion >= userFailureCountMigrationVersion {
+		return nil
+	}
+
+	if currentVersion < userFailureCountPreviousMigrationVersion {
+		if err := goose.UpTo(db, dir, userFailureCountPreviousMigrationVersion); err != nil {
+			return fmt.Errorf("补跑 %s 前置迁移失败: %w", userFailureCountColumn, err)
+		}
+	}
+
+	return markGooseVersionAppliedIfMissing(
+		gormDB,
+		userFailureCountMigrationVersion,
+		fmt.Sprintf("%s.%s 已存在", legacySchemaSentinelTable, userFailureCountColumn),
+		logger,
+	)
+}
+
+func markGooseVersionAppliedIfMissing(gormDB *gorm.DB, version int64, reason string, logger Logger) error {
+	var count int64
+	if err := gormDB.Table(goose.TableName()).
+		Where("version_id = ? AND is_applied = ?", version, true).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("检查 goose version=%d 失败: %w", version, err)
+	}
+	if count > 0 {
+		return nil
+	}
+
+	if err := gormDB.Exec(
+		"INSERT INTO "+goose.TableName()+" (version_id, is_applied, tstamp) VALUES (?, ?, ?)",
+		version, true, time.Now(),
+	).Error; err != nil {
+		return fmt.Errorf("写入 goose version=%d 失败: %w", version, err)
+	}
+
+	logger.Warn(fmt.Sprintf("[db migration] 检测到 %s 但 goose 缺少 version=%d，已标记为 applied", reason, version))
 	return nil
 }
 
