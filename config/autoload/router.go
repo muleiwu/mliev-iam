@@ -228,6 +228,7 @@ func (receiver Router) InitConfig() map[string]any {
 			apiOidc.POST("/login-by-code", controller.OIDCAuthFlowController{}.LoginByCode)
 			apiOidc.POST("/register", controller.OIDCAuthFlowController{}.Register)
 			apiOidc.GET("/auth-info", controller.OIDCAuthFlowController{}.GetAuthInfo)
+			apiOidc.GET("/client-config", controller.OIDCAuthFlowController{}.GetClientConfig)
 			apiOidc.GET("/flow-status", controller.OIDCAuthFlowController{}.GetFlowStatus)
 			apiOidc.POST("/send-login-verification-code", controller.OIDCAuthFlowController{}.SendLoginVerificationCode)
 			apiOidc.POST("/send-verification-code", controller.OIDCAuthFlowController{}.SendVerificationCode)
@@ -235,6 +236,9 @@ func (receiver Router) InitConfig() map[string]any {
 			apiOidc.POST("/complete-profile", controller.OIDCAuthFlowController{}.CompleteProfile)
 			apiOidc.GET("/register-settings", controller.OIDCAuthFlowController{}.GetRegisterSettings)
 			apiOidc.POST("/init-session", controller.OIDCAuthFlowController{}.InitSession)
+			oidcAuth := apiOidc.Group("/auth")
+			oidcAuth.POST("/refresh", controller.OIDCAuthFlowController{}.RefreshToken)
+			oidcAuth.POST("/logout", controller.OIDCAuthFlowController{}.Logout)
 
 			// === 社会化登录 ===
 			social := router.Group("/social")

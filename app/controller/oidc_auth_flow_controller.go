@@ -2,6 +2,7 @@ package controller
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
@@ -114,6 +116,43 @@ type AuthInfoResponse struct {
 	} `json:"user"`
 }
 
+// ClientConfigResponse OIDC 登录页客户端配置响应。
+// v1 先用应用基础信息和固定默认值补齐前端契约，不引入额外持久化字段。
+type ClientConfigResponse struct {
+	ClientID         string                 `json:"clientId"`
+	AppName          string                 `json:"appName"`
+	Description      string                 `json:"description,omitempty"`
+	Logo             string                 `json:"logo,omitempty"`
+	Appearance       ClientAppearanceConfig `json:"appearance"`
+	Features         ClientFeaturesConfig   `json:"features"`
+	LoginMethods     ClientLoginMethods     `json:"loginMethods"`
+	SocialProviders  []string               `json:"socialProviders"`
+	Locale           string                 `json:"locale"`
+	PrivacyPolicyURL string                 `json:"privacyPolicyUrl,omitempty"`
+	TermsURL         string                 `json:"termsUrl,omitempty"`
+}
+
+type ClientAppearanceConfig struct {
+	PrimaryColor string `json:"primaryColor,omitempty"`
+	BorderRadius string `json:"borderRadius,omitempty"`
+	DarkMode     string `json:"darkMode,omitempty"`
+}
+
+type ClientFeaturesConfig struct {
+	Registration     bool `json:"registration"`
+	SocialLogin      bool `json:"socialLogin"`
+	IdentityLogin    bool `json:"identityLogin"`
+	RememberMe       bool `json:"rememberMe"`
+	ForgotPassword   bool `json:"forgotPassword"`
+	PasswordStrength bool `json:"passwordStrength"`
+}
+
+type ClientLoginMethods struct {
+	Username bool `json:"username"`
+	Email    bool `json:"email"`
+	Phone    bool `json:"phone"`
+}
+
 // SendVerificationCodeRequest 发送验证码请求
 type SendVerificationCodeRequest struct {
 	SessionID     string             `json:"sessionId" binding:"required"`
@@ -137,6 +176,43 @@ type SendRegisterVerificationCodeRequest struct {
 	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
+func buildClientConfigResponse(app *model.Application) ClientConfigResponse {
+	return ClientConfigResponse{
+		ClientID:    app.UUID,
+		AppName:     app.Name,
+		Description: app.Description,
+		Appearance: ClientAppearanceConfig{
+			PrimaryColor: "#3b82f6",
+			DarkMode:     "auto",
+		},
+		Features: ClientFeaturesConfig{
+			Registration:     true,
+			SocialLogin:      true,
+			IdentityLogin:    true,
+			RememberMe:       true,
+			ForgotPassword:   false,
+			PasswordStrength: true,
+		},
+		LoginMethods: ClientLoginMethods{
+			Username: true,
+			Email:    true,
+			Phone:    false,
+		},
+		SocialProviders: []string{},
+		Locale:          "zh-CN",
+	}
+}
+
+func validateClientConfigSession(clientID string, session *service.OIDCSession) error {
+	if session == nil {
+		return fmt.Errorf("会话已过期或不存在，请重新发起授权")
+	}
+	if session.ClientID != clientID {
+		return fmt.Errorf("会话与客户端不匹配")
+	}
+	return nil
+}
+
 // SendVerificationCodeResponse 发送验证码响应
 type SendVerificationCodeResponse struct {
 	Success bool   `json:"success"`
@@ -158,6 +234,46 @@ type CompleteProfileResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	NextURL string `json:"nextUrl,omitempty"`
+}
+
+// GetClientConfig 获取 OIDC 登录页客户端配置
+// GET /api/oidc/client-config
+func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContextInterface) {
+	clientID := strings.TrimSpace(ctx.Query("client_id"))
+	if clientID == "" {
+		c.Error(ctx, constants.ErrCodeBadRequest, "缺少client_id参数")
+		return
+	}
+
+	if sessionID := strings.TrimSpace(ctx.Query("session_id")); sessionID != "" {
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		session, err := sessionService.GetSession(ctx.Request().Context(), sessionID)
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+			return
+		}
+		if err := validateClientConfigSession(clientID, session); err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+			return
+		}
+	}
+
+	appService := service.NewApplicationService(helper.GetDatabase())
+	app, err := appService.GetApplicationByClientID(clientID)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		}
+		c.Error(ctx, errCode, err.Error())
+		return
+	}
+	if !app.IsActive {
+		c.Error(ctx, constants.ErrCodeForbidden, "应用已被禁用")
+		return
+	}
+
+	c.Success(ctx, buildClientConfigResponse(app))
 }
 
 // Login OIDC登录接口
@@ -1099,7 +1215,7 @@ type RefreshTokenResponse struct {
 }
 
 // RefreshToken 刷新访问令牌
-// POST /api/auth/refresh
+// POST /api/oidc/auth/refresh
 func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInterface) {
 	// 1. 从 Cookie 获取 Refresh Token
 	refreshToken, err := ctx.Cookie("refresh_token")
@@ -1158,7 +1274,7 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 }
 
 // Logout 登出接口
-// POST /api/auth/logout
+// POST /api/oidc/auth/logout
 func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface) {
 	refreshToken, err := ctx.Cookie("refresh_token")
 	if err == nil && refreshToken != "" {

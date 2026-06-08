@@ -1,9 +1,21 @@
 package controller
 
 import (
+	"errors"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/open/go-web/pkg/container"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestBuildLoginVerificationSessionIDIsSceneScoped(t *testing.T) {
@@ -21,3 +33,321 @@ func TestBuildLoginVerificationSessionIDIsSceneScoped(t *testing.T) {
 		t.Fatal("login verification code key must include login scene and session context")
 	}
 }
+
+func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
+	db := registerControllerTestDatabase(t)
+	app := &model.Application{
+		UUID:           "client-a",
+		Name:           "测试应用",
+		Description:    "用于 OIDC 登录页",
+		ProtocolType:   string(model.ProtocolTypeOIDC),
+		ProtocolConfig: map[string]interface{}{"clientId": "client-a"},
+		IsActive:       true,
+	}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+
+	ctx := newTestRouterContext(map[string]string{"client_id": "client-a"})
+	OIDCAuthFlowController{}.GetClientConfig(ctx)
+
+	resp := assertControllerResponse[dto.Response](t, ctx.payload)
+	if ctx.status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", ctx.status, http.StatusOK)
+	}
+	if resp.Code != 0 {
+		t.Fatalf("code = %d, want 0: %s", resp.Code, resp.Message)
+	}
+	data, ok := resp.Data.(ClientConfigResponse)
+	if !ok {
+		t.Fatalf("data type = %T, want ClientConfigResponse", resp.Data)
+	}
+
+	if data.ClientID != "client-a" || data.AppName != "测试应用" || data.Description != "用于 OIDC 登录页" {
+		t.Fatalf("unexpected client identity: %+v", data)
+	}
+	if data.Appearance.PrimaryColor != "#3b82f6" || data.Appearance.DarkMode != "auto" {
+		t.Fatalf("unexpected appearance defaults: %+v", data.Appearance)
+	}
+	if !data.Features.Registration || !data.Features.SocialLogin || !data.Features.IdentityLogin || !data.Features.RememberMe || !data.Features.PasswordStrength {
+		t.Fatalf("expected enabled feature defaults: %+v", data.Features)
+	}
+	if data.Features.ForgotPassword {
+		t.Fatalf("forgot password must default to disabled")
+	}
+	if !data.LoginMethods.Username || !data.LoginMethods.Email || data.LoginMethods.Phone {
+		t.Fatalf("unexpected login method defaults: %+v", data.LoginMethods)
+	}
+	if data.SocialProviders == nil || len(data.SocialProviders) != 0 {
+		t.Fatalf("socialProviders must be an empty array, got %#v", data.SocialProviders)
+	}
+	if data.Locale != "zh-CN" {
+		t.Fatalf("locale = %q, want zh-CN", data.Locale)
+	}
+}
+
+func TestGetClientConfigRejectsUnknownClient(t *testing.T) {
+	registerControllerTestDatabase(t)
+
+	ctx := newTestRouterContext(map[string]string{"client_id": "missing-client"})
+	OIDCAuthFlowController{}.GetClientConfig(ctx)
+
+	resp := assertControllerResponse[dto.Response](t, ctx.payload)
+	if ctx.status != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", ctx.status, http.StatusNotFound)
+	}
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("code = %d, want %d", resp.Code, http.StatusNotFound)
+	}
+}
+
+func TestValidateClientConfigSessionRejectsClientMismatch(t *testing.T) {
+	err := validateClientConfigSession("client-a", &service.OIDCSession{ClientID: "client-b"})
+	if err == nil {
+		t.Fatal("expected mismatch error")
+	}
+	if !strings.Contains(err.Error(), "会话与客户端不匹配") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOIDCRefreshTokenRejectsMissingCookie(t *testing.T) {
+	ctx := newTestRouterContext(nil)
+
+	OIDCAuthFlowController{}.RefreshToken(ctx)
+
+	resp := assertControllerResponse[dto.Response](t, ctx.payload)
+	if ctx.status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", ctx.status, http.StatusUnauthorized)
+	}
+	if resp.Code != http.StatusUnauthorized {
+		t.Fatalf("code = %d, want %d", resp.Code, http.StatusUnauthorized)
+	}
+}
+
+func registerControllerTestDatabase(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Application{}); err != nil {
+		t.Fatalf("migrate applications: %v", err)
+	}
+
+	provider := container.NewSimpleProviderWithPriority(reflect.TypeFor[*gorm.DB](), db, 1000)
+	container.Register(provider)
+	return db
+}
+
+func assertControllerResponse[T any](t *testing.T, payload any) T {
+	t.Helper()
+
+	resp, ok := payload.(T)
+	if !ok {
+		t.Fatalf("payload type = %T, want %T", payload, *new(T))
+	}
+	return resp
+}
+
+type testRouterContext struct {
+	query     map[string]string
+	values    map[string]any
+	headers   http.Header
+	status    int
+	payload   any
+	req       *http.Request
+	aborted   bool
+	sameSite  http.SameSite
+	setCookie []http.Cookie
+}
+
+func newTestRouterContext(query map[string]string) *testRouterContext {
+	req := httptest.NewRequest(http.MethodGet, "/api/oidc/client-config", nil)
+	q := req.URL.Query()
+	for key, value := range query {
+		q.Set(key, value)
+	}
+	req.URL.RawQuery = q.Encode()
+
+	return &testRouterContext{
+		query:   query,
+		values:  map[string]any{},
+		headers: http.Header{},
+		req:     req,
+	}
+}
+
+func (c *testRouterContext) JSON(code int, obj any) {
+	c.status = code
+	c.payload = obj
+}
+
+func (c *testRouterContext) HTML(code int, _ string, obj any) {
+	c.JSON(code, obj)
+}
+
+func (c *testRouterContext) String(code int, format string, values ...any) {
+	c.JSON(code, map[string]any{"format": format, "values": values})
+}
+
+func (c *testRouterContext) Data(code int, _ string, data []byte) {
+	c.JSON(code, data)
+}
+
+func (c *testRouterContext) Redirect(code int, location string) {
+	c.JSON(code, map[string]string{"location": location})
+}
+
+func (c *testRouterContext) File(string) {}
+
+func (c *testRouterContext) Stream(func(w io.Writer) bool) {}
+
+func (c *testRouterContext) Status(code int) {
+	c.status = code
+}
+
+func (c *testRouterContext) Query(key string) string {
+	if c.query != nil {
+		return c.query[key]
+	}
+	return c.req.URL.Query().Get(key)
+}
+
+func (c *testRouterContext) DefaultQuery(key, defaultValue string) string {
+	if value := c.Query(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func (c *testRouterContext) QueryArray(key string) []string {
+	return c.req.URL.Query()[key]
+}
+
+func (c *testRouterContext) PostForm(string) string { return "" }
+
+func (c *testRouterContext) DefaultPostForm(_, defaultValue string) string {
+	return defaultValue
+}
+
+func (c *testRouterContext) ShouldBind(any) error { return nil }
+
+func (c *testRouterContext) ShouldBindJSON(any) error { return nil }
+
+func (c *testRouterContext) ShouldBindQuery(any) error { return nil }
+
+func (c *testRouterContext) GetRawData() ([]byte, error) { return nil, nil }
+
+func (c *testRouterContext) FormFile(string) (*multipart.FileHeader, error) {
+	return nil, errors.New("no file")
+}
+
+func (c *testRouterContext) SaveUploadedFile(*multipart.FileHeader, string) error {
+	return nil
+}
+
+func (c *testRouterContext) Set(key string, value any) {
+	c.values[key] = value
+}
+
+func (c *testRouterContext) Get(key string) any {
+	return c.values[key]
+}
+
+func (c *testRouterContext) GetString(key string) string {
+	value, _ := c.values[key].(string)
+	return value
+}
+
+func (c *testRouterContext) Param(string) string { return "" }
+
+func (c *testRouterContext) Path() string { return c.req.URL.Path }
+
+func (c *testRouterContext) FullPath() string { return c.req.URL.Path }
+
+func (c *testRouterContext) Method() string { return c.req.Method }
+
+func (c *testRouterContext) ClientIP() string { return "127.0.0.1" }
+
+func (c *testRouterContext) RemoteAddr() string { return c.req.RemoteAddr }
+
+func (c *testRouterContext) Host() string { return c.req.Host }
+
+func (c *testRouterContext) Hostname() string { return c.req.Host }
+
+func (c *testRouterContext) Scheme() string { return "http" }
+
+func (c *testRouterContext) URL() string { return c.req.URL.String() }
+
+func (c *testRouterContext) ContentType() string { return "" }
+
+func (c *testRouterContext) UserAgent() string { return c.req.UserAgent() }
+
+func (c *testRouterContext) Referer() string { return c.req.Referer() }
+
+func (c *testRouterContext) IsWebsocket() bool { return false }
+
+func (c *testRouterContext) GetHeader(key string) string {
+	if value := c.headers.Get(key); value != "" {
+		return value
+	}
+	return c.req.Header.Get(key)
+}
+
+func (c *testRouterContext) SetHeader(key, value string) {
+	c.headers.Set(key, value)
+}
+
+func (c *testRouterContext) Cookie(name string) (string, error) {
+	cookie, err := c.req.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+	return cookie.Value, nil
+}
+
+func (c *testRouterContext) SetCookie(name, value string, maxAge int, path, domain string, secure, httpOnly bool) {
+	c.setCookie = append(c.setCookie, http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     path,
+		Domain:   domain,
+		MaxAge:   maxAge,
+		Secure:   secure,
+		HttpOnly: httpOnly,
+	})
+}
+
+func (c *testRouterContext) SetSameSite(mode http.SameSite) {
+	c.sameSite = mode
+}
+
+func (c *testRouterContext) Error(error) {}
+
+func (c *testRouterContext) IsAborted() bool { return c.aborted }
+
+func (c *testRouterContext) Written() bool { return c.payload != nil }
+
+func (c *testRouterContext) GetStatus() int { return c.status }
+
+func (c *testRouterContext) Next() {}
+
+func (c *testRouterContext) Abort() {
+	c.aborted = true
+}
+
+func (c *testRouterContext) AbortWithStatus(code int) {
+	c.aborted = true
+	c.status = code
+}
+
+func (c *testRouterContext) AbortWithStatusJSON(code int, obj any) {
+	c.aborted = true
+	c.JSON(code, obj)
+}
+
+func (c *testRouterContext) Request() *http.Request { return c.req }
+
+func (c *testRouterContext) ResponseWriter() http.ResponseWriter { return nil }
