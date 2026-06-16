@@ -439,6 +439,11 @@ func (s *UserService) ValidateUserForLogin(username, password string) (*dto.User
 	// 根据用户名获取用户
 	user, err := s.userDao.GetByUsername(username)
 	if err != nil {
+		// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
+		// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
+		if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(username, password); legacyErr == nil {
+			return resp, nil
+		}
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 

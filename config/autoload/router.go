@@ -197,6 +197,23 @@ func (receiver Router) InitConfig() map[string]any {
 			adminCaptchaConfigs.PUT("/:id", AdminController.CaptchaConfigController{}.UpdateCaptchaConfig)
 			adminCaptchaConfigs.DELETE("/:id", AdminController.CaptchaConfigController{}.DeleteCaptchaConfig)
 
+			// 数据迁移模块（迁移源 / 旧用户 / 导入任务）
+			adminMigration := admin.Group("/migration")
+			adminMigration.Use(middleware.AdminAuthMiddleware())
+			adminMigration.GET("/sources", AdminController.MigrationController{}.ListSources)
+			adminMigration.POST("/sources", AdminController.MigrationController{}.CreateSource)
+			adminMigration.GET("/sources/:id", AdminController.MigrationController{}.GetSource)
+			adminMigration.PUT("/sources/:id", AdminController.MigrationController{}.UpdateSource)
+			adminMigration.DELETE("/sources/:id", AdminController.MigrationController{}.DeleteSource)
+			adminMigration.POST("/sources/:id/import", AdminController.MigrationController{}.StartImport)
+			adminMigration.POST("/test-script", AdminController.MigrationController{}.TestScript)
+			adminMigration.POST("/test-connection", AdminController.MigrationController{}.TestConnection)
+			adminMigration.GET("/tasks", AdminController.MigrationController{}.ListTasks)
+			adminMigration.GET("/tasks/:id", AdminController.MigrationController{}.GetTask)
+			adminMigration.POST("/tasks/:id/cancel", AdminController.MigrationController{}.CancelTask)
+			adminMigration.GET("/legacy-users", AdminController.MigrationController{}.ListLegacyUsers)
+			adminMigration.GET("/legacy-users/:id", AdminController.MigrationController{}.GetLegacyUser)
+
 			// === 普通用户路由 ===
 			// 公开：/api/user/login
 			userPublic := api.Group("/user")
