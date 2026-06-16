@@ -23,9 +23,9 @@ func TestRunForMapReturnsObject(t *testing.T) {
 	}
 }
 
-func TestCryptoSha256(t *testing.T) {
+func TestPasshashSha256(t *testing.T) {
 	e := NewEngine(0)
-	out, err := e.Run(context.Background(), `return crypto.sha256("abc");`, nil)
+	out, err := e.Run(context.Background(), `return passhash.sha256("abc");`, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

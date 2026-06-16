@@ -7,7 +7,7 @@
 //     内复用，见 Engine.Run 注释）。
 //   - 通过 context + time.AfterFunc + vm.Interrupt() 实现执行超时，避免
 //     管理员脚本里的死循环挂死请求/导入任务。
-//   - 注入 http / crypto / log / console 等便利对象。能力不额外做沙箱限制
+//   - 注入 http / passhash / log / console 等便利对象。能力不额外做沙箱限制
 //     （仅 super_admin 可写脚本），但保留超时这一最后防线。
 package script
 
@@ -111,7 +111,7 @@ func (e *Engine) RunForMap(ctx context.Context, scriptSrc string, input map[stri
 	return m, nil
 }
 
-// installGlobals 注入 input / http / crypto / log / console 全局对象。
+// installGlobals 注入 input / http / passhash / log / console 全局对象。
 func (e *Engine) installGlobals(vm *goja.Runtime, input map[string]any) error {
 	if input == nil {
 		input = map[string]any{}
@@ -122,7 +122,7 @@ func (e *Engine) installGlobals(vm *goja.Runtime, input map[string]any) error {
 	if err := vm.Set("http", e.httpObject(vm)); err != nil {
 		return err
 	}
-	if err := vm.Set("crypto", e.cryptoObject(vm)); err != nil {
+	if err := vm.Set("passhash", e.passhashObject(vm)); err != nil {
 		return err
 	}
 
@@ -212,35 +212,73 @@ func (e *Engine) httpObject(vm *goja.Runtime) *goja.Object {
 	return obj
 }
 
-// cryptoObject 暴露常见哈希/编码/bcrypt 比对，便于校验旧密码格式。
-func (e *Engine) cryptoObject(vm *goja.Runtime) *goja.Object {
+// passhashObject 构造注入脚本的全局 `passhash` 对象，提供常见哈希、HMAC、
+// 密码校验与编码工具，便于迁移脚本校验旧系统的密码格式。
+//
+// 取名 passhash 与后端 Go 包 internal/pkg/passhash 一致，前后端命名统一、便于排查。
+//
+// 在迁移脚本（login_script / transform_script）里可直接用全局 `passhash`：
+//
+// 哈希（返回小写十六进制字符串）：
+//   - passhash.md5(s)            => string   例: passhash.md5(input.password)
+//   - passhash.sha1(s)           => string
+//   - passhash.sha256(s)         => string   例: passhash.sha256(input.password + lu.salt)
+//   - passhash.hmacSha256(key,s) => string   HMAC-SHA256，返回十六进制
+//
+// 密码校验/生成（推荐用于密码场景）：
+//   - passhash.passVerify(hash, password) => bool
+//     用统一密码库(gopasshash)按前缀自动识别 argon2id / bcrypt / pbkdf2
+//     等“标准编码哈希”并校验。旧系统若用这些算法存储，优先用它。
+//     例: if (passhash.passVerify(lu.passwordHash, input.password)) { ... }
+//   - passhash.bcryptCompare(hash, password) => bool
+//     仅比对 bcrypt（$2a$/$2b$/$2y$）哈希；passVerify 已涵盖 bcrypt，
+//     此方法保留用于明确只接受 bcrypt 的场景。
+//   - passhash.passHash(password) => string
+//     用 argon2id 生成新哈希；出错返回空串。一般无需在脚本里调用——
+//     迁移成功后由系统用本次明文自动重哈希为 argon2id。
+//
+// 编码（解码失败返回空串）：
+//   - passhash.hexEncode(s) / passhash.hexDecode(s)       => string
+//   - passhash.base64Encode(s) / passhash.base64Decode(s) => string（标准 base64）
+//
+// 说明：
+//   - 所有入参/返回均为 JS 字符串；哈希类方法把字符串按 UTF-8 字节计算。
+//   - 自定义旧格式（如 sha256(password+salt)）用 passhash.sha256 自行拼接比较；
+//     标准编码格式（argon2id/bcrypt/pbkdf2）用 passhash.passVerify。
+func (e *Engine) passhashObject(vm *goja.Runtime) *goja.Object {
 	obj := vm.NewObject()
 
+	// passhash.md5(s) => 十六进制字符串
 	_ = obj.Set("md5", func(s string) string {
 		sum := md5.Sum([]byte(s))
 		return hex.EncodeToString(sum[:])
 	})
+	// passhash.sha1(s) => 十六进制字符串
 	_ = obj.Set("sha1", func(s string) string {
 		sum := sha1.Sum([]byte(s))
 		return hex.EncodeToString(sum[:])
 	})
+	// passhash.sha256(s) => 十六进制字符串
 	_ = obj.Set("sha256", func(s string) string {
 		sum := sha256.Sum256([]byte(s))
 		return hex.EncodeToString(sum[:])
 	})
+	// passhash.hmacSha256(key, s) => 十六进制字符串
 	_ = obj.Set("hmacSha256", func(key, s string) string {
 		mac := hmac.New(sha256.New, []byte(key))
 		mac.Write([]byte(s))
 		return hex.EncodeToString(mac.Sum(nil))
 	})
+	// passhash.bcryptCompare(hash, password) => bool，仅比对 bcrypt 哈希
 	_ = obj.Set("bcryptCompare", func(hash, password string) bool {
 		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 	})
-	// passVerify 用统一密码库自动识别 argon2id / bcrypt / pbkdf2 等标准编码哈希。
+	// passhash.passVerify(hash, password) => bool
+	// 用统一密码库自动识别 argon2id / bcrypt / pbkdf2 等标准编码哈希并校验。
 	_ = obj.Set("passVerify", func(hash, password string) bool {
 		return passhash.Verify(password, hash)
 	})
-	// passHash 用 argon2id 生成新哈希（按需）。
+	// passhash.passHash(password) => string，用 argon2id 生成新哈希（出错返回 ""）
 	_ = obj.Set("passHash", func(password string) string {
 		h, err := passhash.Hash(password)
 		if err != nil {
@@ -248,16 +286,20 @@ func (e *Engine) cryptoObject(vm *goja.Runtime) *goja.Object {
 		}
 		return h
 	})
+	// passhash.hexEncode(s) => 十六进制字符串
 	_ = obj.Set("hexEncode", func(s string) string {
 		return hex.EncodeToString([]byte(s))
 	})
+	// passhash.hexDecode(s) => 解码后字符串（非法输入返回 ""）
 	_ = obj.Set("hexDecode", func(s string) string {
 		b, _ := hex.DecodeString(s)
 		return string(b)
 	})
+	// passhash.base64Encode(s) => 标准 base64 字符串
 	_ = obj.Set("base64Encode", func(s string) string {
 		return base64.StdEncoding.EncodeToString([]byte(s))
 	})
+	// passhash.base64Decode(s) => 解码后字符串（非法输入返回 ""）
 	_ = obj.Set("base64Decode", func(s string) string {
 		b, _ := base64.StdEncoding.DecodeString(s)
 		return string(b)

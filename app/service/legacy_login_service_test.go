@@ -54,7 +54,7 @@ func TestLegacyLoginDatabaseModePromotesUser(t *testing.T) {
 		Enabled: true,
 		LoginScript: `
 			var lu = input.legacyUser;
-			if (crypto.sha256(input.password + lu.salt) === lu.passwordHash) {
+			if (passhash.sha256(input.password + lu.salt) === lu.passwordHash) {
 				return { success: true, user: { username: lu.username, email: lu.email } };
 			}
 			return { success: false };
