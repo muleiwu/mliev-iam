@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"github.com/dop251/goja"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -234,6 +235,18 @@ func (e *Engine) cryptoObject(vm *goja.Runtime) *goja.Object {
 	})
 	_ = obj.Set("bcryptCompare", func(hash, password string) bool {
 		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	})
+	// passVerify 用统一密码库自动识别 argon2id / bcrypt / pbkdf2 等标准编码哈希。
+	_ = obj.Set("passVerify", func(hash, password string) bool {
+		return passhash.Verify(password, hash)
+	})
+	// passHash 用 argon2id 生成新哈希（按需）。
+	_ = obj.Set("passHash", func(password string) string {
+		h, err := passhash.Hash(password)
+		if err != nil {
+			return ""
+		}
+		return h
 	})
 	_ = obj.Set("hexEncode", func(s string) string {
 		return hex.EncodeToString([]byte(s))

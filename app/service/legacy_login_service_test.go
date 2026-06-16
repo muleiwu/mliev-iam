@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
@@ -88,7 +89,14 @@ func TestLegacyLoginDatabaseModePromotesUser(t *testing.T) {
 		t.Fatalf("unexpected user response: %+v", resp)
 	}
 
-	// 4) 用户应已落库到主 users 表，且密码为原生 bcrypt（再次登录走标准路径）。
+	// 4) 用户应已落库到主 users 表，且密码用 argon2id 重哈希（再次登录走标准路径）。
+	promoted, err := dao.NewUserDao(db).GetByID(resp.ID)
+	if err != nil {
+		t.Fatalf("reload promoted user: %v", err)
+	}
+	if !strings.HasPrefix(promoted.PasswordHash, "$argon2id$") {
+		t.Fatalf("expected argon2id hash after promotion, got %q", promoted.PasswordHash)
+	}
 	resp2, err := userSvc.ValidateUserForLogin(username, password)
 	if err != nil {
 		t.Fatalf("expected native login after promotion, got: %v", err)

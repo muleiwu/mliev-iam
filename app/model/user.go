@@ -44,7 +44,7 @@ type User struct {
 	Avatar   string  `gorm:"size:255" json:"avatar" validate:"max=255"`
 
 	Salt         string `gorm:"size:32" json:"-"`
-	PasswordHash string `gorm:"size:100" json:"-"`
+	PasswordHash string `gorm:"size:255" json:"-"`
 
 	// 状态管理
 	Status          UserStatus `gorm:"default:0;not null" json:"status"`
