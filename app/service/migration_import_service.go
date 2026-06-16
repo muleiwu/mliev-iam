@@ -12,18 +12,21 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/script"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
 
-// runningImports 记录进行中的导入任务，支持取消。key=taskID。
+// runningImports 记录本实例进行中任务的本地 cancel（同实例取消的快路径）。
+// 跨实例取消依赖 Redis 取消标志 + watcher，见 migration_import_lock.go。
 var runningImports sync.Map // map[uint]context.CancelFunc
 
 // MigrationImportService 一次性批量导入服务。
 type MigrationImportService struct {
 	db        *gorm.DB
+	rdb       *redis.Client
 	sourceDao *dao.MigrationSourceDao
 	legacyDao *dao.LegacyUserDao
 	taskDao   *dao.MigrationTaskDao
@@ -32,6 +35,7 @@ type MigrationImportService struct {
 func NewMigrationImportService(db *gorm.DB) *MigrationImportService {
 	return &MigrationImportService{
 		db:        db,
+		rdb:       helper.GetRedis(),
 		sourceDao: dao.NewMigrationSourceDao(db),
 		legacyDao: dao.NewLegacyUserDao(db),
 		taskDao:   dao.NewMigrationTaskDao(db),
@@ -51,6 +55,7 @@ func (s *MigrationImportService) StartImport(sourceID uint) (*model.MigrationTas
 		return nil, fmt.Errorf("迁移源未配置查询语句 (connectionConfig.query)")
 	}
 
+	// DB 层兜底检查（无 Redis 的单实例场景仍可去重）。
 	running, err := s.taskDao.HasRunningTask(sourceID)
 	if err != nil {
 		return nil, err
@@ -67,28 +72,89 @@ func (s *MigrationImportService) StartImport(sourceID uint) (*model.MigrationTas
 		return nil, fmt.Errorf("创建导入任务失败: %w", err)
 	}
 
+	// 抢占源级分布式锁（跨实例互斥）。token 用 taskID，释放/续期时校验持有者。
+	lockToken := fmt.Sprintf("%d", task.ID)
+	ok, lockErr := acquireImportLock(s.rdb, sourceID, lockToken)
+	if lockErr != nil {
+		s.failTask(task.ID, "获取分布式锁失败: "+lockErr.Error())
+		return nil, fmt.Errorf("获取分布式锁失败: %w", lockErr)
+	}
+	if !ok {
+		_ = s.taskDao.UpdateFields(task.ID, map[string]interface{}{
+			"status": model.MigrationTaskStatusFailed,
+			"error":  "该迁移源已有进行中的导入任务（分布式锁）",
+		})
+		return nil, fmt.Errorf("该迁移源已有进行中的导入任务")
+	}
+
 	// 后台执行。复制源以避免外部修改影响。参考 install_controller 的 goroutine 用法。
-	go s.runImport(task.ID, *source)
+	go s.runImport(task.ID, *source, lockToken)
 
 	return task, nil
 }
 
-// CancelImport 请求取消进行中的任务。
+// CancelImport 请求取消任务（跨实例）。写 Redis 取消标志，运行该任务的实例
+// 上的 watcher 会感知并停止；同实例再走本地 cancel 快路径。
 func (s *MigrationImportService) CancelImport(taskID uint) error {
+	task, err := s.taskDao.GetByID(taskID)
+	if err != nil {
+		return fmt.Errorf("任务不存在")
+	}
+	if task.Status != model.MigrationTaskStatusPending && task.Status != model.MigrationTaskStatusRunning {
+		return fmt.Errorf("任务不在运行中")
+	}
+
+	setImportCancelFlag(s.rdb, taskID)
 	if cancel, ok := runningImports.Load(taskID); ok {
 		cancel.(context.CancelFunc)()
-		return nil
 	}
-	return fmt.Errorf("任务不在运行中")
+	return nil
 }
 
 // runImport 是后台导入主循环：连旧库 → 逐行跑 transform_script → upsert legacy_users。
-func (s *MigrationImportService) runImport(taskID uint, source model.MigrationSource) {
+// lockToken 为本任务持有的源级分布式锁令牌，结束时据此安全释放。
+func (s *MigrationImportService) runImport(taskID uint, source model.MigrationSource, lockToken string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runningImports.Store(taskID, cancel)
+
+	// 看门狗：定期续期分布式锁，防止长任务期间锁过期被他人抢占。
+	stopWatchdog := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(importLockRenew)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatchdog:
+				return
+			case <-ticker.C:
+				renewImportLock(s.rdb, source.ID, lockToken)
+			}
+		}
+	}()
+
+	// 取消 watcher：轮询 Redis 取消标志，感知到则本地 cancel（支持跨实例取消）。
+	go func() {
+		ticker := time.NewTicker(importCancelPoll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatchdog:
+				return
+			case <-ticker.C:
+				if isImportCancelRequested(s.rdb, taskID) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
 	defer func() {
 		cancel()
+		close(stopWatchdog)
 		runningImports.Delete(taskID)
+		releaseImportLock(s.rdb, source.ID, lockToken)
+		clearImportCancelFlag(s.rdb, taskID)
 		if r := recover(); r != nil {
 			s.failTask(taskID, fmt.Sprintf("导入异常: %v", r))
 		}
