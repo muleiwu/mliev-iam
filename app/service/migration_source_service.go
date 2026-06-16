@@ -130,13 +130,24 @@ func (s *MigrationSourceService) TestConnection(config map[string]any) (map[stri
 
 	result := map[string]any{"connected": true}
 	if query := asConfigString(config["query"]); query != "" {
-		var rows []map[string]any
-		// 仅取一行做样例预览，避免拉全表。
-		if err := legacyDB.Raw(query).Limit(1).Scan(&rows).Error; err != nil {
+		// 只真正读第一行：Raw 上的 .Limit(1) 对原始 SQL 无效，会把全表拉进内存。
+		// 这里用底层 *sql.Rows，读一行即关闭，驱动随之停止取数。
+		rows, err := sqlDB.Query(query)
+		if err != nil {
 			return nil, fmt.Errorf("执行查询失败: %w", err)
 		}
-		if len(rows) > 0 {
-			result["sampleRow"] = rows[0]
+		defer rows.Close()
+
+		columns, err := rows.Columns()
+		if err != nil {
+			return nil, fmt.Errorf("读取列信息失败: %w", err)
+		}
+		// 返回列名，便于管理员对照转换脚本里的 r.xxx 字段映射（即使表为空也能看到）。
+		result["columns"] = columns
+		if rows.Next() {
+			if sample, scanErr := scanRowToMap(rows, columns); scanErr == nil {
+				result["sampleRow"] = sample
+			}
 		}
 	}
 	return result, nil

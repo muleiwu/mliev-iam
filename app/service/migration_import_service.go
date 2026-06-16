@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -195,11 +196,12 @@ func (s *MigrationImportService) runImport(taskID uint, source model.MigrationSo
 
 	engine := script.NewEngine(0)
 	var processed, succeeded, failed int64
+	errSampler := newErrorSampler()
 
 	for rows.Next() {
 		select {
 		case <-ctx.Done():
-			s.finishTask(taskID, model.MigrationTaskStatusCanceled, processed, succeeded, failed, "任务已取消")
+			s.finishTask(taskID, model.MigrationTaskStatusCanceled, processed, succeeded, failed, errSampler.summary())
 			return
 		default:
 		}
@@ -208,14 +210,17 @@ func (s *MigrationImportService) runImport(taskID uint, source model.MigrationSo
 		if scanErr != nil {
 			failed++
 			processed++
+			errSampler.add("扫描数据行失败: " + scanErr.Error())
 			continue
 		}
 
 		legacyUser, mapErr := s.mapRow(engine, &source, rowMap)
 		if mapErr != nil {
 			failed++
+			errSampler.add("字段映射失败: " + mapErr.Error())
 		} else if err := s.legacyDao.Upsert(legacyUser); err != nil {
 			failed++
+			errSampler.add("写入失败: " + err.Error())
 		} else {
 			succeeded++
 		}
@@ -226,6 +231,7 @@ func (s *MigrationImportService) runImport(taskID uint, source model.MigrationSo
 				"processed": processed,
 				"succeeded": succeeded,
 				"failed":    failed,
+				"error":     errSampler.summary(),
 			})
 		}
 	}
@@ -234,7 +240,7 @@ func (s *MigrationImportService) runImport(taskID uint, source model.MigrationSo
 		return
 	}
 
-	s.finishTask(taskID, model.MigrationTaskStatusSucceeded, processed, succeeded, failed, "")
+	s.finishTask(taskID, model.MigrationTaskStatusSucceeded, processed, succeeded, failed, errSampler.summary())
 }
 
 // mapRow 用 transform_script 把旧行映射为 LegacyUser；未配置脚本时按列名直取。
@@ -357,6 +363,56 @@ func scanRowToMap(rows *sql.Rows, columns []string) (map[string]any, error) {
 		}
 	}
 	return m, nil
+}
+
+// errorSampler 聚合导入过程中的逐行错误：按错误信息归类计数，仅保留前若干种，
+// 用于在任务结束时回填一份可读的失败原因摘要（否则失败只有计数、无从排查）。
+type errorSampler struct {
+	counts map[string]int64
+	order  []string
+	total  int64
+}
+
+const errorSamplerMaxKinds = 5
+
+func newErrorSampler() *errorSampler {
+	return &errorSampler{counts: make(map[string]int64)}
+}
+
+func (s *errorSampler) add(msg string) {
+	s.total++
+	// 截断单条过长的错误，避免摘要膨胀。
+	if len(msg) > 200 {
+		msg = msg[:200] + "…"
+	}
+	if _, ok := s.counts[msg]; !ok {
+		if len(s.order) >= errorSamplerMaxKinds {
+			return // 种类已满，仅累计 total，不再记新种类
+		}
+		s.order = append(s.order, msg)
+	}
+	s.counts[msg]++
+}
+
+// summary 返回形如 "共 N 条失败；映射失败: 缺少 username (×N) | 写入失败: ... (×M)"。
+func (s *errorSampler) summary() string {
+	if s.total == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "共 %d 条失败", s.total)
+	for i, msg := range s.order {
+		if i == 0 {
+			b.WriteString("；")
+		} else {
+			b.WriteString(" | ")
+		}
+		fmt.Fprintf(&b, "%s (×%d)", msg, s.counts[msg])
+	}
+	if int64(len(s.order)) >= errorSamplerMaxKinds {
+		b.WriteString(" | …更多错误已省略")
+	}
+	return b.String()
 }
 
 func asConfigString(v any) string {
