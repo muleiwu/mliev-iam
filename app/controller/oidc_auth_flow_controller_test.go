@@ -101,6 +101,102 @@ func TestGetClientConfigRejectsUnknownClient(t *testing.T) {
 	}
 }
 
+func TestGetClientConfigRejectsMissingClientContext(t *testing.T) {
+	registerControllerTestDatabase(t)
+
+	ctx := newTestRouterContext(nil)
+	OIDCAuthFlowController{}.GetClientConfig(ctx)
+
+	resp := assertControllerResponse[dto.Response](t, ctx.payload)
+	if ctx.status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", ctx.status, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Message, "缺少client_id或session_id参数") {
+		t.Fatalf("message = %q, want missing client context", resp.Message)
+	}
+}
+
+func TestResolveClientConfigClientID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		clientID   string
+		sessionID  string
+		session    *service.OIDCSession
+		sessionErr error
+		want       string
+		wantErr    string
+	}{
+		{
+			name:     "client id only",
+			clientID: "client-a",
+			want:     "client-a",
+		},
+		{
+			name:      "session id only resolves client",
+			sessionID: "session-a",
+			session:   &service.OIDCSession{ClientID: "client-a"},
+			want:      "client-a",
+		},
+		{
+			name:      "client and session must match",
+			clientID:  "client-a",
+			sessionID: "session-a",
+			session:   &service.OIDCSession{ClientID: "client-a"},
+			want:      "client-a",
+		},
+		{
+			name:      "client and session mismatch",
+			clientID:  "client-a",
+			sessionID: "session-a",
+			session:   &service.OIDCSession{ClientID: "client-b"},
+			wantErr:   "会话与客户端不匹配",
+		},
+		{
+			name:    "missing client context",
+			wantErr: "缺少client_id或session_id参数",
+		},
+		{
+			name:       "expired session",
+			sessionID:  "session-a",
+			sessionErr: errors.New("会话已过期"),
+			wantErr:    "无效的会话ID或会话已过期",
+		},
+		{
+			name:      "session without client",
+			sessionID: "session-a",
+			session:   &service.OIDCSession{},
+			wantErr:   "会话缺少客户端信息",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := resolveClientConfigClientID(tt.clientID, tt.sessionID, func(string) (*service.OIDCSession, error) {
+				return tt.session, tt.sessionErr
+			})
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %q, want %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("clientID = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateClientConfigSessionRejectsClientMismatch(t *testing.T) {
 	err := validateClientConfigSession("client-a", &service.OIDCSession{ClientID: "client-b"})
 	if err == nil {
