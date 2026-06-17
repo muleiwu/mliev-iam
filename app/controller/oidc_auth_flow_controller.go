@@ -213,6 +213,39 @@ func validateClientConfigSession(clientID string, session *service.OIDCSession) 
 	return nil
 }
 
+func resolveClientConfigClientID(
+	clientID string,
+	sessionID string,
+	getSession func(string) (*service.OIDCSession, error),
+) (string, error) {
+	clientID = strings.TrimSpace(clientID)
+	sessionID = strings.TrimSpace(sessionID)
+	if clientID == "" && sessionID == "" {
+		return "", fmt.Errorf("缺少client_id或session_id参数，请重新发起授权")
+	}
+	if sessionID == "" {
+		return clientID, nil
+	}
+	if getSession == nil {
+		return "", fmt.Errorf("无法读取授权会话，请重新发起授权")
+	}
+
+	session, err := getSession(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("无效的会话ID或会话已过期")
+	}
+	if session == nil || strings.TrimSpace(session.ClientID) == "" {
+		return "", fmt.Errorf("会话缺少客户端信息，请重新发起授权")
+	}
+	if clientID == "" {
+		return strings.TrimSpace(session.ClientID), nil
+	}
+	if err := validateClientConfigSession(clientID, session); err != nil {
+		return "", err
+	}
+	return clientID, nil
+}
+
 // SendVerificationCodeResponse 发送验证码响应
 type SendVerificationCodeResponse struct {
 	Success bool   `json:"success"`
@@ -239,23 +272,17 @@ type CompleteProfileResponse struct {
 // GetClientConfig 获取 OIDC 登录页客户端配置
 // GET /api/oidc/client-config
 func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContextInterface) {
-	clientID := strings.TrimSpace(ctx.Query("client_id"))
-	if clientID == "" {
-		c.Error(ctx, constants.ErrCodeBadRequest, "缺少client_id参数")
+	clientID, err := resolveClientConfigClientID(
+		ctx.Query("client_id"),
+		ctx.Query("session_id"),
+		func(sessionID string) (*service.OIDCSession, error) {
+			sessionService := service.NewOIDCSessionService(helper.GetRedis())
+			return sessionService.GetSession(ctx.Request().Context(), sessionID)
+		},
+	)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
-	}
-
-	if sessionID := strings.TrimSpace(ctx.Query("session_id")); sessionID != "" {
-		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		session, err := sessionService.GetSession(ctx.Request().Context(), sessionID)
-		if err != nil {
-			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
-			return
-		}
-		if err := validateClientConfigSession(clientID, session); err != nil {
-			c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
-			return
-		}
 	}
 
 	appService := service.NewApplicationService(helper.GetDatabase())
