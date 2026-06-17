@@ -267,6 +267,23 @@ func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterReques
 		return nil, err
 	}
 
+	agreementService := NewAgreementService(s.db)
+	appID, err := agreementService.ResolveApplicationIDFromSession(context.Background(), req.SessionID, s.redis)
+	if err != nil {
+		return nil, err
+	}
+	requiredAgreements, err := agreementService.ListRequiredRegistrationAgreements(appID)
+	if err != nil {
+		return nil, err
+	}
+	acceptedAgreementKeys := req.AcceptedAgreementKeys
+	if len(acceptedAgreementKeys) == 0 && req.AgreePolicy {
+		acceptedAgreementKeys = AgreementKeys(requiredAgreements)
+	}
+	if err := agreementService.EnsureAgreementsAccepted(requiredAgreements, acceptedAgreementKeys); err != nil {
+		return nil, err
+	}
+
 	exists, err := s.userDAO.ExistsUsername(req.Username)
 	if err != nil {
 		return nil, err
@@ -340,6 +357,10 @@ func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterReques
 	if err := accountDAO.Create(account); err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("创建身份源账号绑定失败: %w", err)
+	}
+	if err := NewAgreementService(tx).RecordAcceptances(user.ID, appID, requiredAgreements); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("记录协议同意失败: %w", err)
 	}
 	if err := tx.Commit().Error; err != nil {
 		return nil, fmt.Errorf("提交事务失败: %w", err)

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -17,6 +18,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+var controllerTestDBProviderPriority int64 = 1000
 
 func TestBuildLoginVerificationSessionIDIsSceneScoped(t *testing.T) {
 	phoneSessionA := buildLoginVerificationSessionID("session-a", service.VerificationTypePhone, "13800138000")
@@ -83,6 +86,61 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 	}
 	if data.Locale != "zh-CN" {
 		t.Fatalf("locale = %q, want zh-CN", data.Locale)
+	}
+	if len(data.Agreements) != 0 || data.TermsURL != "" || data.PrivacyPolicyURL != "" {
+		t.Fatalf("disabled default agreements must not be returned: %+v", data)
+	}
+}
+
+func TestGetClientConfigReturnsEnabledAgreementLinks(t *testing.T) {
+	db := registerControllerTestDatabase(t)
+	app := &model.Application{
+		UUID:           "client-a",
+		Name:           "测试应用",
+		ProtocolType:   string(model.ProtocolTypeOIDC),
+		ProtocolConfig: map[string]interface{}{"clientId": "client-a"},
+		IsActive:       true,
+	}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+	if _, err := service.NewAgreementService(db).UpsertGlobalAgreement(model.AgreementCodeTerms, &dto.AgreementUpsertRequest{
+		Title:     "服务协议",
+		ContentMD: "# Terms",
+		Enabled:   true,
+		Sort:      10,
+	}); err != nil {
+		t.Fatalf("upsert global terms: %v", err)
+	}
+	if _, err := service.NewAgreementService(db).CreateApplicationAgreement(app.ID, &dto.AgreementUpsertRequest{
+		Code:      "extra-policy",
+		Title:     "应用协议",
+		ContentMD: "# App",
+		Enabled:   true,
+		Sort:      1,
+	}); err != nil {
+		t.Fatalf("create app agreement: %v", err)
+	}
+
+	ctx := newTestRouterContext(map[string]string{"client_id": "client-a"})
+	OIDCAuthFlowController{}.GetClientConfig(ctx)
+
+	resp := assertControllerResponse[dto.Response](t, ctx.payload)
+	if resp.Code != 0 {
+		t.Fatalf("code = %d, want 0: %s", resp.Code, resp.Message)
+	}
+	data, ok := resp.Data.(ClientConfigResponse)
+	if !ok {
+		t.Fatalf("data type = %T, want ClientConfigResponse", resp.Data)
+	}
+	if data.TermsURL != "/auth/#/agreements/terms" {
+		t.Fatalf("termsUrl = %q", data.TermsURL)
+	}
+	if len(data.Agreements) != 2 {
+		t.Fatalf("agreements len = %d, want 2: %+v", len(data.Agreements), data.Agreements)
+	}
+	if data.Agreements[0].Key != "global:terms" || data.Agreements[1].Key != "application:extra-policy" {
+		t.Fatalf("unexpected agreement order: %+v", data.Agreements)
 	}
 }
 
@@ -228,11 +286,12 @@ func registerControllerTestDatabase(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.Application{}); err != nil {
-		t.Fatalf("migrate applications: %v", err)
+	if err := db.AutoMigrate(&model.Application{}, &model.Agreement{}, &model.AgreementAcceptance{}); err != nil {
+		t.Fatalf("migrate test tables: %v", err)
 	}
 
-	provider := container.NewSimpleProviderWithPriority(reflect.TypeFor[*gorm.DB](), db, 1000)
+	priority := int(atomic.AddInt64(&controllerTestDBProviderPriority, 1))
+	provider := container.NewSimpleProviderWithPriority(reflect.TypeFor[*gorm.DB](), db, priority)
 	container.Register(provider)
 	return db
 }

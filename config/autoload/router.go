@@ -141,6 +141,10 @@ func (receiver Router) InitConfig() map[string]any {
 			adminApps.GET("/:id", AdminController.ApplicationController{}.GetApplication)
 			adminApps.PUT("/:id", AdminController.ApplicationController{}.UpdateApplication)
 			adminApps.DELETE("/:id", AdminController.ApplicationController{}.DeleteApplication)
+			adminApps.GET("/:id/agreements", AdminController.AgreementController{}.ListApplicationAgreements)
+			adminApps.POST("/:id/agreements", AdminController.AgreementController{}.CreateApplicationAgreement)
+			adminApps.PUT("/:id/agreements/:agreementId", AdminController.AgreementController{}.UpdateApplicationAgreement)
+			adminApps.DELETE("/:id/agreements/:agreementId", AdminController.AgreementController{}.DeleteApplicationAgreement)
 			adminApps.GET("/:id/keys", AdminController.ApplicationController{}.GetApplicationKeys)
 			adminApps.POST("/:id/keys/rotate", AdminController.ApplicationController{}.RotateApplicationKey)
 			adminApps.POST("/:id/secret/reset", AdminController.ApplicationController{}.ResetClientSecret)
@@ -186,6 +190,13 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSettings.PUT("/push/config", AdminController.SettingController{}.UpdatePushSettings)
 			adminSettings.GET("/captcha/bindings", AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings)
 			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
+
+			// 管理员协议设置
+			adminAgreements := admin.Group("/agreements")
+			adminAgreements.Use(middleware.AdminAuthMiddleware())
+			adminAgreements.GET("/global", AdminController.AgreementController{}.ListGlobalAgreements)
+			adminAgreements.GET("/global/:code", AdminController.AgreementController{}.GetGlobalAgreement)
+			adminAgreements.PUT("/global/:code", AdminController.AgreementController{}.UpsertGlobalAgreement)
 
 			// 管理员验证码配置
 			adminCaptchaConfigs := admin.Group("/captcha-configs")
@@ -238,6 +249,11 @@ func (receiver Router) InitConfig() map[string]any {
 			// 验证码公开接口
 			captcha := api.Group("/captcha")
 			captcha.POST("/params", controller.CaptchaController{}.GetCaptchaParams)
+
+			// 协议公开接口
+			agreements := api.Group("/agreements")
+			agreements.GET("/global/:code", controller.AgreementController{}.GetGlobalAgreement)
+			agreements.GET("/application", controller.AgreementController{}.GetApplicationAgreement)
 
 			// OIDC 授权流程 API（服务于 /auth 登录 UI）
 			apiOidc := api.Group("/oidc")

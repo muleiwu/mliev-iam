@@ -209,10 +209,6 @@ func (ic IdentityAuthController) RegisterWithProvider(c httpInterfaces.RouterCon
 		ic.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
-	if !req.AgreePolicy {
-		ic.Error(c, constants.ErrCodeBadRequest, "请同意隐私政策和服务条款")
-		return
-	}
 	authService := service.NewIdentityAuthService(helper.GetDatabase(), helper.GetRedis())
 	response, err := authService.RegisterWithProvider(&req)
 	if err != nil {
