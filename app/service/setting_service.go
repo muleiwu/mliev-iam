@@ -222,6 +222,9 @@ func (s *SettingService) UpdateRegisterFieldsSettings(req *dto.UpdateRegisterFie
 		RealName: s.normalizeRegisterFieldConfig(req.RealName, defaults.RealName),
 		Nickname: s.normalizeRegisterFieldConfig(req.Nickname, defaults.Nickname),
 	}
+	if err := s.validateRegisterIdentityFields(config); err != nil {
+		return err
+	}
 
 	configJSON, err := json.Marshal(config)
 	if err != nil {
@@ -295,6 +298,9 @@ func (s *SettingService) ensureRegisterFieldsDefaults(config *dto.RegisterFields
 }
 
 func (s *SettingService) normalizeRegisterFieldConfig(config, defaultConfig dto.RegisterFieldConfig) dto.RegisterFieldConfig {
+	if config.Required {
+		config.Visible = true
+	}
 	if config.Label == "" {
 		config.Label = defaultConfig.Label
 	}
@@ -309,6 +315,25 @@ func (s *SettingService) normalizeRegisterUsernameConfig(config, defaultConfig d
 		return defaultConfig
 	}
 	return s.normalizeRegisterFieldConfig(config, defaultConfig)
+}
+
+func (s *SettingService) validateRegisterIdentityFields(config dto.RegisterFieldsSettings) error {
+	identityFields := []dto.RegisterFieldConfig{config.Username, config.Email, config.Phone}
+
+	hasVisible := false
+	hasRequired := false
+	for _, field := range identityFields {
+		hasVisible = hasVisible || field.Visible
+		hasRequired = hasRequired || field.Required
+	}
+
+	if !hasVisible {
+		return fmt.Errorf("用户名、邮箱、手机号码至少需要开启一个")
+	}
+	if !hasRequired {
+		return fmt.Errorf("用户名、邮箱、手机号码至少需要设置一个必填项")
+	}
+	return nil
 }
 
 // ValidateRegisterFields 验证注册字段是否满足配置要求

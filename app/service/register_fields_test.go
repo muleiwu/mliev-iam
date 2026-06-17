@@ -102,3 +102,83 @@ func TestValidateRegisterFieldsAllowsOptionalUsername(t *testing.T) {
 		t.Fatalf("optional username should pass: %v", err)
 	}
 }
+
+func TestUpdateRegisterFieldsSettingsRejectsNoIdentityVisible(t *testing.T) {
+	svc, _ := newRegisterFieldsTestService(t)
+
+	err := svc.UpdateRegisterFieldsSettings(&dto.UpdateRegisterFieldsRequest{
+		Username: dto.RegisterFieldConfig{
+			Visible:     false,
+			Required:    false,
+			Label:       "用户名",
+			Placeholder: "请输入用户名",
+		},
+		Email: dto.RegisterFieldConfig{
+			Visible:     false,
+			Required:    false,
+			Label:       "邮箱地址",
+			Placeholder: "请输入邮箱地址",
+		},
+		Phone: dto.RegisterFieldConfig{
+			Visible:     false,
+			Required:    false,
+			Label:       "手机号码",
+			Placeholder: "请输入手机号码",
+		},
+		RealName: dto.RegisterFieldConfig{
+			Visible:     true,
+			Required:    true,
+			Label:       "真实姓名",
+			Placeholder: "请输入真实姓名",
+		},
+		Nickname: dto.RegisterFieldConfig{
+			Visible:     false,
+			Required:    false,
+			Label:       "昵称",
+			Placeholder: "请输入昵称",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "至少需要开启一个") {
+		t.Fatalf("err = %v, want identity visible error", err)
+	}
+}
+
+func TestUpdateRegisterFieldsSettingsRejectsNoIdentityRequired(t *testing.T) {
+	svc, _ := newRegisterFieldsTestService(t)
+
+	err := svc.UpdateRegisterFieldsSettings(&dto.UpdateRegisterFieldsRequest{
+		Username: dto.RegisterFieldConfig{
+			Visible:     true,
+			Required:    false,
+			Label:       "用户名",
+			Placeholder: "请输入用户名",
+		},
+		Email: dto.RegisterFieldConfig{
+			Visible:     true,
+			Required:    false,
+			Label:       "邮箱地址",
+			Placeholder: "请输入邮箱地址",
+		},
+		Phone: dto.RegisterFieldConfig{
+			Visible:     false,
+			Required:    false,
+			Label:       "手机号码",
+			Placeholder: "请输入手机号码",
+		},
+		RealName: dto.RegisterFieldConfig{
+			Visible:     true,
+			Required:    true,
+			Label:       "真实姓名",
+			Placeholder: "请输入真实姓名",
+		},
+		Nickname: dto.RegisterFieldConfig{
+			Visible:     false,
+			Required:    false,
+			Label:       "昵称",
+			Placeholder: "请输入昵称",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "至少需要设置一个必填项") {
+		t.Fatalf("err = %v, want identity required error", err)
+	}
+}
