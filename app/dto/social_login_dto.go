@@ -153,13 +153,14 @@ type SocialBindWithLoginRequest struct {
 
 // SocialRegisterRequest 用社交账号注册新账户
 type SocialRegisterRequest struct {
-	BindToken   string `json:"bindToken" binding:"required"`
-	Username    string `json:"username" binding:"required,min=3,max=20"`
-	Email       string `json:"email" binding:"required,email"`
-	Password    string `json:"password" binding:"required,min=6"`
-	RealName    string `json:"realName" binding:"required,min=2,max=20"`
-	AgreePolicy bool   `json:"agreePolicy" binding:"required"`
-	SessionID   string `json:"sessionId,omitempty"` // OIDC会话ID
+	BindToken             string   `json:"bindToken" binding:"required"`
+	Username              string   `json:"username" binding:"required,min=3,max=20"`
+	Email                 string   `json:"email" binding:"required,email"`
+	Password              string   `json:"password" binding:"required,min=6"`
+	RealName              string   `json:"realName" binding:"required,min=2,max=20"`
+	AgreePolicy           bool     `json:"agreePolicy"`
+	AcceptedAgreementKeys []string `json:"acceptedAgreementKeys,omitempty"`
+	SessionID             string   `json:"sessionId,omitempty"` // OIDC会话ID
 }
 
 // SocialBindAccountRequest 绑定社交账号请求（已登录用户）
@@ -182,29 +183,29 @@ type SocialMiniProgramLoginRequest struct {
 
 // MPQRCodeCreateRequest PC 创建扫码登录票据
 type MPQRCodeCreateRequest struct {
-	SessionID string `json:"sessionId,omitempty"` // 可选：OIDC 会话 ID
-	Page      string `json:"page,omitempty"`      // 可选：小程序打开路径，默认由后端设置
+	SessionID  string `json:"sessionId,omitempty"`  // 可选：OIDC 会话 ID
+	Page       string `json:"page,omitempty"`       // 可选：小程序打开路径，默认由后端设置
 	EnvVersion string `json:"envVersion,omitempty"` // 可选：小程序版本 release/trial/develop，默认 release
 }
 
 // MPQRCodeCreateResponse 创建扫码登录票据响应
 type MPQRCodeCreateResponse struct {
-	Ticket    string `json:"ticket"`             // 本次扫码会话唯一标识
-	Scene     string `json:"scene"`              // 传给小程序的 scene 字符串
-	QRCode    string `json:"qrcode,omitempty"`   // data:image/png;base64,... 形式的小程序码（可能为空）
-	ExpiresIn int    `json:"expiresIn"`          // 有效期（秒）
+	Ticket    string `json:"ticket"`           // 本次扫码会话唯一标识
+	Scene     string `json:"scene"`            // 传给小程序的 scene 字符串
+	QRCode    string `json:"qrcode,omitempty"` // data:image/png;base64,... 形式的小程序码（可能为空）
+	ExpiresIn int    `json:"expiresIn"`        // 有效期（秒）
 }
 
 // MPQRCodeStatusResponse 扫码状态查询响应
 // state 可取值：pending / scanned / confirmed / needs_bind / canceled / expired
 type MPQRCodeStatusResponse struct {
-	State     string        `json:"state"`
-	Token     string        `json:"token,omitempty"`     // state == confirmed 时返回 JWT
-	User      *UserResponse `json:"user,omitempty"`      // state == confirmed 时返回用户信息
-	IsNewUser bool          `json:"isNewUser,omitempty"` // 对齐已有 callback 语义
-	BindToken string        `json:"bindToken,omitempty"` // state == needs_bind 时返回
+	State      string         `json:"state"`
+	Token      string         `json:"token,omitempty"`      // state == confirmed 时返回 JWT
+	User       *UserResponse  `json:"user,omitempty"`       // state == confirmed 时返回用户信息
+	IsNewUser  bool           `json:"isNewUser,omitempty"`  // 对齐已有 callback 语义
+	BindToken  string         `json:"bindToken,omitempty"`  // state == needs_bind 时返回
 	SocialInfo *MPSocialBrief `json:"socialInfo,omitempty"` // state == needs_bind 时的社交资料片段
-	SessionID string        `json:"sessionId,omitempty"` // OIDC 会话（透传）
+	SessionID  string         `json:"sessionId,omitempty"`  // OIDC 会话（透传）
 }
 
 // MPSocialBrief 供 PC 在"注册/绑定"抉择页展示的最小社交资料
@@ -222,10 +223,10 @@ type MPQRCodeScanRequest struct {
 
 // MPQRCodeScanResponse 扫码上报响应（小程序端使用）
 type MPQRCodeScanResponse struct {
-	State    string         `json:"state"`               // scanned / already_bound / not_bound
-	Nickname string         `json:"nickname,omitempty"`  // 后台根据 openid 找到的用户昵称（若已绑定）
-	Avatar   string         `json:"avatar,omitempty"`    // 同上
-	PendingAction string    `json:"pendingAction,omitempty"` // login / bind
+	State         string `json:"state"`                   // scanned / already_bound / not_bound
+	Nickname      string `json:"nickname,omitempty"`      // 后台根据 openid 找到的用户昵称（若已绑定）
+	Avatar        string `json:"avatar,omitempty"`        // 同上
+	PendingAction string `json:"pendingAction,omitempty"` // login / bind
 }
 
 // MPQRCodeConfirmRequest 小程序端确认或取消

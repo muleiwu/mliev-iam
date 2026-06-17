@@ -311,12 +311,6 @@ func (sc SocialAuthController) RegisterWithSocial(c httpInterfaces.RouterContext
 		return
 	}
 
-	// 验证隐私政策同意
-	if !req.AgreePolicy {
-		sc.Error(c, constants.ErrCodeBadRequest, "请同意隐私政策和服务条款")
-		return
-	}
-
 	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
 	response, err := authService.RegisterWithSocial(&req)
 	if err != nil {

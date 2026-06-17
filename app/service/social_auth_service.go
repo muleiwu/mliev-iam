@@ -756,6 +756,23 @@ func (s *SocialAuthService) RegisterWithSocial(req *dto.SocialRegisterRequest) (
 		return nil, err
 	}
 
+	agreementService := NewAgreementService(s.db)
+	appID, err := agreementService.ResolveApplicationIDFromSession(context.Background(), req.SessionID, s.redis)
+	if err != nil {
+		return nil, err
+	}
+	requiredAgreements, err := agreementService.ListRequiredRegistrationAgreements(appID)
+	if err != nil {
+		return nil, err
+	}
+	acceptedAgreementKeys := req.AcceptedAgreementKeys
+	if len(acceptedAgreementKeys) == 0 && req.AgreePolicy {
+		acceptedAgreementKeys = AgreementKeys(requiredAgreements)
+	}
+	if err := agreementService.EnsureAgreementsAccepted(requiredAgreements, acceptedAgreementKeys); err != nil {
+		return nil, err
+	}
+
 	// 验证用户名是否已存在
 	existingUser, err := s.userDAO.GetByUsername(req.Username)
 	if err == nil && existingUser != nil {
@@ -827,6 +844,11 @@ func (s *SocialAuthService) RegisterWithSocial(req *dto.SocialRegisterRequest) (
 	if err := accountDAO.Create(account); err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("创建社交账号绑定失败: %w", err)
+	}
+
+	if err := NewAgreementService(tx).RecordAcceptances(user.ID, appID, requiredAgreements); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("记录协议同意失败: %w", err)
 	}
 
 	// 提交事务

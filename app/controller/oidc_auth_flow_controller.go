@@ -17,6 +17,7 @@ import (
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // OIDCAuthFlowController OIDC授权流程控制器
@@ -44,16 +45,17 @@ type LoginByCodeRequest struct {
 
 // RegisterRequest 注册请求
 type RegisterRequest struct {
-	Username      string             `json:"username" binding:"required"`
-	Email         string             `json:"email" binding:"omitempty,email"`
-	EmailCode     string             `json:"emailCode" binding:"omitempty"`
-	Phone         string             `json:"phone" binding:"omitempty"`
-	PhoneCode     string             `json:"phoneCode" binding:"omitempty"`
-	Password      string             `json:"password" binding:"required,min=6"`
-	RealName      string             `json:"realName" binding:"omitempty"`
-	Nickname      string             `json:"nickname" binding:"omitempty"`
-	SessionID     string             `json:"sessionId,omitempty"`
-	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
+	Username              string             `json:"username" binding:"required"`
+	Email                 string             `json:"email" binding:"omitempty,email"`
+	EmailCode             string             `json:"emailCode" binding:"omitempty"`
+	Phone                 string             `json:"phone" binding:"omitempty"`
+	PhoneCode             string             `json:"phoneCode" binding:"omitempty"`
+	Password              string             `json:"password" binding:"required,min=6"`
+	RealName              string             `json:"realName" binding:"omitempty"`
+	Nickname              string             `json:"nickname" binding:"omitempty"`
+	SessionID             string             `json:"sessionId,omitempty"`
+	AcceptedAgreementKeys []string           `json:"acceptedAgreementKeys,omitempty"`
+	CaptchaTicket         *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // RegisterResponse 注册响应
@@ -119,17 +121,18 @@ type AuthInfoResponse struct {
 // ClientConfigResponse OIDC 登录页客户端配置响应。
 // v1 先用应用基础信息和固定默认值补齐前端契约，不引入额外持久化字段。
 type ClientConfigResponse struct {
-	ClientID         string                 `json:"clientId"`
-	AppName          string                 `json:"appName"`
-	Description      string                 `json:"description,omitempty"`
-	Logo             string                 `json:"logo,omitempty"`
-	Appearance       ClientAppearanceConfig `json:"appearance"`
-	Features         ClientFeaturesConfig   `json:"features"`
-	LoginMethods     ClientLoginMethods     `json:"loginMethods"`
-	SocialProviders  []string               `json:"socialProviders"`
-	Locale           string                 `json:"locale"`
-	PrivacyPolicyURL string                 `json:"privacyPolicyUrl,omitempty"`
-	TermsURL         string                 `json:"termsUrl,omitempty"`
+	ClientID         string                    `json:"clientId"`
+	AppName          string                    `json:"appName"`
+	Description      string                    `json:"description,omitempty"`
+	Logo             string                    `json:"logo,omitempty"`
+	Appearance       ClientAppearanceConfig    `json:"appearance"`
+	Features         ClientFeaturesConfig      `json:"features"`
+	LoginMethods     ClientLoginMethods        `json:"loginMethods"`
+	SocialProviders  []string                  `json:"socialProviders"`
+	Locale           string                    `json:"locale"`
+	PrivacyPolicyURL string                    `json:"privacyPolicyUrl,omitempty"`
+	TermsURL         string                    `json:"termsUrl,omitempty"`
+	Agreements       []dto.ClientAgreementLink `json:"agreements"`
 }
 
 type ClientAppearanceConfig struct {
@@ -176,8 +179,8 @@ type SendRegisterVerificationCodeRequest struct {
 	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
-func buildClientConfigResponse(app *model.Application) ClientConfigResponse {
-	return ClientConfigResponse{
+func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAgreementLink) ClientConfigResponse {
+	response := ClientConfigResponse{
 		ClientID:    app.UUID,
 		AppName:     app.Name,
 		Description: app.Description,
@@ -200,7 +203,22 @@ func buildClientConfigResponse(app *model.Application) ClientConfigResponse {
 		},
 		SocialProviders: []string{},
 		Locale:          "zh-CN",
+		Agreements:      agreements,
 	}
+
+	for _, agreement := range agreements {
+		if agreement.Scope != string(model.AgreementScopeGlobal) {
+			continue
+		}
+		switch agreement.Code {
+		case model.AgreementCodePrivacy:
+			response.PrivacyPolicyURL = agreement.URL
+		case model.AgreementCodeTerms:
+			response.TermsURL = agreement.URL
+		}
+	}
+
+	return response
 }
 
 func validateClientConfigSession(clientID string, session *service.OIDCSession) error {
@@ -285,7 +303,8 @@ func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContext
 		return
 	}
 
-	appService := service.NewApplicationService(helper.GetDatabase())
+	db := helper.GetDatabase()
+	appService := service.NewApplicationService(db)
 	app, err := appService.GetApplicationByClientID(clientID)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
@@ -300,7 +319,14 @@ func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContext
 		return
 	}
 
-	c.Success(ctx, buildClientConfigResponse(app))
+	agreementService := service.NewAgreementService(db)
+	agreementLinks, err := agreementService.BuildClientAgreementLinks(app)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "获取协议配置失败: "+err.Error())
+		return
+	}
+
+	c.Success(ctx, buildClientConfigResponse(app, agreementLinks))
 }
 
 // Login OIDC登录接口
@@ -493,14 +519,23 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 1. 如果有sessionId，验证会话是否存在
+	var registrationAppID *uint
+
+	// 1. 如果有sessionId，验证会话是否存在并解析应用
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		_, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+		session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
 		if err != nil {
 			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 			return
 		}
+		appService := service.NewApplicationService(helper.GetDatabase())
+		app, err := appService.GetApplicationByClientID(session.ClientID)
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话应用")
+			return
+		}
+		registrationAppID = &app.ID
 	}
 
 	// 2. 根据配置验证注册字段
@@ -515,6 +550,13 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	}
 
 	if err := settingService.ValidateRegisterFields(createUserReq); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	agreementService := service.NewAgreementService(helper.GetDatabase())
+	requiredAgreements, err := agreementService.ValidateRegistrationAcceptance(registrationAppID, req.AcceptedAgreementKeys)
+	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
@@ -543,9 +585,21 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		}
 	}
 
-	// 4. 创建用户
-	userService := service.NewUserService(helper.GetDatabase())
-	userResponse, err := userService.CreateUser(createUserReq)
+	// 4. 创建用户并记录协议同意
+	var userResponse *dto.UserResponse
+	err = helper.GetDatabase().Transaction(func(tx *gorm.DB) error {
+		txUserService := service.NewUserService(tx)
+		resp, err := txUserService.CreateUser(createUserReq)
+		if err != nil {
+			return err
+		}
+		txAgreementService := service.NewAgreementService(tx)
+		if err := txAgreementService.RecordAcceptances(resp.ID, registrationAppID, requiredAgreements); err != nil {
+			return err
+		}
+		userResponse = resp
+		return nil
+	})
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
