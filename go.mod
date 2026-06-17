@@ -12,6 +12,7 @@ require (
 	github.com/mliev-sdk/push-go v1.0.0
 	github.com/muleiwu/gomander v1.0.0
 	github.com/muleiwu/gopasshash v0.0.1
+	github.com/nyaruka/phonenumbers v1.8.0
 	github.com/pressly/goose/v3 v3.27.0
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/spf13/viper v1.21.0

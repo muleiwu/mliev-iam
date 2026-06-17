@@ -196,7 +196,7 @@ func buildClientConfigResponse(app *model.Application) ClientConfigResponse {
 		LoginMethods: ClientLoginMethods{
 			Username: true,
 			Email:    true,
-			Phone:    false,
+			Phone:    true,
 		},
 		SocialProviders: []string{},
 		Locale:          "zh-CN",

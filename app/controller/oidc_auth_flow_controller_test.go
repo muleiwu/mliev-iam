@@ -75,7 +75,7 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 	if data.Features.ForgotPassword {
 		t.Fatalf("forgot password must default to disabled")
 	}
-	if !data.LoginMethods.Username || !data.LoginMethods.Email || data.LoginMethods.Phone {
+	if !data.LoginMethods.Username || !data.LoginMethods.Email || !data.LoginMethods.Phone {
 		t.Fatalf("unexpected login method defaults: %+v", data.LoginMethods)
 	}
 	if data.SocialProviders == nil || len(data.SocialProviders) != 0 {

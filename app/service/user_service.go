@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"gorm.io/gorm"
 )
@@ -33,6 +34,11 @@ func NewUserService(database *gorm.DB) *UserService {
 
 // CreateUser 创建用户
 func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse, error) {
+	// 校验账户格式：禁止纯数字、禁止含 "@"（保证登录标识符判断无歧义）
+	if err := utils.ValidateUsernameFormat(req.Username); err != nil {
+		return nil, err
+	}
+
 	// 验证用户名是否已存在
 	exists, err := s.userDao.ExistsUsername(req.Username)
 	if err != nil {
@@ -53,8 +59,14 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		}
 	}
 
-	// 验证手机号是否已存在
+	// 规范化手机号为 E.164 并验证是否已存在
 	if req.Phone != "" {
+		normalized, err := utils.NormalizePhoneToE164(req.Phone, utils.DefaultPhoneRegion)
+		if err != nil {
+			return nil, err
+		}
+		req.Phone = normalized
+
 		exists, err = s.userDao.ExistsPhone(req.Phone)
 		if err != nil {
 			return nil, fmt.Errorf("检查手机号失败: %w", err)
@@ -156,8 +168,14 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 		user.Email = nil
 	}
 
-	// 验证手机号是否已存在（排除自己）
+	// 规范化手机号为 E.164 并验证是否已存在（排除自己）
 	if req.Phone != "" {
+		normalized, err := utils.NormalizePhoneToE164(req.Phone, utils.DefaultPhoneRegion)
+		if err != nil {
+			return nil, err
+		}
+		req.Phone = normalized
+
 		// 检查是否与当前值不同
 		needUpdate := true
 		if user.Phone != nil && *user.Phone == req.Phone {
@@ -440,16 +458,32 @@ func (s *UserService) verifyPassword(password, salt, hash string) bool {
 	return ok
 }
 
-// ValidateUserForLogin 验证用户登录
-func (s *UserService) ValidateUserForLogin(username, password string) (*dto.UserResponse, error) {
-	// 根据用户名获取用户
-	user, err := s.userDao.GetByUsername(username)
-	if err != nil {
-		// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
-		// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
-		if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(username, password); legacyErr == nil {
-			return resp, nil
+// ValidateUserForLogin 验证用户登录。
+// account 可以是 用户名 / 手机号 / 邮箱，按输入自动判断类型查找用户。
+// 因用户账户(username) 禁止全数字、禁止含 "@"，三类标识符不会冲突。
+func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserResponse, error) {
+	// 根据标识符类型获取用户
+	var (
+		user *model.User
+		err  error
+	)
+	switch utils.DetectLoginIdentifier(account) {
+	case utils.LoginIdentifierPhone:
+		user, err = s.userDao.GetByPhone(account)
+	case utils.LoginIdentifierEmail:
+		user, err = s.userDao.GetByEmail(account)
+	default:
+		user, err = s.userDao.GetByUsername(account)
+		if err != nil {
+			// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
+			// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
+			// 仅用户名分支支持旧系统迁移登录。
+			if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(account, password); legacyErr == nil {
+				return resp, nil
+			}
 		}
+	}
+	if err != nil {
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 
