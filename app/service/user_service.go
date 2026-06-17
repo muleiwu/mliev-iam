@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
@@ -30,6 +31,36 @@ func NewUserService(database *gorm.DB) *UserService {
 		roleDao:     dao.NewRoleDao(database),
 		database:    database,
 	}
+}
+
+// GenerateAvailableUsername 生成符合账户格式且未被占用的内部用户名。
+func (s *UserService) GenerateAvailableUsername() (string, error) {
+	return s.generateAvailableUsername(utils.GenerateUUIDv7)
+}
+
+func (s *UserService) generateAvailableUsername(generateID func() (string, error)) (string, error) {
+	for i := 0; i < 5; i++ {
+		id, err := generateID()
+		if err != nil {
+			return "", fmt.Errorf("生成用户名失败: %w", err)
+		}
+
+		token := strings.ReplaceAll(id, "-", "")
+		if len(token) < 16 {
+			return "", fmt.Errorf("生成用户名失败: 随机标识长度不足")
+		}
+
+		username := "u_" + token[:16]
+		exists, err := s.userDao.ExistsUsername(username)
+		if err != nil {
+			return "", fmt.Errorf("检查用户名失败: %w", err)
+		}
+		if !exists {
+			return username, nil
+		}
+	}
+
+	return "", fmt.Errorf("生成用户名失败: 用户名冲突")
 }
 
 // CreateUser 创建用户
