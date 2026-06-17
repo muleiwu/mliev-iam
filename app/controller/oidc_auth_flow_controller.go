@@ -45,7 +45,7 @@ type LoginByCodeRequest struct {
 
 // RegisterRequest 注册请求
 type RegisterRequest struct {
-	Username              string             `json:"username" binding:"required"`
+	Username              string             `json:"username" binding:"omitempty"`
 	Email                 string             `json:"email" binding:"omitempty,email"`
 	EmailCode             string             `json:"emailCode" binding:"omitempty"`
 	Phone                 string             `json:"phone" binding:"omitempty"`
@@ -541,7 +541,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	// 2. 根据配置验证注册字段
 	settingService := service.NewSettingService(helper.GetDatabase())
 	createUserReq := &dto.CreateUserRequest{
-		Username: req.Username,
+		Username: strings.TrimSpace(req.Username),
 		Email:    req.Email,
 		Password: req.Password,
 		RealName: req.RealName,
@@ -552,6 +552,16 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	if err := settingService.ValidateRegisterFields(createUserReq); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
 		return
+	}
+
+	if createUserReq.Username == "" {
+		userService := service.NewUserService(helper.GetDatabase())
+		generatedUsername, err := userService.GenerateAvailableUsername()
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeInternal, err.Error())
+			return
+		}
+		createUserReq.Username = generatedUsername
 	}
 
 	agreementService := service.NewAgreementService(helper.GetDatabase())

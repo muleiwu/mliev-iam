@@ -12,6 +12,7 @@ type RegisterFieldConfig struct {
 
 // RegisterFieldsSettings 注册字段配置集合
 type RegisterFieldsSettings struct {
+	Username RegisterFieldConfig `json:"username"`
 	Email    RegisterFieldConfig `json:"email"`
 	Phone    RegisterFieldConfig `json:"phone"`
 	RealName RegisterFieldConfig `json:"realName"`
@@ -46,6 +47,7 @@ type CreateSettingRequest struct {
 
 // UpdateRegisterFieldsRequest 更新注册字段配置请求
 type UpdateRegisterFieldsRequest struct {
+	Username RegisterFieldConfig `json:"username"`
 	Email    RegisterFieldConfig `json:"email"`
 	Phone    RegisterFieldConfig `json:"phone"`
 	RealName RegisterFieldConfig `json:"realName"`
