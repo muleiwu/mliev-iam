@@ -1,8 +1,14 @@
 FROM node:22-slim AS builder-web
 
 ENV TZ=Asia/Shanghai
+# 非交互构建：关闭 corepack 下载确认提示，避免卡住
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
-RUN npm i -g corepack
+# 用最新 corepack（旧版可能缺 pnpm 新版本的签名密钥）并启用，
+# 之后 pnpm 会按各项目 package.json 的 packageManager 字段自动选版本：
+#   - admin-web      → pnpm@10.14.0
+#   - frontend-oidc  → pnpm@10.27.0
+RUN npm i -g corepack@latest && corepack enable
 
 WORKDIR /app
 
@@ -23,7 +29,7 @@ RUN pnpm config set registry https://mirrors.cloud.tencent.com/npm/ && \
 
 
 # 构建阶段
-FROM golang:1.25-alpine AS builder-go
+FROM golang:1.26-alpine AS builder-go
 
 # 设置工作目录
 WORKDIR /app
