@@ -251,7 +251,8 @@ func (h *OIDCProtocolHandler) ValidateClient(app *model.Application, clientSecre
 //   - 必须是注册白名单内的 URI
 //   - 禁止 fragment（#...）
 //   - 比较方式为规范化后精确匹配：scheme + host + path + query（query 允许客户端附加则在注册时预先声明）
-//   - localhost / 自定义 scheme 走原始精确比较以兼容 native app
+//   - RFC 8252 §7.3：http + loopback IP 字面量（127.0.0.1 / ::1）忽略端口比较，
+//     以支持 native app 监听随机本地端口；localhost 域名不放宽
 func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redirectURI string) error {
 	config := app.ProtocolConfig
 	redirectUris, ok := config["redirectUris"].([]interface{})
@@ -277,8 +278,29 @@ func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redire
 		if normalizeRedirectURI(registered) == incomingNorm {
 			return nil
 		}
+		if matchLoopbackRedirectURI(registered, incoming) {
+			return nil
+		}
 	}
 	return errors.New("无效的重定向URI")
+}
+
+// matchLoopbackRedirectURI RFC 8252 §7.3：注册 URI 与传入 URI 均为 http + 同一
+// loopback IP 字面量时忽略端口，其余部分（path、query）仍按规范化精确匹配
+func matchLoopbackRedirectURI(registered, incoming *url.URL) bool {
+	if strings.ToLower(registered.Scheme) != "http" || strings.ToLower(incoming.Scheme) != "http" {
+		return false
+	}
+	regHost := strings.ToLower(registered.Hostname())
+	if !isLoopbackIP(regHost) || regHost != strings.ToLower(incoming.Hostname()) {
+		return false
+	}
+	return normalizeRedirectURIWithoutPort(registered) == normalizeRedirectURIWithoutPort(incoming)
+}
+
+// isLoopbackIP 仅认可 RFC 8252 §7.3 的 loopback IP 字面量，不包含 localhost 域名
+func isLoopbackIP(hostname string) bool {
+	return hostname == "127.0.0.1" || hostname == "::1"
 }
 
 // parseAndValidateRedirectURI 解析并检查 URI 的结构层面合规性
@@ -301,8 +323,16 @@ func parseAndValidateRedirectURI(raw string) (*url.URL, error) {
 
 // normalizeRedirectURI 规范化用于比较：大小写化 scheme/host、去尾部多余斜杠
 func normalizeRedirectURI(u *url.URL) string {
+	return normalizeRedirectURIHost(u, strings.ToLower(u.Host))
+}
+
+// normalizeRedirectURIWithoutPort 同 normalizeRedirectURI，但 host 只取主机名（用于 loopback 忽略端口比较）
+func normalizeRedirectURIWithoutPort(u *url.URL) string {
+	return normalizeRedirectURIHost(u, strings.ToLower(u.Hostname()))
+}
+
+func normalizeRedirectURIHost(u *url.URL, host string) string {
 	scheme := strings.ToLower(u.Scheme)
-	host := strings.ToLower(u.Host)
 	path := u.EscapedPath()
 	if path == "" && (scheme == "http" || scheme == "https") {
 		path = "/"
