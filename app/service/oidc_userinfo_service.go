@@ -221,6 +221,7 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse
 			"address",
 		},
 		CodeChallengeMethodsSupported: codeChallengeMethods,
+		PromptValuesSupported:         []string{"none", "login", "consent", "select_account", "create"},
 	}
 }
 

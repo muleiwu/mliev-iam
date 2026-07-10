@@ -173,6 +173,7 @@ type OIDCDiscoveryResponse struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
+	PromptValuesSupported             []string `json:"prompt_values_supported,omitempty"`
 }
 
 // ============== OIDC Introspection DTOs ==============

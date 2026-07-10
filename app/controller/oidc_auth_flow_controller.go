@@ -54,15 +54,22 @@ type RegisterRequest struct {
 	RealName              string             `json:"realName" binding:"omitempty"`
 	Nickname              string             `json:"nickname" binding:"omitempty"`
 	SessionID             string             `json:"sessionId,omitempty"`
+	RememberMe            bool               `json:"rememberMe"` // 记住我
 	AcceptedAgreementKeys []string           `json:"acceptedAgreementKeys,omitempty"`
 	CaptchaTicket         *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // RegisterResponse 注册响应
 type RegisterResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	UserID  uint   `json:"userId,omitempty"`
+	Success                   bool     `json:"success"`
+	Message                   string   `json:"message"`
+	UserID                    uint     `json:"userId,omitempty"`
+	AutoLogin                 bool     `json:"autoLogin,omitempty"`
+	NextURL                   string   `json:"nextUrl,omitempty"`
+	AccessToken               string   `json:"accessToken,omitempty"`
+	ExpiresIn                 int64    `json:"expiresIn,omitempty"`
+	RequiresProfileCompletion bool     `json:"requiresProfileCompletion,omitempty"`
+	MissingFields             []string `json:"missingFields,omitempty"`
 }
 
 // LoginResponse 登录响应
@@ -520,6 +527,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	}
 
 	var registrationAppID *uint
+	var oidcSession *service.OIDCSession
 
 	// 1. 如果有sessionId，验证会话是否存在并解析应用
 	if req.SessionID != "" {
@@ -536,6 +544,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 			return
 		}
 		registrationAppID = &app.ID
+		oidcSession = session
 	}
 
 	// 2. 根据配置验证注册字段
@@ -624,11 +633,12 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 5. 如果有会话，标记为已认证
-	if req.SessionID != "" {
+	// 5. 如果有会话，自动登录并衔接授权流程（生成 token、写 refresh_token cookie、返回 NextURL）
+	if req.SessionID != "" && oidcSession != nil {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), req.SessionID, userResponse.ID); err != nil {
-			// 注册成功但更新会话失败，仍返回成功
+		loginResp, err := c.completeOIDCLogin(ctx, sessionService, oidcSession, req.SessionID, userResponse, req.RememberMe)
+		if err != nil {
+			// 注册成功但自动登录失败，降级为手动登录
 			response := RegisterResponse{
 				Success: true,
 				Message: "注册成功，但会话更新失败，请重新登录",
@@ -637,6 +647,19 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 			c.Success(ctx, response)
 			return
 		}
+
+		c.Success(ctx, RegisterResponse{
+			Success:                   true,
+			Message:                   "注册成功",
+			UserID:                    userResponse.ID,
+			AutoLogin:                 true,
+			NextURL:                   loginResp.NextURL,
+			AccessToken:               loginResp.AccessToken,
+			ExpiresIn:                 loginResp.ExpiresIn,
+			RequiresProfileCompletion: loginResp.RequiresProfileCompletion,
+			MissingFields:             loginResp.MissingFields,
+		})
+		return
 	}
 
 	// 6. 返回成功响应
@@ -1557,6 +1580,7 @@ type InitSessionRequest struct {
 	Nonce               string `json:"nonce"`
 	CodeChallenge       string `json:"codeChallenge"`
 	CodeChallengeMethod string `json:"codeChallengeMethod"`
+	Prompt              string `json:"prompt"`
 }
 
 // InitSessionResponse 初始化OIDC会话响应
@@ -1594,7 +1618,7 @@ func (c OIDCAuthFlowController) InitSession(ctx httpInterfaces.RouterContextInte
 		req.ResponseType,
 		req.CodeChallenge,
 		req.CodeChallengeMethod,
-		"",
+		req.Prompt,
 	)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "创建会话失败: "+err.Error())
