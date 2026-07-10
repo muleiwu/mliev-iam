@@ -147,6 +147,11 @@ func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUs
 		if req.Nickname == "" {
 			req.Nickname = legacyUser.Nickname
 		}
+		// 记录旧系统身份映射：业务系统可经 OIDC userinfo 拿到 legacy_external_id 完成用户映射。
+		req.Attributes = map[string]interface{}{
+			"legacy_external_id": legacyUser.ExternalID,
+			"legacy_source_id":   source.ID,
+		}
 	}
 
 	resp, err := s.userService.CreateUser(req)

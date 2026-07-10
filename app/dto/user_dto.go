@@ -16,6 +16,9 @@ type CreateUserRequest struct {
 	Avatar   string `json:"avatar" validate:"max=255" binding:"omitempty"`
 	Password string `json:"password" validate:"required,min=6" binding:"required"`
 	Remark   string `json:"remark" binding:"omitempty"`
+	// Attributes 扩展属性，写入用户 attributes（如旧系统身份映射信息）。
+	// 保留键 email_verified / phone_number_verified 会在落库时被过滤。
+	Attributes map[string]interface{} `json:"attributes" binding:"omitempty"`
 }
 
 // UpdateUserRequest 更新用户请求

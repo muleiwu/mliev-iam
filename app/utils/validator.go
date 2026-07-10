@@ -108,3 +108,37 @@ func NormalizePhoneToE164(input, defaultRegion string) (string, error) {
 	}
 	return phonenumbers.Format(num, phonenumbers.E164), nil
 }
+
+// PhoneLoginCandidates 为手机号型登录标识符生成候选匹配集，用于兼容旧系统里可能存的
+// 不同手机号格式（原始输入 / E.164 带国家码 / 去国家码裸号）。返回值总是包含原始输入（去重）。
+// 输入非合法手机号时仅返回原始输入。
+func PhoneLoginCandidates(input string) []string {
+	value := strings.TrimSpace(input)
+	candidates := []string{value}
+	seen := map[string]struct{}{value: {}}
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		candidates = append(candidates, v)
+	}
+
+	region := DefaultPhoneRegion
+	if strings.HasPrefix(value, "+") {
+		region = "" // 含国家码，无需默认地区
+	}
+	num, err := phonenumbers.Parse(value, region)
+	if err != nil || !phonenumbers.IsValidNumber(num) {
+		return candidates
+	}
+	// E.164 形式（+8613800138000）
+	add(phonenumbers.Format(num, phonenumbers.E164))
+	// 去国家码裸号（13800138000）
+	add(phonenumbers.GetNationalSignificantNumber(num))
+	return candidates
+}

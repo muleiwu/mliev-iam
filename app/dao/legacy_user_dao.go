@@ -2,6 +2,7 @@ package dao
 
 import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"gorm.io/gorm"
 )
 
@@ -53,10 +54,13 @@ func (dao *LegacyUserDao) GetPendingByUsername(sourceID uint, username string) (
 }
 
 // GetPendingByIdentifier 取某源下未迁移、且 username/email/phone 任一匹配的旧用户。
+// phone 列做候选集匹配：旧系统导入的多为裸号格式，登录标识符可能被前端规范化为 E.164，
+// 因此按 原始输入 / E.164 / 去国家码裸号 三种形式匹配。
 func (dao *LegacyUserDao) GetPendingByIdentifier(sourceID uint, identifier string) (*model.LegacyUser, error) {
 	var u model.LegacyUser
+	phoneCandidates := utils.PhoneLoginCandidates(identifier)
 	err := dao.db.Where("source_id = ? AND status <> ?", sourceID, model.LegacyUserStatusMigrated).
-		Where("username = ? OR email = ? OR phone = ?", identifier, identifier, identifier).
+		Where("username = ? OR email = ? OR phone IN ?", identifier, identifier, phoneCandidates).
 		First(&u).Error
 	if err != nil {
 		return nil, err
