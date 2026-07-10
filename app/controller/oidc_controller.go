@@ -63,8 +63,13 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
-	// 3. prompt=none：不允许显示任何 UI
-	if req.Prompt == "none" {
+	// 3. prompt=none：不允许显示任何 UI（OIDC Core 规定 none 不得与其他值组合）
+	if promptHas(req.Prompt, "none") {
+		if len(strings.Fields(req.Prompt)) > 1 {
+			sessionService.DeleteSession(rctx, session.SessionID)
+			oc.redirectWithError(c, req.RedirectURI, "invalid_request", "prompt=none 不能与其他值组合", req.State)
+			return
+		}
 		if ok := oc.trySSO(c, sessionService, session, req, true); ok {
 			return
 		}
@@ -73,14 +78,24 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
-	// 4. 非 prompt=login 时尝试 SSO 自动认证（不中断交互式流程，仅标记会话）
-	if req.Prompt != "login" {
+	// 4. prompt=login 强制重新认证、prompt=create 直达注册，其余尝试 SSO 自动认证（不中断交互式流程，仅标记会话）
+	if !promptHas(req.Prompt, "login") && !promptHas(req.Prompt, "create") {
 		_ = oc.trySSO(c, sessionService, session, req, false)
 	}
 
 	// 5. 重定向到统一的前端授权入口（编排器）
 	authorizeURL := "/auth/#/oidc/authorize?session_id=" + session.SessionID
 	c.Redirect(http.StatusFound, authorizeURL)
+}
+
+// promptHas 判断空格分隔的 prompt 参数中是否包含指定值（OIDC Core §3.1.2.1）
+func promptHas(prompt, value string) bool {
+	for _, p := range strings.Fields(prompt) {
+		if p == value {
+			return true
+		}
+	}
+	return false
 }
 
 // Token OIDC令牌端点

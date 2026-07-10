@@ -135,6 +135,7 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		Status:       model.UserStatusActive,
 		IsActivated:  true,
 		Remark:       req.Remark,
+		Attributes:   filterCreateAttributes(req.Attributes),
 	}
 
 	// 保存到数据库
@@ -145,6 +146,31 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 	// 转换为响应DTO
 	response := dto.ConvertToUserResponse(user)
 	return &response, nil
+}
+
+// reservedCreateAttributeKeys 创建用户时禁止外部写入的扩展属性键。
+// 邮箱/手机验证状态只能经验证流程置位，避免导入数据篡改 verified 语义。
+var reservedCreateAttributeKeys = map[string]struct{}{
+	"email_verified":        {},
+	"phone_number_verified": {},
+}
+
+// filterCreateAttributes 过滤保留键后返回可安全落库的扩展属性；输入为空或过滤后为空时返回 nil。
+func filterCreateAttributes(attrs map[string]interface{}) model.JSONObject {
+	if len(attrs) == 0 {
+		return nil
+	}
+	filtered := make(model.JSONObject, len(attrs))
+	for k, v := range attrs {
+		if _, reserved := reservedCreateAttributeKeys[k]; reserved {
+			continue
+		}
+		filtered[k] = v
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // GetUserByID 根据ID获取用户
@@ -505,16 +531,14 @@ func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserR
 		user, err = s.userDao.GetByEmail(account)
 	default:
 		user, err = s.userDao.GetByUsername(account)
-		if err != nil {
-			// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
-			// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
-			// 仅用户名分支支持旧系统迁移登录。
-			if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(account, password); legacyErr == nil {
-				return resp, nil
-			}
-		}
 	}
 	if err != nil {
+		// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
+		// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
+		// 用户名 / 手机号 / 邮箱三类标识符均支持旧系统迁移登录。
+		if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(account, password); legacyErr == nil {
+			return resp, nil
+		}
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 

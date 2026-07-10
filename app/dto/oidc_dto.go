@@ -138,6 +138,9 @@ type UserInfoResponse struct {
 	PhoneNumberVerified bool     `json:"phone_number_verified,omitempty"`
 	Address             *Address `json:"address,omitempty"`
 	UpdatedAt           int64    `json:"updated_at,omitempty"`
+	// LegacyExternalID 旧系统用户 ID（external_id），仅在 oidc.expose_legacy_external_id 开启时透出，
+	// 供业务系统完成新旧身份映射。
+	LegacyExternalID string `json:"legacy_external_id,omitempty"`
 }
 
 // Address 地址信息
@@ -170,6 +173,7 @@ type OIDCDiscoveryResponse struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
+	PromptValuesSupported             []string `json:"prompt_values_supported,omitempty"`
 }
 
 // ============== OIDC Introspection DTOs ==============

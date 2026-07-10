@@ -9,6 +9,8 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/open/go-web/pkg/container"
+	"github.com/muleiwu/gsr"
 	"gorm.io/gorm"
 )
 
@@ -94,6 +96,14 @@ func (s *OIDCUserInfoService) BuildUserInfoResponse(user *model.User, scopes []s
 				response.Locale = locale
 			}
 		}
+
+		// 按配置透出旧系统用户 ID（legacy external_id），供业务系统完成新旧身份映射。
+		// 读取 nil map 安全，无需额外判空。
+		if exposeLegacyExternalID() {
+			if legacyID, ok := user.Attributes["legacy_external_id"].(string); ok && legacyID != "" {
+				response.LegacyExternalID = legacyID
+			}
+		}
 	}
 
 	if s.hasScope(scopes, "email") {
@@ -136,6 +146,17 @@ func (s *OIDCUserInfoService) BuildUserInfoResponse(user *model.User, scopes []s
 	}
 
 	return response
+}
+
+// exposeLegacyExternalID 是否在 userinfo 的 profile scope 中透出 legacy_external_id（默认 false）。
+// 用 container.Get（而非 helper.GetEnv 的 MustGet）读取，env 未注册时安全回落为默认值，
+// 便于直接构造 BuildUserInfoResponse 的单元测试运行。
+func exposeLegacyExternalID() bool {
+	env, err := container.Get[gsr.Enver]()
+	if err != nil || env == nil {
+		return false
+	}
+	return env.GetBool("oidc.expose_legacy_external_id", false)
 }
 
 // hasScope 检查是否有指定作用域
@@ -200,6 +221,7 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse
 			"address",
 		},
 		CodeChallengeMethodsSupported: codeChallengeMethods,
+		PromptValuesSupported:         []string{"none", "login", "consent", "select_account", "create"},
 	}
 }
 
