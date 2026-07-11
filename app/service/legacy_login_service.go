@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/script"
 	"gorm.io/gorm"
 )
@@ -160,15 +161,190 @@ func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUs
 	}
 
 	if legacyUser != nil {
-		now := time.Now()
-		_ = s.legacyDao.UpdateFields(legacyUser.ID, map[string]interface{}{
-			"status":           model.LegacyUserStatusMigrated,
-			"migrated_user_id": resp.ID,
-			"migrated_at":      now,
-			"migration_remark": "",
-		})
+		_ = markLegacyMigrated(s.legacyDao, legacyUser.ID, resp.ID)
 	}
 	return resp, nil
+}
+
+// ============ 已验证联系方式认领：验证码登录 / 注册时的免密迁移 ============
+
+// HasPendingCodeLoginUser 判断该联系方式是否命中可认领的未迁移旧用户（发验证码前的预检查用）。
+func (s *LegacyLoginService) HasPendingCodeLoginUser(verificationType VerificationType, receiver string) bool {
+	source, legacyUser := s.findClaimable(verificationType, receiver)
+	return source != nil && legacyUser != nil
+}
+
+// findClaimable 按 sort 顺序在启用的 database 源里找首个匹配该联系方式的未迁移旧用户。
+// 只按已验证归属的渠道列（email/phone）匹配。api 源没有本地旧数据，无法认领。
+func (s *LegacyLoginService) findClaimable(verificationType VerificationType, receiver string) (*model.MigrationSource, *model.LegacyUser) {
+	sources, err := s.sourceDao.ListEnabled()
+	if err != nil {
+		return nil, nil
+	}
+	for i := range sources {
+		source := &sources[i]
+		if source.Type != model.MigrationSourceTypeDatabase {
+			continue
+		}
+		var (
+			legacyUser *model.LegacyUser
+			findErr    error
+		)
+		switch verificationType {
+		case VerificationTypeEmail:
+			legacyUser, findErr = s.legacyDao.GetPendingByEmail(source.ID, receiver)
+		case VerificationTypePhone:
+			legacyUser, findErr = s.legacyDao.GetPendingByPhone(source.ID, receiver)
+		default:
+			return nil, nil
+		}
+		if findErr == nil && legacyUser != nil {
+			return source, legacyUser
+		}
+	}
+	return nil, nil
+}
+
+// PromoteByVerifiedReceiver 用已通过验证码证明归属的邮箱/手机号认领旧用户并迁移进主表。
+// 与 TryLegacyLogin 不同：此路径拿不到明文密码，验证码即归属证明，因此创建的是
+// 无密码账号（PasswordHash 为空，密码登录必然失败，只能验证码登录或后续设置密码），
+// 对应渠道直接标记已验证。
+func (s *LegacyLoginService) PromoteByVerifiedReceiver(verificationType VerificationType, receiver string) (*dto.UserResponse, error) {
+	source, legacyUser := s.findClaimable(verificationType, receiver)
+	if source == nil || legacyUser == nil {
+		return nil, ErrLegacyLoginNotMatched
+	}
+
+	user, err := s.buildClaimedUser(source, legacyUser, verificationType, receiver)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewUserDao(tx).Create(user); err != nil {
+			return fmt.Errorf("迁移用户落库失败: %w", err)
+		}
+		return markLegacyMigrated(dao.NewLegacyUserDao(tx), legacyUser.ID, user.ID)
+	})
+	if err != nil {
+		_ = s.legacyDao.UpdateFields(legacyUser.ID, map[string]interface{}{
+			"status":           model.LegacyUserStatusFailed,
+			"migration_remark": err.Error(),
+		})
+		return nil, err
+	}
+
+	resp := dto.ConvertToUserResponse(user)
+	return &resp, nil
+}
+
+// buildClaimedUser 由旧用户记录构造待落库的主表用户（认领路径）。
+// 旧用户名不符合账户格式或已被占用时改用生成的账户名；
+// 未经验证的另一路联系方式仅在不与主表冲突时顺带带入。
+func (s *LegacyLoginService) buildClaimedUser(source *model.MigrationSource, legacyUser *model.LegacyUser, verificationType VerificationType, receiver string) (*model.User, error) {
+	userDao := dao.NewUserDao(s.db)
+
+	username := legacyUser.Username
+	if utils.ValidateUsernameFormat(username) != nil {
+		username = ""
+	} else if exists, err := userDao.ExistsUsername(username); err != nil || exists {
+		username = ""
+	}
+	if username == "" {
+		generated, err := s.userService.GenerateAvailableUsername()
+		if err != nil {
+			return nil, err
+		}
+		username = generated
+	}
+
+	now := time.Now()
+	user := &model.User{
+		Username:    username,
+		Nickname:    legacyUser.Nickname,
+		Status:      model.UserStatusActive,
+		IsActivated: true,
+		Remark:      fmt.Sprintf("从迁移源「%s」迁移", source.Name),
+		Attributes: model.JSONObject{
+			"legacy_external_id": legacyUser.ExternalID,
+			"legacy_source_id":   source.ID,
+		},
+	}
+
+	switch verificationType {
+	case VerificationTypePhone:
+		phone, err := utils.NormalizePhoneToE164(receiver, utils.DefaultPhoneRegion)
+		if err != nil {
+			return nil, err
+		}
+		user.Phone = &phone
+		user.PhoneVerifiedAt = &now
+		if email := derefString(legacyUser.Email); email != "" {
+			if exists, err := userDao.ExistsEmail(email); err == nil && !exists {
+				user.Email = &email
+			}
+		}
+	case VerificationTypeEmail:
+		email := receiver
+		user.Email = &email
+		user.EmailVerifiedAt = &now
+		if rawPhone := derefString(legacyUser.Phone); rawPhone != "" {
+			if phone, err := utils.NormalizePhoneToE164(rawPhone, utils.DefaultPhoneRegion); err == nil {
+				if exists, err := userDao.ExistsPhone(phone); err == nil && !exists {
+					user.Phone = &phone
+				}
+			}
+		}
+	default:
+		return nil, fmt.Errorf("不支持的认领方式: %s", verificationType)
+	}
+	return user, nil
+}
+
+// LinkOnRegistration 注册成功后，用已通过验证码验证的邮箱/手机号认领匹配的未迁移旧用户：
+// 把旧系统身份映射写入用户扩展属性，并回填 legacy_users 迁移状态。无匹配时为空操作。
+// 需在注册事务内调用（用事务的 *gorm.DB 构造本服务），保证关联与建号原子。
+func (s *LegacyLoginService) LinkOnRegistration(userID uint, verifiedEmail, verifiedPhone string) error {
+	var (
+		source     *model.MigrationSource
+		legacyUser *model.LegacyUser
+	)
+	if verifiedPhone != "" {
+		source, legacyUser = s.findClaimable(VerificationTypePhone, verifiedPhone)
+	}
+	if legacyUser == nil && verifiedEmail != "" {
+		source, legacyUser = s.findClaimable(VerificationTypeEmail, verifiedEmail)
+	}
+	if legacyUser == nil {
+		return nil
+	}
+
+	userDao := dao.NewUserDao(s.db)
+	user, err := userDao.GetByID(userID)
+	if err != nil {
+		return err
+	}
+	attrs := user.Attributes
+	if attrs == nil {
+		attrs = model.JSONObject{}
+	}
+	attrs["legacy_external_id"] = legacyUser.ExternalID
+	attrs["legacy_source_id"] = source.ID
+	if err := userDao.UpdateById(userID, map[string]interface{}{"attributes": attrs}); err != nil {
+		return err
+	}
+	return markLegacyMigrated(s.legacyDao, legacyUser.ID, userID)
+}
+
+// markLegacyMigrated 回填 legacy_users 迁移状态。
+func markLegacyMigrated(legacyDao *dao.LegacyUserDao, legacyID, userID uint) error {
+	now := time.Now()
+	return legacyDao.UpdateFields(legacyID, map[string]interface{}{
+		"status":           model.LegacyUserStatusMigrated,
+		"migrated_user_id": userID,
+		"migrated_at":      now,
+		"migration_remark": "",
+	})
 }
 
 func derefString(p *string) string {

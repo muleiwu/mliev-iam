@@ -272,6 +272,7 @@ func (receiver Router) InitConfig() map[string]any {
 			oidcAuth := apiOidc.Group("/auth")
 			oidcAuth.POST("/refresh", controller.OIDCAuthFlowController{}.RefreshToken)
 			oidcAuth.POST("/logout", controller.OIDCAuthFlowController{}.Logout)
+			oidcAuth.POST("/switch-account", controller.OIDCAuthFlowController{}.SwitchAccount)
 
 			// === 社会化登录 ===
 			social := router.Group("/social")
