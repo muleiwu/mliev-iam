@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"github.com/glebarez/sqlite"
@@ -196,5 +197,137 @@ func TestLegacyLoginPhoneCandidateMatch(t *testing.T) {
 	}
 	if migrated.Status != model.LegacyUserStatusMigrated {
 		t.Fatalf("expected status migrated, got %s", migrated.Status)
+	}
+}
+
+// newPendingLegacyPhoneUser 建一个启用的 database 迁移源和一条带裸号手机的 pending 旧用户。
+func newPendingLegacyPhoneUser(t *testing.T, db *gorm.DB, barePhone, externalID string) *model.LegacyUser {
+	t.Helper()
+	source := &model.MigrationSource{
+		UUID:    "test-uuid-claim",
+		Name:    "旧系统-认领",
+		Type:    model.MigrationSourceTypeDatabase,
+		Enabled: true,
+	}
+	if err := dao.NewMigrationSourceDao(db).Create(source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	phone := barePhone
+	lu := &model.LegacyUser{
+		SourceID:   source.ID,
+		Username:   "legacy_claim_user",
+		Phone:      &phone,
+		ExternalID: externalID,
+		Status:     model.LegacyUserStatusPending,
+	}
+	if err := dao.NewLegacyUserDao(db).Create(lu); err != nil {
+		t.Fatalf("create legacy user: %v", err)
+	}
+	return lu
+}
+
+// TestPromoteByVerifiedPhone 覆盖"验证码登录：主表无此手机号 → 认领旧用户免密自动注册"。
+func TestPromoteByVerifiedPhone(t *testing.T) {
+	db := newMigratedTestDB(t)
+
+	const (
+		barePhone  = "15385390860"
+		e164Phone  = "+8615385390860"
+		externalID = "ext-claim-1"
+	)
+	lu := newPendingLegacyPhoneUser(t, db, barePhone, externalID)
+
+	legacySvc := NewLegacyLoginService(db)
+	if !legacySvc.HasPendingCodeLoginUser(VerificationTypePhone, e164Phone) {
+		t.Fatal("expected claimable legacy user for E.164 phone")
+	}
+	if !legacySvc.HasPendingCodeLoginUser(VerificationTypePhone, barePhone) {
+		t.Fatal("expected claimable legacy user for bare phone")
+	}
+
+	resp, err := legacySvc.PromoteByVerifiedReceiver(VerificationTypePhone, e164Phone)
+	if err != nil {
+		t.Fatalf("promote by verified phone: %v", err)
+	}
+
+	promoted, err := dao.NewUserDao(db).GetByID(resp.ID)
+	if err != nil {
+		t.Fatalf("reload promoted user: %v", err)
+	}
+	if promoted.Phone == nil || *promoted.Phone != e164Phone {
+		t.Fatalf("expected phone %s, got %v", e164Phone, promoted.Phone)
+	}
+	if promoted.PhoneVerifiedAt == nil {
+		t.Fatal("expected phone marked verified")
+	}
+	if promoted.PasswordHash != "" {
+		t.Fatalf("expected passwordless account, got hash %q", promoted.PasswordHash)
+	}
+	if got, _ := promoted.Attributes["legacy_external_id"].(string); got != externalID {
+		t.Fatalf("expected legacy_external_id=%q, got %v", externalID, promoted.Attributes["legacy_external_id"])
+	}
+
+	// 无密码账号不允许密码登录。
+	if _, err := NewUserService(db).ValidateUserForLogin(e164Phone, "anything"); err == nil {
+		t.Fatal("expected password login to fail for passwordless claimed user")
+	}
+
+	// legacy 记录应已迁移，且不再可认领。
+	migrated, err := dao.NewLegacyUserDao(db).GetByID(lu.ID)
+	if err != nil {
+		t.Fatalf("reload legacy user: %v", err)
+	}
+	if migrated.Status != model.LegacyUserStatusMigrated {
+		t.Fatalf("expected status migrated, got %s", migrated.Status)
+	}
+	if migrated.MigratedUserID == nil || *migrated.MigratedUserID != resp.ID {
+		t.Fatalf("expected migrated_user_id=%d, got %v", resp.ID, migrated.MigratedUserID)
+	}
+	if legacySvc.HasPendingCodeLoginUser(VerificationTypePhone, e164Phone) {
+		t.Fatal("expected no claimable legacy user after promotion")
+	}
+}
+
+// TestLinkOnRegistration 覆盖"新用户注册（手机验证码通过）→ 自动关联 pending 旧用户"。
+func TestLinkOnRegistration(t *testing.T) {
+	db := newMigratedTestDB(t)
+
+	const (
+		barePhone  = "15385390860"
+		e164Phone  = "+8615385390860"
+		externalID = "ext-link-1"
+	)
+	lu := newPendingLegacyPhoneUser(t, db, barePhone, externalID)
+
+	resp, err := NewUserService(db).CreateUser(&dto.CreateUserRequest{
+		Username: "fresh_user",
+		Password: "p@ssw0rd",
+		Phone:    e164Phone,
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	if err := NewLegacyLoginService(db).LinkOnRegistration(resp.ID, "", e164Phone); err != nil {
+		t.Fatalf("link on registration: %v", err)
+	}
+
+	linked, err := dao.NewUserDao(db).GetByID(resp.ID)
+	if err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if got, _ := linked.Attributes["legacy_external_id"].(string); got != externalID {
+		t.Fatalf("expected legacy_external_id=%q, got %v", externalID, linked.Attributes["legacy_external_id"])
+	}
+
+	migrated, err := dao.NewLegacyUserDao(db).GetByID(lu.ID)
+	if err != nil {
+		t.Fatalf("reload legacy user: %v", err)
+	}
+	if migrated.Status != model.LegacyUserStatusMigrated {
+		t.Fatalf("expected status migrated, got %s", migrated.Status)
+	}
+	if migrated.MigratedUserID == nil || *migrated.MigratedUserID != resp.ID {
+		t.Fatalf("expected migrated_user_id=%d, got %v", resp.ID, migrated.MigratedUserID)
 	}
 }
