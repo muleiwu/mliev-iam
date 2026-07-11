@@ -97,6 +97,13 @@ type ConsentRequest struct {
 	CsrfToken string `json:"csrfToken" binding:"required"`
 }
 
+// SwitchAccountRequest switches the authenticated user while preserving the
+// current OIDC authorization request.
+type SwitchAccountRequest struct {
+	SessionID string `json:"sessionId" binding:"required"`
+	CsrfToken string `json:"csrfToken" binding:"required"`
+}
+
 // ConsentResponse 授权确认响应
 type ConsentResponse struct {
 	Success     bool   `json:"success"`
@@ -1390,6 +1397,49 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 // Logout 登出接口
 // POST /api/oidc/auth/logout
 func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface) {
+	c.revokeRefreshTokenCookie(ctx)
+	c.Success(ctx, map[string]any{"success": true, "message": "登出成功"})
+}
+
+// SwitchAccount clears the current user from an OIDC authorization session,
+// preserving the client request so the next login can continue the same flow.
+// It also clears the browser-level SSO cookie to prevent the previous account
+// from being silently selected on a later authorization request.
+// POST /api/oidc/auth/switch-account
+func (c OIDCAuthFlowController) SwitchAccount(ctx httpInterfaces.RouterContextInterface) {
+	var req SwitchAccountRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+
+	if !session.IsAuthenticated || session.UserID == nil {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
+		return
+	}
+
+	if !validSwitchAccountCSRF(session, req.CsrfToken) {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "CSRF 校验失败")
+		return
+	}
+
+	if err := sessionService.ResetAuthentication(ctx.Request().Context(), req.SessionID); err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "切换账号失败: "+err.Error())
+		return
+	}
+
+	c.revokeRefreshTokenCookie(ctx)
+	c.Success(ctx, map[string]any{"success": true, "message": "已切换账号"})
+}
+
+func (c OIDCAuthFlowController) revokeRefreshTokenCookie(ctx httpInterfaces.RouterContextInterface) {
 	refreshToken, err := ctx.Cookie("refresh_token")
 	if err == nil && refreshToken != "" {
 		tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
@@ -1398,7 +1448,11 @@ func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface
 		}
 	}
 	ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
-	c.Success(ctx, map[string]any{"success": true, "message": "登出成功"})
+}
+
+func validSwitchAccountCSRF(session *service.OIDCSession, csrfToken string) bool {
+	return session != nil && session.CsrfToken != "" &&
+		subtle.ConstantTimeCompare([]byte(csrfToken), []byte(session.CsrfToken)) == 1
 }
 
 // FlowStatusResponse 流程状态响应
