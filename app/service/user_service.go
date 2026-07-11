@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -566,6 +567,11 @@ func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserR
 	return &response, nil
 }
 
+// ErrLoginAccountNotFound 登录标识符在主 users 表中查无此人（区别于禁用/未验证等失败）。
+// 错误消息经 fmt.Errorf("%s%w", label, ...) 包装成"手机号未注册"等提示；
+// 调用方用 errors.Is 判断是否可回退到迁移数据认领。
+var ErrLoginAccountNotFound = errors.New("未注册")
+
 // GetVerifiedUserForCodeLogin 根据已验证邮箱或手机号获取可登录用户。
 func (s *UserService) GetVerifiedUserForCodeLogin(verificationType VerificationType, receiver string) (*dto.UserResponse, error) {
 	var (
@@ -585,7 +591,7 @@ func (s *UserService) GetVerifiedUserForCodeLogin(verificationType VerificationT
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("%s未注册", identifierLabel)
+		return nil, fmt.Errorf("%s%w", identifierLabel, ErrLoginAccountNotFound)
 	}
 
 	if !user.CanLogin() {
@@ -601,6 +607,23 @@ func (s *UserService) GetVerifiedUserForCodeLogin(verificationType VerificationT
 
 	response := dto.ConvertToUserResponse(user)
 	return &response, nil
+}
+
+// MarkContactVerified 把邮箱/手机标记为已验证。
+// 仅供已通过验证码等方式证明联系方式归属的流程调用（如注册时验证码校验通过后）。
+func (s *UserService) MarkContactVerified(userID uint, emailVerified, phoneVerified bool) error {
+	if !emailVerified && !phoneVerified {
+		return nil
+	}
+	now := time.Now()
+	updates := map[string]interface{}{}
+	if emailVerified {
+		updates["email_verified_at"] = now
+	}
+	if phoneVerified {
+		updates["phone_verified_at"] = now
+	}
+	return s.userDao.UpdateById(userID, updates)
 }
 
 // ============= RBAC权限相关方法 =============

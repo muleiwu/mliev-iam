@@ -68,6 +68,32 @@ func (dao *LegacyUserDao) GetPendingByIdentifier(sourceID uint, identifier strin
 	return &u, nil
 }
 
+// GetPendingByEmail 取某源下未迁移、邮箱匹配的旧用户。
+// 供"已验证联系方式认领"场景使用：只按 email 列匹配，不匹配 username，
+// 避免验证了邮箱却认领到 username 恰好等于该邮箱的旧用户。
+func (dao *LegacyUserDao) GetPendingByEmail(sourceID uint, email string) (*model.LegacyUser, error) {
+	var u model.LegacyUser
+	err := dao.db.Where("source_id = ? AND status <> ? AND email = ?",
+		sourceID, model.LegacyUserStatusMigrated, email).First(&u).Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// GetPendingByPhone 取某源下未迁移、手机号匹配的旧用户。
+// 供"已验证联系方式认领"场景使用：只按 phone 列匹配，
+// 候选集策略与 GetPendingByIdentifier 一致（原始输入 / E.164 / 去国家码裸号）。
+func (dao *LegacyUserDao) GetPendingByPhone(sourceID uint, phone string) (*model.LegacyUser, error) {
+	var u model.LegacyUser
+	err := dao.db.Where("source_id = ? AND status <> ? AND phone IN ?",
+		sourceID, model.LegacyUserStatusMigrated, utils.PhoneLoginCandidates(phone)).First(&u).Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (dao *LegacyUserDao) UpdateFields(id uint, fields map[string]interface{}) error {
 	return dao.db.Model(&model.LegacyUser{}).Where("id = ?", id).Updates(fields).Error
 }
