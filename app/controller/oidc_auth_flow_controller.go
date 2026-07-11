@@ -487,12 +487,19 @@ func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInte
 	userService := service.NewUserService(helper.GetDatabase())
 	user, err := userService.GetVerifiedUserForCodeLogin(verificationType, req.Receiver)
 	if err != nil {
-		code := constants.ErrCodeBadRequest
-		if strings.Contains(err.Error(), "禁用") {
-			code = constants.ErrCodeUnauthorized
+		// 主表未注册但迁移数据里有可认领的旧用户时不报错：等验证码证明归属后再认领建号。
+		// 其余错误（禁用/未验证）维持原判。
+		claimable := errors.Is(err, service.ErrLoginAccountNotFound) &&
+			service.NewLegacyLoginService(helper.GetDatabase()).HasPendingCodeLoginUser(verificationType, req.Receiver)
+		if !claimable {
+			code := constants.ErrCodeBadRequest
+			if strings.Contains(err.Error(), "禁用") {
+				code = constants.ErrCodeUnauthorized
+			}
+			c.Error(ctx, code, err.Error())
+			return
 		}
-		c.Error(ctx, code, err.Error())
-		return
+		user = nil
 	}
 
 	config := c.getVerificationCodeConfig()
@@ -506,6 +513,15 @@ func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInte
 	if err := verificationService.VerifyCode(ctx.Request().Context(), req.Receiver, verificationType, loginVerificationSessionID, req.Code); err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "验证码错误或已过期")
 		return
+	}
+
+	if user == nil {
+		// 验证码已证明联系方式归属：从迁移数据认领旧用户，免密自动注册后继续登录。
+		user, err = service.NewLegacyLoginService(helper.GetDatabase()).PromoteByVerifiedReceiver(verificationType, req.Receiver)
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeInternal, "旧系统账号迁移失败，请稍后重试")
+			return
+		}
 	}
 
 	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
@@ -588,6 +604,8 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	}
 
 	// 3. 验证邮箱和手机验证码
+	emailCodeVerified := false
+	phoneCodeVerified := false
 	config := c.getVerificationCodeConfig()
 	if config != nil {
 		verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
@@ -599,6 +617,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 				c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
 				return
 			}
+			emailCodeVerified = true
 		}
 
 		// 验证手机验证码（如果提供了手机号）
@@ -608,6 +627,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 				c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
 				return
 			}
+			phoneCodeVerified = true
 		}
 	}
 
@@ -621,6 +641,21 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		}
 		txAgreementService := service.NewAgreementService(tx)
 		if err := txAgreementService.RecordAcceptances(resp.ID, registrationAppID, requiredAgreements); err != nil {
+			return err
+		}
+		// 验证码已证明联系方式归属：标记已验证，并尝试关联迁移数据里的同联系方式旧用户
+		// （合入 legacy 身份映射属性、回填迁移状态）。
+		if err := txUserService.MarkContactVerified(resp.ID, emailCodeVerified, phoneCodeVerified); err != nil {
+			return err
+		}
+		verifiedEmail, verifiedPhone := "", ""
+		if emailCodeVerified {
+			verifiedEmail = createUserReq.Email
+		}
+		if phoneCodeVerified {
+			verifiedPhone = createUserReq.Phone // CreateUser 已规范化为 E.164
+		}
+		if err := service.NewLegacyLoginService(tx).LinkOnRegistration(resp.ID, verifiedEmail, verifiedPhone); err != nil {
 			return err
 		}
 		userResponse = resp
@@ -1044,9 +1079,15 @@ func (c OIDCAuthFlowController) SendLoginVerificationCode(ctx httpInterfaces.Rou
 
 	userService := service.NewUserService(helper.GetDatabase())
 	if _, err := userService.GetVerifiedUserForCodeLogin(verificationType, req.Receiver); err != nil {
-		c.logVerificationCodeControllerWarn(traceID, "登录验证码账号校验失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
-		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
-		return
+		// 主表未注册但迁移数据里有可认领的旧用户时放行发码：登录时验证码通过即认领迁移。
+		claimable := errors.Is(err, service.ErrLoginAccountNotFound) &&
+			service.NewLegacyLoginService(helper.GetDatabase()).HasPendingCodeLoginUser(verificationType, req.Receiver)
+		if !claimable {
+			c.logVerificationCodeControllerWarn(traceID, "登录验证码账号校验失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+			c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
+			return
+		}
+		c.logVerificationCodeControllerInfo(traceID, "主表未注册但命中可认领旧用户，放行发码 type=%s receiver=%s", verificationType, service.MaskVerificationReceiver(req.Receiver))
 	}
 
 	config := c.getVerificationCodeConfig()
