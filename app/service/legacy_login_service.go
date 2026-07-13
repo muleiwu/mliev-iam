@@ -120,12 +120,16 @@ func (s *LegacyLoginService) trySource(source *model.MigrationSource, identifier
 // promoteUser 把通过校验的旧用户写入主 users 表，并回填 legacy_users 迁移状态。
 // 用本次明文密码生成 bcrypt 哈希，旧哈希不进主表。
 func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUser *model.LegacyUser, identifier, password string, scriptUser map[string]any) (*dto.UserResponse, error) {
-	username := mapString(scriptUser, "username")
-	if username == "" && legacyUser != nil {
-		username = legacyUser.Username
+	candidate := mapString(scriptUser, "username")
+	if candidate == "" && legacyUser != nil {
+		candidate = legacyUser.Username
 	}
-	if username == "" {
-		username = identifier
+	if candidate == "" {
+		candidate = identifier
+	}
+	username, err := s.resolveMigrationUsername(candidate)
+	if err != nil {
+		return nil, err
 	}
 
 	req := &dto.CreateUserRequest{
@@ -164,6 +168,20 @@ func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUs
 		_ = markLegacyMigrated(s.legacyDao, legacyUser.ID, resp.ID)
 	}
 	return resp, nil
+}
+
+// resolveMigrationUsername 为迁移用户确定主表账户名。
+// 旧系统常用纯数字手机号或含 "@" 的邮箱当用户名，不符合主表账户格式
+// （禁纯数字/禁 "@"，保证登录标识符判断无歧义），或者已被占用——
+// 这些情况一律改用生成的账户名，用户仍可用手机号/邮箱登录。
+func (s *LegacyLoginService) resolveMigrationUsername(candidate string) (string, error) {
+	if candidate != "" && utils.ValidateUsernameFormat(candidate) == nil {
+		exists, err := dao.NewUserDao(s.db).ExistsUsername(candidate)
+		if err == nil && !exists {
+			return candidate, nil
+		}
+	}
+	return s.userService.GenerateAvailableUsername()
 }
 
 // ============ 已验证联系方式认领：验证码登录 / 注册时的免密迁移 ============

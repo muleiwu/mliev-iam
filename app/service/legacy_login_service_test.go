@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -285,6 +286,78 @@ func TestPromoteByVerifiedPhone(t *testing.T) {
 	}
 	if legacySvc.HasPendingCodeLoginUser(VerificationTypePhone, e164Phone) {
 		t.Fatal("expected no claimable legacy user after promotion")
+	}
+}
+
+// TestLegacyLoginPureDigitUsernamePromotes 覆盖"旧系统用纯数字手机号当用户名 → 密码登录迁移"：
+// 旧用户名不符合主表账户格式（禁纯数字），promoteUser 应改用生成账户名而非落库失败。
+func TestLegacyLoginPureDigitUsernamePromotes(t *testing.T) {
+	db := newMigratedTestDB(t)
+
+	const (
+		barePhone = "15610136254"
+		e164Phone = "+8615610136254"
+		oldPass   = "old-p@ss"
+	)
+
+	source := &model.MigrationSource{
+		UUID:    "test-uuid-digit-username",
+		Name:    "早期认证系统",
+		Type:    model.MigrationSourceTypeDatabase,
+		Enabled: true,
+		LoginScript: `
+			var lu = input.legacyUser;
+			if (passhash.passVerify(lu.passwordHash, input.password)) {
+				return { success: true, user: { username: lu.username, email: lu.email, phone: lu.phone } };
+			}
+			return { success: false };
+		`,
+	}
+	if err := dao.NewMigrationSourceDao(db).Create(source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	oldHash, err := passhash.Hash(oldPass)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	phone := barePhone
+	lu := &model.LegacyUser{
+		SourceID:     source.ID,
+		Username:     barePhone, // 旧系统用手机号当用户名（纯数字）
+		Phone:        &phone,
+		PasswordHash: oldHash,
+		Status:       model.LegacyUserStatusPending,
+	}
+	if err := dao.NewLegacyUserDao(db).Create(lu); err != nil {
+		t.Fatalf("create legacy user: %v", err)
+	}
+
+	// 用 E.164 + 旧密码做密码登录：脚本校验通过后应成功迁移（账户名改用生成的）。
+	resp, err := NewUserService(db).ValidateUserForLogin(e164Phone, oldPass)
+	if err != nil {
+		t.Fatalf("expected legacy password login success, got: %v", err)
+	}
+
+	promoted, err := dao.NewUserDao(db).GetByID(resp.ID)
+	if err != nil {
+		t.Fatalf("reload promoted user: %v", err)
+	}
+	if promoted.Username == barePhone {
+		t.Fatalf("expected generated username, got legacy pure-digit username %q", promoted.Username)
+	}
+	if !strings.HasPrefix(promoted.Username, "u_") {
+		t.Fatalf("expected generated username with u_ prefix, got %q", promoted.Username)
+	}
+	if promoted.Phone == nil || *promoted.Phone != e164Phone {
+		t.Fatalf("expected phone %s, got %v", e164Phone, promoted.Phone)
+	}
+
+	migrated, err := dao.NewLegacyUserDao(db).GetByID(lu.ID)
+	if err != nil {
+		t.Fatalf("reload legacy user: %v", err)
+	}
+	if migrated.Status != model.LegacyUserStatusMigrated {
+		t.Fatalf("expected status migrated, got %s (remark=%s)", migrated.Status, migrated.MigrationRemark)
 	}
 }
 
