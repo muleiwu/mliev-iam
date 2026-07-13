@@ -361,6 +361,85 @@ func TestLegacyLoginPureDigitUsernamePromotes(t *testing.T) {
 	}
 }
 
+// TestPasswordLoginAfterCodeClaim 覆盖"验证码认领迁移成无密码账号 → 用旧密码做密码登录"：
+// 应回退到 legacy_users 里的旧哈希走脚本校验，通过后把密码补进主表，二次登录走原生路径。
+func TestPasswordLoginAfterCodeClaim(t *testing.T) {
+	db := newMigratedTestDB(t)
+
+	const (
+		barePhone = "15610136254"
+		e164Phone = "+8615610136254"
+		oldPass   = "old-p@ss"
+	)
+
+	// 旧系统存标准 argon2id 哈希，登录脚本用 passhash.passVerify 校验。
+	source := &model.MigrationSource{
+		UUID:    "test-uuid-pwd-after-claim",
+		Name:    "早期认证系统",
+		Type:    model.MigrationSourceTypeDatabase,
+		Enabled: true,
+		LoginScript: `
+			var lu = input.legacyUser;
+			if (passhash.passVerify(lu.passwordHash, input.password)) {
+				return { success: true, user: { username: lu.username, phone: lu.phone } };
+			}
+			return { success: false };
+		`,
+	}
+	if err := dao.NewMigrationSourceDao(db).Create(source); err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	oldHash, err := passhash.Hash(oldPass)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	phone := barePhone
+	lu := &model.LegacyUser{
+		SourceID:     source.ID,
+		Username:     barePhone, // 旧系统用手机号当用户名
+		Phone:        &phone,
+		PasswordHash: oldHash,
+		Status:       model.LegacyUserStatusPending,
+	}
+	if err := dao.NewLegacyUserDao(db).Create(lu); err != nil {
+		t.Fatalf("create legacy user: %v", err)
+	}
+
+	// 1) 先走验证码认领（模拟用户先用短信登录过一次）→ 无密码账号。
+	legacySvc := NewLegacyLoginService(db)
+	claimed, err := legacySvc.PromoteByVerifiedReceiver(VerificationTypePhone, e164Phone)
+	if err != nil {
+		t.Fatalf("promote by verified phone: %v", err)
+	}
+
+	// 2) 再用旧密码做密码登录：应回退 legacy 凭据校验并成功。
+	userSvc := NewUserService(db)
+	resp, err := userSvc.ValidateUserForLogin(e164Phone, oldPass)
+	if err != nil {
+		t.Fatalf("expected legacy-credential password login success, got: %v", err)
+	}
+	if resp.ID != claimed.ID {
+		t.Fatalf("expected same user id %d, got %d", claimed.ID, resp.ID)
+	}
+
+	// 3) 密码应已补进主表（argon2id），再次登录走原生路径。
+	reloaded, err := dao.NewUserDao(db).GetByID(claimed.ID)
+	if err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if !strings.HasPrefix(reloaded.PasswordHash, "$argon2id$") {
+		t.Fatalf("expected backfilled argon2id hash, got %q", reloaded.PasswordHash)
+	}
+	if _, err := userSvc.ValidateUserForLogin(e164Phone, oldPass); err != nil {
+		t.Fatalf("expected native password login after backfill, got: %v", err)
+	}
+
+	// 4) 错误密码仍应失败。
+	if _, err := userSvc.ValidateUserForLogin(e164Phone, "wrong-pass"); err == nil {
+		t.Fatal("expected wrong password to fail")
+	}
+}
+
 // TestLinkOnRegistration 覆盖"新用户注册（手机验证码通过）→ 自动关联 pending 旧用户"。
 func TestLinkOnRegistration(t *testing.T) {
 	db := newMigratedTestDB(t)

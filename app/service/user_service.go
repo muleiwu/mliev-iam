@@ -548,6 +548,23 @@ func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserR
 		return nil, fmt.Errorf("用户账户已禁用")
 	}
 
+	// 无密码账号（验证码认领迁移/社交注册）：主表没有哈希，密码校验必败。
+	// 若其关联了已迁移的旧用户记录，用旧系统凭据（legacy_users 里的旧哈希）走脚本校验；
+	// 通过则登录，并把本次明文密码以 argon2id 补进主表，之后走原生密码路径。
+	if user.PasswordHash == "" {
+		if !NewLegacyLoginService(s.database).VerifyMigratedUserPassword(user.ID, account, password) {
+			return nil, fmt.Errorf("用户名或密码错误")
+		}
+		if _, newHash, err := s.generatePasswordHash(password); err == nil {
+			_ = s.userDao.UpdateById(user.ID, map[string]interface{}{
+				"salt":          "",
+				"password_hash": newHash,
+			})
+		}
+		response := dto.ConvertToUserResponse(user)
+		return &response, nil
+	}
+
 	// 验证密码（同时拿到可能的升级哈希）
 	ok, newHash := s.verifyAndUpgrade(password, user.Salt, user.PasswordHash)
 	if !ok {

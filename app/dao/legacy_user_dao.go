@@ -94,6 +94,19 @@ func (dao *LegacyUserDao) GetPendingByPhone(sourceID uint, phone string) (*model
 	return &u, nil
 }
 
+// GetMigratedByUserID 取已迁移到指定主表用户的旧用户记录。
+// 供"无密码账号用旧密码登录"回退校验：验证码认领迁移后主表没有密码哈希，
+// 旧密码凭据仍留在 legacy_users，可继续用于脚本校验。
+func (dao *LegacyUserDao) GetMigratedByUserID(userID uint) (*model.LegacyUser, error) {
+	var u model.LegacyUser
+	err := dao.db.Where("migrated_user_id = ? AND status = ?",
+		userID, model.LegacyUserStatusMigrated).First(&u).Error
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 func (dao *LegacyUserDao) UpdateFields(id uint, fields map[string]interface{}) error {
 	return dao.db.Model(&model.LegacyUser{}).Where("id = ?", id).Updates(fields).Error
 }

@@ -83,16 +83,7 @@ func (s *LegacyLoginService) trySource(source *model.MigrationSource, identifier
 			return nil, false, nil
 		}
 		legacyUser = lu
-		input["legacyUser"] = map[string]any{
-			"username":     lu.Username,
-			"externalId":   lu.ExternalID,
-			"email":        derefString(lu.Email),
-			"phone":        derefString(lu.Phone),
-			"nickname":     lu.Nickname,
-			"passwordHash": lu.PasswordHash,
-			"salt":         lu.Salt,
-			"rawData":      map[string]any(lu.RawData),
-		}
+		input["legacyUser"] = legacyUserScriptInput(lu)
 	}
 
 	out, err := s.engine.RunForMap(context.Background(), source.LoginScript, input)
@@ -184,6 +175,46 @@ func (s *LegacyLoginService) resolveMigrationUsername(candidate string) (string,
 	return s.userService.GenerateAvailableUsername()
 }
 
+// legacyUserScriptInput 把旧用户记录转成登录脚本的 input.legacyUser 结构。
+func legacyUserScriptInput(lu *model.LegacyUser) map[string]any {
+	return map[string]any{
+		"username":     lu.Username,
+		"externalId":   lu.ExternalID,
+		"email":        derefString(lu.Email),
+		"phone":        derefString(lu.Phone),
+		"nickname":     lu.Nickname,
+		"passwordHash": lu.PasswordHash,
+		"salt":         lu.Salt,
+		"rawData":      map[string]any(lu.RawData),
+	}
+}
+
+// VerifyMigratedUserPassword 用主表用户关联的已迁移旧用户凭据校验密码。
+// 场景：验证码认领迁移创建的无密码账号，用户后续仍拿旧密码做密码登录——
+// 旧密码哈希还留在 legacy_users 里，走迁移源脚本校验即可。
+// 校验通过返回 true，调用方应把该明文密码重哈希补进主表，之后走原生路径。
+func (s *LegacyLoginService) VerifyMigratedUserPassword(userID uint, identifier, password string) bool {
+	legacyUser, err := s.legacyDao.GetMigratedByUserID(userID)
+	if err != nil {
+		return false
+	}
+	source, err := s.sourceDao.GetByID(legacyUser.SourceID)
+	if err != nil || !source.Enabled || source.Type != model.MigrationSourceTypeDatabase || source.LoginScript == "" {
+		return false
+	}
+
+	input := map[string]any{
+		"identifier": identifier,
+		"password":   password,
+		"legacyUser": legacyUserScriptInput(legacyUser),
+	}
+	out, err := s.engine.RunForMap(context.Background(), source.LoginScript, input)
+	if err != nil {
+		return false
+	}
+	return asBool(out["success"])
+}
+
 // ============ 已验证联系方式认领：验证码登录 / 注册时的免密迁移 ============
 
 // HasPendingCodeLoginUser 判断该联系方式是否命中可认领的未迁移旧用户（发验证码前的预检查用）。
@@ -262,18 +293,9 @@ func (s *LegacyLoginService) PromoteByVerifiedReceiver(verificationType Verifica
 func (s *LegacyLoginService) buildClaimedUser(source *model.MigrationSource, legacyUser *model.LegacyUser, verificationType VerificationType, receiver string) (*model.User, error) {
 	userDao := dao.NewUserDao(s.db)
 
-	username := legacyUser.Username
-	if utils.ValidateUsernameFormat(username) != nil {
-		username = ""
-	} else if exists, err := userDao.ExistsUsername(username); err != nil || exists {
-		username = ""
-	}
-	if username == "" {
-		generated, err := s.userService.GenerateAvailableUsername()
-		if err != nil {
-			return nil, err
-		}
-		username = generated
+	username, err := s.resolveMigrationUsername(legacyUser.Username)
+	if err != nil {
+		return nil, err
 	}
 
 	now := time.Now()
