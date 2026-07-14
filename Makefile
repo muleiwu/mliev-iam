@@ -1,4 +1,4 @@
-.PHONY: all install-frontend build-frontend build-packages build-oidc build-install build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help migrate-new migrate-status migrate-up migrate-down
+.PHONY: all install-frontend build-frontend build-packages build-oidc build-install build-oidc-only build-antd build-antd-only build-install-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help migrate-new migrate-status migrate-up migrate-down
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -59,16 +59,23 @@ build-oidc-only:
 build-antd: build-packages build-antd-only
 
 # 编译 web-antd 前端（仅应用本身，不构建核心包）
+# vite.config.mts 的 outDir 已指向 ../../../static/admin，且 emptyOutDir=true 会自动清理
 build-antd-only:
 	@echo "==> 开始编译 web-antd 前端..."
-	@echo "==> 清理 static/admin 目录..."
 	@rm -rf static/admin
-	@mkdir -p static/admin
-	@echo "==> 切换到 admin-web/apps/web-antd 目录并编译..."
-	@cd admin-web/apps && pnpm build:antd
-	@echo "==> 复制编译产物到 static/admin..."
-	@cp -r admin-web/apps/web-antd/dist/* static/admin/
-	@echo "==> web-antd 前端编译完成！"
+	@cd admin-web && pnpm build:antd
+	@echo "==> web-antd 前端编译完成！产物已写入 static/admin"
+
+# 编译 web-install 前端（包含核心包依赖）
+build-install: build-packages build-install-only
+
+# 编译 web-install 前端（仅应用本身，不构建核心包）
+# vite.config.mts 的 outDir 已指向 ../../../static/install，且 emptyOutDir=true 会自动清理
+build-install-only:
+	@echo "==> 开始编译 web-install 前端..."
+	@rm -rf static/install
+	@cd admin-web && pnpm build:install
+	@echo "==> web-install 前端编译完成！产物已写入 static/install"
 
 # 编译 Go 后端
 build-go:
