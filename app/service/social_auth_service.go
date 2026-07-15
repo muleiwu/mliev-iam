@@ -402,7 +402,7 @@ func (s *SocialAuthService) loginWithSocialAccount(account *model.UserSocialAcco
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -521,7 +521,7 @@ func (s *SocialAuthService) registerWithSocialAccount(provider *model.SocialProv
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		fmt.Printf("DEBUG: 生成令牌失败: %v\n", err)
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
@@ -775,7 +775,7 @@ func (s *SocialAuthService) BindWithExistingUser(bindToken, username, password s
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -915,7 +915,7 @@ func (s *SocialAuthService) RegisterWithSocial(req *dto.SocialRegisterRequest) (
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}

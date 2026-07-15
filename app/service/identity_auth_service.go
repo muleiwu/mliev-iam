@@ -268,7 +268,7 @@ func (s *IdentityAuthService) BindWithExistingUser(bindToken, username, password
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -399,7 +399,7 @@ func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterReques
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -470,7 +470,7 @@ func (s *IdentityAuthService) loginWithIdentityAccount(account *model.UserIdenti
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}

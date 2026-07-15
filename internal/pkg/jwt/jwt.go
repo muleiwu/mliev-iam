@@ -13,7 +13,7 @@ import (
 type TokenSubject struct {
 	UserID   uint
 	Username string
-	Role     string // 可为空；为空时回退到 "admin"
+	Role     string // 必填，不得为空（GenerateToken 会拒绝空 role，防止静默提权）
 }
 
 // Claims JWT声明结构
@@ -43,16 +43,17 @@ func (j *JWTService) GenerateToken(sub TokenSubject, expirationHours int) (strin
 	// 设置过期时间
 	expirationTime := time.Now().Add(time.Duration(expirationHours) * time.Hour)
 
-	role := sub.Role
-	if role == "" {
-		role = "admin"
+	// role 必须显式指定：早期实现空 role 会回退为 "admin"，造成任何漏填 role 的
+	// 调用方静默拿到管理员身份的提权漏洞，故改为拒绝空 role。
+	if sub.Role == "" {
+		return "", errors.New("token role 不能为空")
 	}
 
 	// 创建声明
 	claims := &Claims{
 		UserID:   sub.UserID,
 		Username: sub.Username,
-		Role:     role,
+		Role:     sub.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

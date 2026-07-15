@@ -78,7 +78,7 @@ func (ac AuthController) Login(c httpInterfaces.RouterContextInterface) {
 		ac.Error(c, constants.ErrCodeInternal, "JWT配置错误: "+err.Error())
 		return
 	}
-	accessToken, err := jwtAuthService.GenerateToken(userResponse)
+	accessToken, err := jwtAuthService.GenerateAdminToken(userResponse)
 	if err != nil {
 		ac.Error(c, constants.ErrCodeInternal, "生成访问令牌失败: "+err.Error())
 		return
