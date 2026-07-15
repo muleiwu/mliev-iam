@@ -68,6 +68,16 @@ func (s *SocialAuthService) GetAuthURL(providerIdentifier string) (*dto.SocialAu
 
 // GetAuthURLWithSessionID 获取OAuth授权URL（带OIDC session_id）
 func (s *SocialAuthService) GetAuthURLWithSessionID(providerIdentifier string, sessionID string) (*dto.SocialAuthURLResponse, error) {
+	return s.getAuthURLWithStateData(providerIdentifier, StateData{SessionID: sessionID})
+}
+
+// GetBindAuthURL 获取用于"已登录用户绑定社交账号"的OAuth授权URL。
+// state 中记录 bind 模式与目标用户ID，回调时据此走绑定分支而非登录分支。
+func (s *SocialAuthService) GetBindAuthURL(providerIdentifier string, userID uint) (*dto.SocialAuthURLResponse, error) {
+	return s.getAuthURLWithStateData(providerIdentifier, StateData{Mode: StateModeBind, BindUserID: userID})
+}
+
+func (s *SocialAuthService) getAuthURLWithStateData(providerIdentifier string, stateData StateData) (*dto.SocialAuthURLResponse, error) {
 	// 获取提供商配置
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
@@ -96,8 +106,8 @@ func (s *SocialAuthService) GetAuthURLWithSessionID(providerIdentifier string, s
 		return nil, fmt.Errorf("生成state失败: %w", err)
 	}
 
-	// 存储state（5分钟有效期），如果有sessionID则一并存储
-	if err := s.storeStateWithSessionID(state, sessionID, 5*time.Minute); err != nil {
+	// 存储state（5分钟有效期）
+	if err := s.storeStateData(state, stateData, 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("存储state失败: %w", err)
 	}
 
@@ -113,11 +123,16 @@ func (s *SocialAuthService) GetAuthURLWithSessionID(providerIdentifier string, s
 // HandleCallback 处理OAuth回调
 func (s *SocialAuthService) HandleCallback(providerIdentifier, code, state string) (*dto.SocialAuthCallbackResponse, error) {
 	// 验证state并获取关联的sessionID（如果有）
-	sessionID, valid := s.validateAndGetSessionID(state)
+	stateData, valid := s.ConsumeState(state)
 	if !valid {
 		return nil, fmt.Errorf("无效的state参数")
 	}
 
+	return s.HandleCallbackWithSessionID(providerIdentifier, code, stateData.SessionID)
+}
+
+// HandleCallbackWithSessionID 处理OAuth回调（state 已由调用方消费校验）
+func (s *SocialAuthService) HandleCallbackWithSessionID(providerIdentifier, code, sessionID string) (*dto.SocialAuthCallbackResponse, error) {
 	// 获取提供商配置
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
@@ -252,6 +267,11 @@ func (s *SocialAuthService) BindSocialAccount(userID uint, providerIdentifier, c
 		return fmt.Errorf("无效的state参数")
 	}
 
+	return s.BindWithCode(userID, providerIdentifier, code)
+}
+
+// BindWithCode 用授权码为指定用户绑定社交账号（state 已由调用方消费校验）
+func (s *SocialAuthService) BindWithCode(userID uint, providerIdentifier, code string) error {
 	// 获取提供商配置
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
@@ -529,27 +549,38 @@ func (s *SocialAuthService) generateState() (string, error) {
 	return v7.String(), nil
 }
 
+// StateModeBind state 的 bind 模式：已登录用户从个人中心发起绑定
+const StateModeBind = "bind"
+
 // StateData state关联的数据
 type StateData struct {
-	SessionID string `json:"sessionId,omitempty"` // OIDC会话ID
-	Timestamp int64  `json:"timestamp"`           // 创建时间戳
+	SessionID  string `json:"sessionId,omitempty"`  // OIDC会话ID
+	Mode       string `json:"mode,omitempty"`       // 空/登录 或 StateModeBind
+	BindUserID uint   `json:"bindUserId,omitempty"` // bind 模式下的目标用户ID
+	Timestamp  int64  `json:"timestamp"`            // 创建时间戳
+}
+
+// IsBind 是否为绑定模式的 state
+func (d *StateData) IsBind() bool {
+	return d != nil && d.Mode == StateModeBind
 }
 
 // storeState 存储state到Redis（兼容旧方法）
 func (s *SocialAuthService) storeState(state string, duration time.Duration) error {
-	return s.storeStateWithSessionID(state, "", duration)
+	return s.storeStateData(state, StateData{}, duration)
 }
 
 // storeStateWithSessionID 存储state到Redis（带session_id）
 func (s *SocialAuthService) storeStateWithSessionID(state string, sessionID string, duration time.Duration) error {
+	return s.storeStateData(state, StateData{SessionID: sessionID}, duration)
+}
+
+// storeStateData 存储state到Redis
+func (s *SocialAuthService) storeStateData(state string, stateData StateData, duration time.Duration) error {
 	ctx := context.Background()
 	key := s.stateKeyPrefix + state
 
-	// 构建state数据
-	stateData := StateData{
-		SessionID: sessionID,
-		Timestamp: time.Now().Unix(),
-	}
+	stateData.Timestamp = time.Now().Unix()
 
 	// 序列化为JSON
 	data, err := json.Marshal(stateData)
@@ -563,12 +594,21 @@ func (s *SocialAuthService) storeStateWithSessionID(state string, sessionID stri
 
 // validateState 验证state（兼容旧方法）
 func (s *SocialAuthService) validateState(state string) bool {
-	_, valid := s.validateAndGetSessionID(state)
+	_, valid := s.ConsumeState(state)
 	return valid
 }
 
 // validateAndGetSessionID 验证state并返回关联的sessionID
 func (s *SocialAuthService) validateAndGetSessionID(state string) (string, bool) {
+	stateData, valid := s.ConsumeState(state)
+	if !valid {
+		return "", false
+	}
+	return stateData.SessionID, true
+}
+
+// ConsumeState 校验并消费一次性 state，返回其关联数据
+func (s *SocialAuthService) ConsumeState(state string) (*StateData, bool) {
 	ctx := context.Background()
 	key := s.stateKeyPrefix + state
 
@@ -576,12 +616,12 @@ func (s *SocialAuthService) validateAndGetSessionID(state string) (string, bool)
 	data, err := s.redis.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
 		// state不存在或已过期
-		return "", false
+		return nil, false
 	}
 	if err != nil {
 		// Redis错误，为安全起见返回false
 		fmt.Printf("验证state时Redis错误: %v\n", err)
-		return "", false
+		return nil, false
 	}
 
 	// 验证成功后删除state（一次性使用）
@@ -595,10 +635,10 @@ func (s *SocialAuthService) validateAndGetSessionID(state string) (string, bool)
 	if err := json.Unmarshal([]byte(data), &stateData); err != nil {
 		// 可能是旧格式（时间戳），兼容处理
 		fmt.Printf("解析state数据失败，使用兼容模式: %v\n", err)
-		return "", true
+		return &StateData{}, true
 	}
 
-	return stateData.SessionID, true
+	return &stateData, true
 }
 
 // generateUsername 生成用户名

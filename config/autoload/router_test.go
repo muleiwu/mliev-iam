@@ -28,8 +28,18 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "POST", "/oidc/:client_id/token")
 	router.assertNoRoute(t, "GET", "/oidc/:client_id/token")
 
+	// 个人中心：资料/密码/绑定管理
+	router.assertRoute(t, "GET", "/api/user/profile")
+	router.assertRoute(t, "PUT", "/api/user/profile")
+	router.assertRoute(t, "PUT", "/api/user/password")
+	router.assertRoute(t, "GET", "/social/bind-auth/:provider")
+	router.assertRoute(t, "GET", "/identity/bind-auth/:provider")
+
 	if router.middlewarePrefixes["/api/auth"] == 0 {
 		t.Fatal("/api/auth must keep AuthMiddleware protection")
+	}
+	if router.middlewarePrefixes["/api/user"] == 0 {
+		t.Fatal("/api/user must keep AuthMiddleware protection")
 	}
 	if router.middlewarePrefixes["/api/oidc/auth"] != 0 {
 		t.Fatal("/api/oidc/auth must stay public so it can use the OIDC refresh_token cookie")

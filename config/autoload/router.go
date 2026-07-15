@@ -290,6 +290,7 @@ func (receiver Router) InitConfig() map[string]any {
 
 			socialAuth := router.Group("/social")
 			socialAuth.Use(middleware.AuthMiddleware())
+			socialAuth.GET("/bind-auth/:provider", controller.SocialAuthController{}.InitiateBind)
 			socialAuth.POST("/bind/:provider", controller.SocialAuthController{}.BindAccount)
 			socialAuth.DELETE("/unbind/:accountId", controller.SocialAuthController{}.UnbindAccount)
 
@@ -303,6 +304,7 @@ func (receiver Router) InitConfig() map[string]any {
 
 			identityAuth := router.Group("/identity")
 			identityAuth.Use(middleware.AuthMiddleware())
+			identityAuth.GET("/bind-auth/:provider", controller.IdentityAuthController{}.InitiateBind)
 			identityAuth.POST("/bind/:provider", controller.IdentityAuthController{}.BindAccount)
 			identityAuth.DELETE("/unbind/:accountId", controller.IdentityAuthController{}.UnbindAccount)
 

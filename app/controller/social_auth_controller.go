@@ -2,15 +2,28 @@ package controller
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
+
+// redirectBindResult 个人中心发起的绑定回调完成后，整页跳转回个人中心绑定 tab
+func redirectBindResult(c httpInterfaces.RouterContextInterface, err error) {
+	status := "success"
+	message := "绑定成功"
+	if err != nil {
+		status = "error"
+		message = err.Error()
+	}
+	c.Redirect(302, "/auth/#/account?tab=bindings&bind_status="+status+"&bind_message="+url.QueryEscape(message))
+}
 
 // SocialAuthController 社会化登录控制器（用户端）
 type SocialAuthController struct {
@@ -53,6 +66,31 @@ func (sc SocialAuthController) InitiateAuth(c httpInterfaces.RouterContextInterf
 	c.Redirect(302, response.AuthURL)
 }
 
+// InitiateBind 已登录用户从个人中心发起绑定授权
+// GET /social/bind-auth/:provider
+func (sc SocialAuthController) InitiateBind(c httpInterfaces.RouterContextInterface) {
+	userID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		sc.Error(c, constants.ErrCodeUnauthorized, "未登录")
+		return
+	}
+
+	providerIdentifier := c.Param("provider")
+	if providerIdentifier == "" {
+		sc.Error(c, constants.ErrCodeBadRequest, "提供商标识符不能为空")
+		return
+	}
+
+	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
+	response, err := authService.GetBindAuthURL(providerIdentifier, userID)
+	if err != nil {
+		sc.Error(c, constants.ErrCodeInternal, err.Error())
+		return
+	}
+
+	c.Redirect(302, response.AuthURL)
+}
+
 // HandleCallback 处理OAuth回调
 // GET /api/social/callback/:provider
 func (sc SocialAuthController) HandleCallback(c httpInterfaces.RouterContextInterface) {
@@ -74,7 +112,19 @@ func (sc SocialAuthController) HandleCallback(c httpInterfaces.RouterContextInte
 	}
 
 	authService := service.NewSocialAuthService(helper.GetDatabase(), helper.GetRedis())
-	response, err := authService.HandleCallback(providerIdentifier, code, state)
+	stateData, valid := authService.ConsumeState(state)
+	if !valid {
+		sc.Error(c, constants.ErrCodeBadRequest, "无效的state参数")
+		return
+	}
+
+	// 个人中心发起的绑定：服务端完成绑定后整页跳回个人中心，完全跳过登录处理
+	if stateData.IsBind() {
+		redirectBindResult(c, authService.BindWithCode(stateData.BindUserID, providerIdentifier, code))
+		return
+	}
+
+	response, err := authService.HandleCallbackWithSessionID(providerIdentifier, code, stateData.SessionID)
 	if err != nil {
 		sc.Error(c, constants.ErrCodeInternal, err.Error())
 		return
@@ -135,7 +185,9 @@ func (sc SocialAuthController) HandleCallback(c httpInterfaces.RouterContextInte
 		return
 	}
 
-	// 已绑定，直接登录成功
+	// 已绑定，直接登录成功（无论是否 OIDC 流程）签发个人中心会话 Cookie
+	issueUserSessionCookie(c, response.User, false)
+
 	// 如果有 sessionId，标记 OIDC 会话为已认证
 	if sessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
@@ -299,6 +351,7 @@ func (sc SocialAuthController) BindWithLogin(c httpInterfaces.RouterContextInter
 		}
 	}
 
+	issueUserSessionCookie(c, response.User, false)
 	sc.SuccessWithMessage(c, "绑定成功", response)
 }
 
@@ -345,6 +398,7 @@ func (sc SocialAuthController) RegisterWithSocial(c httpInterfaces.RouterContext
 		}
 	}
 
+	issueUserSessionCookie(c, response.User, false)
 	sc.SuccessWithMessage(c, "注册成功", response)
 }
 
@@ -385,6 +439,7 @@ func (sc SocialAuthController) MiniProgramLogin(c httpInterfaces.RouterContextIn
 		}
 	}
 
+	issueUserSessionCookie(c, response.User, false)
 	sc.Success(c, response)
 }
 
@@ -435,6 +490,11 @@ func (sc SocialAuthController) GetMPQRCodeStatus(c httpInterfaces.RouterContextI
 		} else {
 			resp.Token = ""
 		}
+	}
+
+	// 确认扫码后由 PC 浏览器轮询到此，签发个人中心会话 Cookie
+	if resp.State == service.QRStateConfirmed {
+		issueUserSessionCookie(c, resp.User, false)
 	}
 
 	sc.Success(c, resp)

@@ -57,6 +57,16 @@ func (s *JWTAuthService) GenerateToken(user *dto.UserResponse) (string, error) {
 	}, s.config.GetAccessTokenHours())
 }
 
+// GenerateUserToken 为普通用户会话（个人中心）签发内部 JWT，role 固定为 "user"。
+// 不能复用 GenerateToken：其未设置 Role，底层会回退为 "admin"，导致普通用户越权。
+func (s *JWTAuthService) GenerateUserToken(user *dto.UserResponse) (string, error) {
+	return s.jwtService.GenerateToken(jwt.TokenSubject{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     "user",
+	}, s.config.GetAccessTokenHours())
+}
+
 // ValidateToken 验证JWT token
 func (s *JWTAuthService) ValidateToken(tokenString string) (*jwt.Claims, error) {
 	return s.jwtService.ValidateToken(tokenString)
