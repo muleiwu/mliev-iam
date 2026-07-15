@@ -238,6 +238,10 @@ func (receiver Router) InitConfig() map[string]any {
 			userAuth.PUT("/password", controller.UserController{}.ChangePassword)
 			userAuth.GET("/social-accounts", controller.SocialAuthController{}.GetUserSocialAccounts)
 			userAuth.GET("/identity-accounts", controller.IdentityAuthController{}.GetUserIdentityAccounts)
+			userAuth.POST("/send-contact-verification-code", controller.UserController{}.SendContactVerificationCode)
+			userAuth.PUT("/email", controller.UserController{}.ChangeEmail)
+			userAuth.PUT("/phone", controller.UserController{}.ChangePhone)
+			userAuth.POST("/set-initial-password", controller.UserController{}.SetInitialPassword)
 
 			// 用户 JWT 令牌管理
 			auth := api.Group("/auth")
