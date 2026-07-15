@@ -394,6 +394,9 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		return nil, fmt.Errorf("更新会话失败: %w", err)
 	}
 
+	// 签发个人中心会话 Cookie（先于 OIDC Token 生成，后者降级失败不影响该 Cookie）
+	issueUserSessionCookie(ctx, user, rememberMe)
+
 	// 立即生成 OIDC Token
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	appService := service.NewApplicationService(helper.GetDatabase())
@@ -1489,6 +1492,7 @@ func (c OIDCAuthFlowController) revokeRefreshTokenCookie(ctx httpInterfaces.Rout
 		}
 	}
 	ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
+	clearUserSessionCookie(ctx)
 }
 
 func validSwitchAccountCSRF(session *service.OIDCSession, csrfToken string) bool {

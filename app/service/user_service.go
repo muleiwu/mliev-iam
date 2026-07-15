@@ -307,6 +307,35 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	return &response, nil
 }
 
+// UpdateMyProfile 个人中心自助更新（仅白名单字段，空值表示不修改）。
+// 不复用 UpdateUser：其空 Email/Phone 语义为"清空该字段"，自助场景会造成数据丢失。
+func (s *UserService) UpdateMyProfile(id uint, req *dto.UpdateMyProfileRequest) (*dto.UserResponse, error) {
+	user, err := s.userDao.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Nickname != "" {
+		user.Nickname = req.Nickname
+	}
+	if req.RealName != "" {
+		user.RealName = req.RealName
+	}
+	if req.Avatar != "" {
+		user.Avatar = req.Avatar
+	}
+	if req.Remark != "" {
+		user.Remark = req.Remark
+	}
+
+	if err := s.userDao.Update(user); err != nil {
+		return nil, err
+	}
+
+	response := dto.ConvertToUserResponse(user)
+	return &response, nil
+}
+
 // DeleteUser 删除用户
 func (s *UserService) DeleteUser(id uint) error {
 	// 检查用户是否存在
