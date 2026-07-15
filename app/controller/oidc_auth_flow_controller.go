@@ -505,7 +505,7 @@ func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInte
 		user = nil
 	}
 
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
 		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
 		return
@@ -609,7 +609,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	// 3. 验证邮箱和手机验证码
 	emailCodeVerified := false
 	phoneCodeVerified := false
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config != nil {
 		verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
 
@@ -960,32 +960,6 @@ func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []st
 	return scopes
 }
 
-// getVerificationCodeConfig 从数据库获取验证码服务配置
-func (c OIDCAuthFlowController) getVerificationCodeConfig() *service.VerificationCodeConfig {
-	// 从数据库获取推送服务配置
-	settingService := service.NewSettingService(helper.GetDatabase())
-	pushSettings, err := settingService.GetPushSettings()
-	if err != nil {
-		// 配置获取失败，返回 nil
-		return nil
-	}
-
-	// 检查必填字段
-	if pushSettings.BaseURL == "" || pushSettings.AppID == "" || pushSettings.AppSecret == "" {
-		return nil
-	}
-
-	return &service.VerificationCodeConfig{
-		BaseURL:        pushSettings.BaseURL,
-		AppID:          pushSettings.AppID,
-		AppSecret:      pushSettings.AppSecret,
-		SMSChannelID:   pushSettings.SMSChannelID,
-		EmailChannelID: pushSettings.EmailChannelID,
-		SMSSignature:   pushSettings.SMSSignature,
-		EmailSignature: pushSettings.EmailSignature,
-	}
-}
-
 func newVerificationCodeTraceID() string {
 	v7, err := uuid.NewV7()
 	if err != nil {
@@ -1093,7 +1067,7 @@ func (c OIDCAuthFlowController) SendLoginVerificationCode(ctx httpInterfaces.Rou
 		c.logVerificationCodeControllerInfo(traceID, "主表未注册但命中可认领旧用户，放行发码 type=%s receiver=%s", verificationType, service.MaskVerificationReceiver(req.Receiver))
 	}
 
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
 		c.logVerificationCodeControllerError(traceID, "登录验证码服务未配置")
 		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
@@ -1158,7 +1132,7 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterCo
 	}
 
 	// 2. 获取验证码服务配置
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
 		c.logVerificationCodeControllerError(traceID, "验证码服务未配置")
 		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
@@ -1227,7 +1201,7 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 	}
 
 	// 2. 获取验证码服务配置
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
 		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
 		return
@@ -1336,7 +1310,7 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.
 	c.logVerificationCodeControllerInfo(traceID, "注册验证码校验通过 scene=%s", captchaScene)
 
 	// 1. 获取验证码服务配置
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
 		c.logVerificationCodeControllerError(traceID, "注册验证码服务未配置")
 		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))

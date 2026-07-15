@@ -672,6 +672,78 @@ func (s *UserService) MarkContactVerified(userID uint, emailVerified, phoneVerif
 	return s.userDao.UpdateById(userID, updates)
 }
 
+// ContactInUse 检查邮箱/手机号是否已被其他用户占用（排除 excludeUserID 自身）。
+func (s *UserService) ContactInUse(verificationType VerificationType, value string, excludeUserID uint) (bool, error) {
+	switch verificationType {
+	case VerificationTypeEmail:
+		return s.userDao.ExistsEmail(value, excludeUserID)
+	case VerificationTypePhone:
+		return s.userDao.ExistsPhone(value, excludeUserID)
+	default:
+		return false, fmt.Errorf("不支持的联系方式类型")
+	}
+}
+
+// UpdateVerifiedContact 更新已通过验证码验证归属的联系方式。
+// 调用方须先完成验证码校验；value 须已规范化（手机号 E.164、邮箱去空白）。
+// 单次 UpdateById 同时写入新值与 verified_at，避免出现"新值未验证"的中间态。
+func (s *UserService) UpdateVerifiedContact(userID uint, verificationType VerificationType, value string) error {
+	now := time.Now()
+	var updates map[string]interface{}
+
+	switch verificationType {
+	case VerificationTypeEmail:
+		exists, err := s.userDao.ExistsEmail(value, userID)
+		if err != nil {
+			return fmt.Errorf("检查邮箱失败: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("邮箱已存在")
+		}
+		updates = map[string]interface{}{"email": value, "email_verified_at": now}
+	case VerificationTypePhone:
+		exists, err := s.userDao.ExistsPhone(value, userID)
+		if err != nil {
+			return fmt.Errorf("检查手机号失败: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("手机号已存在")
+		}
+		updates = map[string]interface{}{"phone": value, "phone_verified_at": now}
+	default:
+		return fmt.Errorf("不支持的联系方式类型")
+	}
+
+	return s.userDao.UpdateById(userID, updates)
+}
+
+// SetInitialPassword 为无密码用户（社交注册）设置初始密码。
+// 已有密码的用户必须走 ChangePassword 验证旧密码，防止会话劫持后直接改密。
+func (s *UserService) SetInitialPassword(userID uint, newPassword string) error {
+	user, err := s.userDao.GetByID(userID)
+	if err != nil {
+		return err
+	}
+
+	if user.PasswordHash != "" {
+		return fmt.Errorf("已设置密码，请使用修改密码功能")
+	}
+
+	salt, passwordHash, err := s.generatePasswordHash(newPassword)
+	if err != nil {
+		return fmt.Errorf("生成密码哈希失败: %w", err)
+	}
+
+	updates := map[string]interface{}{
+		"salt":            salt,
+		"password_hash":   passwordHash,
+		"password_expiry": time.Now().AddDate(0, 3, 0), // 3个月后过期，与 ResetPassword 一致
+		"failure_count":   0,
+	}
+
+	return s.userDao.UpdateById(userID, updates)
+}
+
 // ============= RBAC权限相关方法 =============
 
 // CheckUserURLPermission 检查用户是否有URL访问权限

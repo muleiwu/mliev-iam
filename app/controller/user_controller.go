@@ -7,6 +7,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
@@ -65,15 +66,23 @@ func (uc UserController) ChangePassword(c httpInterfaces.RouterContextInterface)
 	uc.SuccessWithMessage(c, "密码修改成功", nil)
 }
 
-// ValidateLogin 用户登录验证
+// ValidateLogin 个人中心独立登录（不依赖 OIDC session）。
+// 校验凭证后签发 user_access_token Cookie，供 /api/user/* 接口使用。
 // POST /api/user/login
 func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) {
-	var req struct {
-		Username string `json:"username" binding:"required"`
-		Password string `json:"password" binding:"required"`
+	if !uc.requireJSONContentType(c) {
+		return
 	}
+
+	var req dto.AccountLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		uc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err != nil {
+		uc.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 
@@ -93,12 +102,7 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 		return
 	}
 
-	// 更新用户登录IP
-	clientIP := c.ClientIP()
-	if clientIP != "" {
-		// 这里可以通过服务层更新用户的最后登录IP
-		// userService.UpdateLastLoginIP(response.ID, clientIP)
-	}
+	issueUserSessionCookie(c, response, req.RememberMe)
 
 	uc.SuccessWithMessage(c, "登录成功", response)
 }
@@ -156,6 +160,42 @@ func (uc UserController) UpdateUserProfile(c httpInterfaces.RouterContextInterfa
 	}
 
 	uc.SuccessWithMessage(c, "个人信息更新成功", response)
+}
+
+// SetInitialPassword 无密码用户（社交注册）设置初始密码
+// POST /api/user/set-initial-password
+func (uc UserController) SetInitialPassword(c httpInterfaces.RouterContextInterface) {
+	userId, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
+		return
+	}
+	if !uc.requireJSONContentType(c) {
+		return
+	}
+
+	var req dto.SetInitialPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		uc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	if err := userService.SetInitialPassword(userId, req.NewPassword); err != nil {
+		errCode := constants.ErrCodeInternal
+		errMsg := err.Error()
+
+		if strings.Contains(errMsg, "已设置密码") {
+			errCode = constants.ErrCodeConflict
+		} else if strings.Contains(errMsg, "用户不存在") {
+			errCode = constants.ErrCodeUserNotFound
+		}
+
+		uc.Error(c, errCode, errMsg)
+		return
+	}
+
+	uc.SuccessWithMessage(c, "密码设置成功", nil)
 }
 
 // Logout 用户退出登录
