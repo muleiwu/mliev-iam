@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">MLiev IAM app icon</title>
+  <desc id="desc">The MLiev IAM identity gateway mark on a dark rounded tile.</desc>
+  <defs>
+    <path
+      id="mliev-m"
+      d="M176 768V304c0-35.346 28.654-64 64-64h72l200 258 200-258h72c35.346 0 64 28.654 64 64v464H688V518L512 730 336 518v250H176Z"
+    />
+    <mask id="identity-gateway">
+      <rect width="1024" height="1024" fill="#000" />
+      <use href="#mliev-m" fill="#fff" />
+      <path d="M464 472h96v258h-96Z" fill="#fff" />
+      <circle cx="512" cy="574" r="28" fill="#000" />
+      <path d="M488 598c0-13.255 10.745-24 24-24s24 10.745 24 24v66h-48v-66Z" fill="#000" />
+    </mask>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="#0F172A" />
+  <g mask="url(#identity-gateway)">
+    <rect x="176" y="240" width="512" height="528" fill="#F8FAFC" />
+    <rect x="688" y="240" width="160" height="528" fill="#60A5FA" />
+  </g>
+</svg>
