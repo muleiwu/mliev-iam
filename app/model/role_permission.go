@@ -16,18 +16,33 @@ func (j *JSONObject) Scan(value interface{}) error {
 		*j = JSONObject{}
 		return nil
 	}
-	bytes, ok := value.([]byte)
-	if !ok {
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
 		return errors.New("failed to scan JSONB")
+	}
+	if len(bytes) == 0 {
+		*j = JSONObject{}
+		return nil
 	}
 	return json.Unmarshal(bytes, j)
 }
 
 func (j JSONObject) Value() (driver.Value, error) {
 	if j == nil {
-		return []byte("{}"), nil
+		return "{}", nil
 	}
-	return json.Marshal(j)
+	// 返回 string 而非 []byte：pgx 简单协议下 []byte 会被编码为 bytea
+	// 十六进制字面量，写入 json/jsonb 列报 22P02。
+	b, err := json.Marshal(j)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 // RolePermission represents the many-to-many relationship between roles and permissions.

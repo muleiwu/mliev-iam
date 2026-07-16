@@ -7,75 +7,105 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 // AdminCookieName 管理员 Access Token 的 HttpOnly Cookie 名
 const AdminCookieName = "admin_access_token"
 
-// extractBearerToken 从 Authorization 头或 HttpOnly Cookie 提取 JWT
-// 优先 Authorization 头（便于 API 调试与移动端），其次 Cookie（浏览器端防 XSS）
-func extractBearerToken(c httpInterfaces.RouterContextInterface) string {
+// UserCookieName 普通用户会话 Access Token 的 HttpOnly Cookie 名（个人中心使用）
+const UserCookieName = "user_access_token"
+
+// extractTokenCandidates 按优先级返回待校验的凭据候选：
+// Authorization 头存在时仅使用该头（严格校验，不回退 Cookie，保持 API 语义）；
+// 否则依次尝试 admin_access_token、user_access_token Cookie，
+// 由调用方逐个校验，第一个有效者生效（过期的 admin Cookie 可落到 user Cookie）。
+func extractTokenCandidates(c httpInterfaces.RouterContextInterface) []string {
 	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) == 2 && parts[0] == "Bearer" {
-			return strings.TrimSpace(parts[1])
+			return []string{strings.TrimSpace(parts[1])}
 		}
-		return ""
+		return nil
 	}
-	if cookie, err := c.Cookie(AdminCookieName); err == nil && cookie != "" {
-		return cookie
+	var candidates []string
+	for _, name := range []string{AdminCookieName, UserCookieName} {
+		if cookie, err := c.Cookie(name); err == nil && cookie != "" {
+			candidates = append(candidates, cookie)
+		}
 	}
-	return ""
+	return candidates
+}
+
+// validateTokenCandidates 依次校验候选凭据，返回第一个有效的 Claims
+func validateTokenCandidates(jwtAuthService *service.JWTAuthService, candidates []string) (*jwt.Claims, error) {
+	var lastErr error
+	for _, token := range candidates {
+		claims, err := jwtAuthService.ValidateToken(token)
+		if err == nil {
+			return claims, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// authenticate 校验请求凭据并写入用户上下文（不推进 handler 链）。
+// 返回 false 表示已写入错误响应并中止。
+func authenticate(c httpInterfaces.RouterContextInterface) bool {
+	candidates := extractTokenCandidates(c)
+	if len(candidates) == 0 {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
+			Code:    constants.ErrCodeUnauthorized,
+			Message: "缺少认证令牌",
+		})
+		return false
+	}
+
+	jwtAuthService, err := service.NewJWTAuthServiceWithError()
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, dto.Response{
+			Code:    constants.ErrCodeInternal,
+			Message: "JWT配置错误: " + err.Error(),
+		})
+		return false
+	}
+	claims, err := validateTokenCandidates(jwtAuthService, candidates)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
+			Code:    constants.ErrCodeUnauthorized,
+			Message: "认证令牌无效: " + err.Error(),
+		})
+		return false
+	}
+
+	c.Set("user_id", claims.UserID)
+	c.Set("username", claims.Username)
+	c.Set("role", claims.Role)
+	c.Set("claims", claims)
+	return true
 }
 
 // AuthMiddleware JWT认证中间件
 // 支持两种凭据来源（任选其一）：
 //  1. Authorization: Bearer <token>
-//  2. HttpOnly Cookie admin_access_token（浏览器推荐，防 XSS 窃取）
+//  2. HttpOnly Cookie admin_access_token / user_access_token（浏览器推荐，防 XSS 窃取）
 func AuthMiddleware() httpInterfaces.HandlerFunc {
 	return func(c httpInterfaces.RouterContextInterface) {
-		tokenString := extractBearerToken(c)
-		if tokenString == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
-				Code:    constants.ErrCodeUnauthorized,
-				Message: "缺少认证令牌",
-			})
+		if !authenticate(c) {
 			return
 		}
-
-		jwtAuthService, err := service.NewJWTAuthServiceWithError()
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, dto.Response{
-				Code:    constants.ErrCodeInternal,
-				Message: "JWT配置错误: " + err.Error(),
-			})
-			return
-		}
-		claims, err := jwtAuthService.ValidateToken(tokenString)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
-				Code:    constants.ErrCodeUnauthorized,
-				Message: "认证令牌无效: " + err.Error(),
-			})
-			return
-		}
-
-		c.Set("user_id", claims.UserID)
-		c.Set("username", claims.Username)
-		c.Set("role", claims.Role)
-		c.Set("claims", claims)
-
 		c.Next()
 	}
 }
 
-// AdminAuthMiddleware 管理员认证中间件
+// AdminAuthMiddleware 管理员认证中间件。
+// 角色检查必须发生在 c.Next() 之前——不能复用 AuthMiddleware() 再补检查，
+// 其内部的 c.Next() 会先把业务 handler 跑完，403 就形同虚设。
 func AdminAuthMiddleware() httpInterfaces.HandlerFunc {
-	authMw := AuthMiddleware()
 	return func(c httpInterfaces.RouterContextInterface) {
-		authMw(c)
-		if c.IsAborted() {
+		if !authenticate(c) {
 			return
 		}
 
@@ -96,8 +126,8 @@ func AdminAuthMiddleware() httpInterfaces.HandlerFunc {
 // 如果提供了token则验证，如果没有提供则继续执行，但不设置用户信息
 func OptionalAuthMiddleware() httpInterfaces.HandlerFunc {
 	return func(c httpInterfaces.RouterContextInterface) {
-		tokenString := extractBearerToken(c)
-		if tokenString == "" {
+		candidates := extractTokenCandidates(c)
+		if len(candidates) == 0 {
 			c.Next()
 			return
 		}
@@ -106,7 +136,7 @@ func OptionalAuthMiddleware() httpInterfaces.HandlerFunc {
 			c.Next()
 			return
 		}
-		claims, err := jwtAuthService.ValidateToken(tokenString)
+		claims, err := validateTokenCandidates(jwtAuthService, candidates)
 		if err != nil {
 			c.Next()
 			return

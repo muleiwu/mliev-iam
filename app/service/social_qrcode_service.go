@@ -171,7 +171,7 @@ func (s *SocialQRCodeService) GetStatus(
 			return nil, fmt.Errorf("JWT配置错误: %w", err)
 		}
 		s.jwtAuthService = jwtAuthService
-		token, err := jwtAuthService.GenerateToken(userResp)
+		token, err := jwtAuthService.GenerateUserToken(userResp)
 		if err != nil {
 			return nil, fmt.Errorf("生成令牌失败: %w", err)
 		}

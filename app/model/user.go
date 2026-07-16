@@ -44,7 +44,7 @@ type User struct {
 	Avatar   string  `gorm:"size:255" json:"avatar" validate:"max=255"`
 
 	Salt         string `gorm:"size:32" json:"-"`
-	PasswordHash string `gorm:"size:100" json:"-"`
+	PasswordHash string `gorm:"size:255" json:"-"`
 
 	// 状态管理
 	Status          UserStatus `gorm:"default:0;not null" json:"status"`
@@ -52,6 +52,7 @@ type User struct {
 	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
 	PhoneVerifiedAt *time.Time `json:"phoneVerifiedAt"`
 	LoginCount      int64      `gorm:"default:0" json:"loginCount"`
+	FailureCount    int64      `gorm:"default:0" json:"failureCount"`
 
 	// 时间信息
 	LastLoginAt    *time.Time     `json:"lastLoginAt"`

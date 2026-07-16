@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 480" role="img" aria-labelledby="title desc">
+  <title id="title">MLiev IAM horizontal logo</title>
+  <desc id="desc">MLiev IAM logo mark with the product name and Identity and Access Management descriptor.</desc>
+  <defs>
+    <path
+      id="mliev-m"
+      d="M60 360V120c0-17.673 14.327-32 32-32h48l92 126 92-126h48c17.673 0 32 14.327 32 32v240h-80V230l-92 112-92-112v130H60Z"
+    />
+    <mask id="identity-gateway">
+      <rect width="480" height="480" fill="#000" />
+      <use href="#mliev-m" fill="#fff" />
+      <path d="M210 202h44v140h-44Z" fill="#fff" />
+      <circle cx="232" cy="258" r="13" fill="#000" />
+      <path d="M221 269c0-6.075 4.925-11 11-11s11 4.925 11 11v34h-22v-34Z" fill="#000" />
+    </mask>
+  </defs>
+  <g mask="url(#identity-gateway)">
+    <rect x="60" y="88" width="264" height="272" fill="#2563EB" />
+    <rect x="324" y="88" width="80" height="272" fill="#0F172A" />
+  </g>
+  <text x="480" y="232" fill="#0F172A" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="132" font-weight="750" letter-spacing="-5">MLIEV</text>
+  <text x="933" y="232" fill="#2563EB" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="132" font-weight="750" letter-spacing="-5">IAM</text>
+  <text x="488" y="304" fill="#475569" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="34" font-weight="600" letter-spacing="8">IDENTITY &amp; ACCESS MANAGEMENT</text>
+</svg>

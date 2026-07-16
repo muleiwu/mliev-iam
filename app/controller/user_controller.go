@@ -1,12 +1,13 @@
 package controller
 
 import (
-	"strconv"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
@@ -16,20 +17,27 @@ type UserController struct {
 	BaseResponse
 }
 
+// requireJSONContentType 拒绝非 JSON 请求体。
+// 会话 Cookie 在 HTTPS 下为 SameSite=None，跨站表单（text/plain 等）可携带 Cookie 提交，
+// 而 ShouldBindJSON 不校验 Content-Type，因此写接口必须显式限制。
+func (uc UserController) requireJSONContentType(c httpInterfaces.RouterContextInterface) bool {
+	contentType := c.GetHeader("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "application/json") {
+		uc.Error(c, constants.ErrCodeBadRequest, "Content-Type 必须为 application/json")
+		return false
+	}
+	return true
+}
+
 // ChangePassword 修改用户密码（用户修改自己的密码）
 // PUT /api/user/password
 func (uc UserController) ChangePassword(c httpInterfaces.RouterContextInterface) {
-	// 这里需要从认证中间件或JWT中获取当前用户ID
-	// 暂时使用查询参数模拟
-	userIdStr := c.Query("userId")
-	if userIdStr == "" {
+	userId, ok := middleware.GetCurrentUserID(c)
+	if !ok {
 		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
 	}
-
-	userId, err := strconv.ParseUint(userIdStr, 10, 32)
-	if err != nil {
-		uc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+	if !uc.requireJSONContentType(c) {
 		return
 	}
 
@@ -40,7 +48,7 @@ func (uc UserController) ChangePassword(c httpInterfaces.RouterContextInterface)
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	err = userService.ChangePassword(uint(userId), &req)
+	err := userService.ChangePassword(userId, &req)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -58,15 +66,23 @@ func (uc UserController) ChangePassword(c httpInterfaces.RouterContextInterface)
 	uc.SuccessWithMessage(c, "密码修改成功", nil)
 }
 
-// ValidateLogin 用户登录验证
+// ValidateLogin 个人中心独立登录（不依赖 OIDC session）。
+// 校验凭证后签发 user_access_token Cookie，供 /api/user/* 接口使用。
 // POST /api/user/login
 func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) {
-	var req struct {
-		Username string `json:"username" binding:"required"`
-		Password string `json:"password" binding:"required"`
+	if !uc.requireJSONContentType(c) {
+		return
 	}
+
+	var req dto.AccountLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		uc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err != nil {
+		uc.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 
@@ -86,12 +102,7 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 		return
 	}
 
-	// 更新用户登录IP
-	clientIP := c.ClientIP()
-	if clientIP != "" {
-		// 这里可以通过服务层更新用户的最后登录IP
-		// userService.UpdateLastLoginIP(response.ID, clientIP)
-	}
+	issueUserSessionCookie(c, response, req.RememberMe)
 
 	uc.SuccessWithMessage(c, "登录成功", response)
 }
@@ -99,22 +110,14 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 // GetUserProfile 获取当前用户信息
 // GET /api/user/profile
 func (uc UserController) GetUserProfile(c httpInterfaces.RouterContextInterface) {
-	// 这里需要从认证中间件或JWT中获取当前用户ID
-	// 暂时使用查询参数模拟
-	userIdStr := c.Query("userId")
-	if userIdStr == "" {
+	userId, ok := middleware.GetCurrentUserID(c)
+	if !ok {
 		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
 	}
 
-	userId, err := strconv.ParseUint(userIdStr, 10, 32)
-	if err != nil {
-		uc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
-		return
-	}
-
 	userService := service.NewUserService(helper.GetDatabase())
-	response, err := userService.GetUserByID(uint(userId))
+	response, err := userService.GetUserByID(userId)
 	if err != nil {
 		errCode := constants.ErrCodeUserNotFound
 		if !strings.Contains(err.Error(), "用户不存在") {
@@ -127,48 +130,72 @@ func (uc UserController) GetUserProfile(c httpInterfaces.RouterContextInterface)
 	uc.Success(c, response)
 }
 
-// UpdateUserProfile 更新当前用户信息
+// UpdateUserProfile 更新当前用户信息（自助白名单字段）
 // PUT /api/user/profile
 func (uc UserController) UpdateUserProfile(c httpInterfaces.RouterContextInterface) {
-	// 这里需要从认证中间件或JWT中获取当前用户ID
-	// 暂时使用查询参数模拟
-	userIdStr := c.Query("userId")
-	if userIdStr == "" {
+	userId, ok := middleware.GetCurrentUserID(c)
+	if !ok {
 		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
 		return
 	}
-
-	userId, err := strconv.ParseUint(userIdStr, 10, 32)
-	if err != nil {
-		uc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
+	if !uc.requireJSONContentType(c) {
 		return
 	}
 
-	var req dto.UpdateUserRequest
+	var req dto.UpdateMyProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		uc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	response, err := userService.UpdateUser(uint(userId), &req)
+	response, err := userService.UpdateMyProfile(userId, &req)
 	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if strings.Contains(err.Error(), "用户不存在") {
+			errCode = constants.ErrCodeUserNotFound
+		}
+		uc.Error(c, errCode, err.Error())
+		return
+	}
+
+	uc.SuccessWithMessage(c, "个人信息更新成功", response)
+}
+
+// SetInitialPassword 无密码用户（社交注册）设置初始密码
+// POST /api/user/set-initial-password
+func (uc UserController) SetInitialPassword(c httpInterfaces.RouterContextInterface) {
+	userId, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
+		return
+	}
+	if !uc.requireJSONContentType(c) {
+		return
+	}
+
+	var req dto.SetInitialPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		uc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	userService := service.NewUserService(helper.GetDatabase())
+	if err := userService.SetInitialPassword(userId, req.NewPassword); err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
-		if strings.Contains(errMsg, "用户不存在") {
+		if strings.Contains(errMsg, "已设置密码") {
+			errCode = constants.ErrCodeConflict
+		} else if strings.Contains(errMsg, "用户不存在") {
 			errCode = constants.ErrCodeUserNotFound
-		} else if strings.Contains(errMsg, "邮箱已存在") {
-			errCode = constants.ErrCodeEmailAlreadyExists
-		} else if strings.Contains(errMsg, "手机号已存在") {
-			errCode = constants.ErrCodePhoneAlreadyExists
 		}
 
 		uc.Error(c, errCode, errMsg)
 		return
 	}
 
-	uc.SuccessWithMessage(c, "个人信息更新成功", response)
+	uc.SuccessWithMessage(c, "密码设置成功", nil)
 }
 
 // Logout 用户退出登录
@@ -220,23 +247,15 @@ func (uc UserController) RefreshToken(c httpInterfaces.RouterContextInterface) {
 // GetAccessCodes 获取用户权限码
 // GET /api/auth/codes
 func (uc UserController) GetAccessCodes(c httpInterfaces.RouterContextInterface) {
-	// 这里需要从认证中间件或JWT中获取当前用户ID
-	// 暂时使用查询参数模拟
-	userIdStr := c.Query("userId")
-	if userIdStr == "" {
+	userId, ok := middleware.GetCurrentUserID(c)
+	if !ok {
 		uc.Error(c, constants.ErrCodeUnauthorized, "未登录或登录已过期")
-		return
-	}
-
-	userId, err := strconv.ParseUint(userIdStr, 10, 32)
-	if err != nil {
-		uc.Error(c, constants.ErrCodeBadRequest, "用户ID格式错误")
 		return
 	}
 
 	// 获取用户的所有权限码
 	userService := service.NewUserService(helper.GetDatabase())
-	permissions, err := userService.GetUserPermissions(uint(userId))
+	permissions, err := userService.GetUserPermissions(userId)
 	if err != nil {
 		uc.Error(c, constants.ErrCodeInternal, "获取权限码失败: "+err.Error())
 		return

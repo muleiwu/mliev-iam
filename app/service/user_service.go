@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,19 +11,10 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
-	"golang.org/x/crypto/bcrypt"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"gorm.io/gorm"
 )
-
-// bcryptCost 定义 bcrypt 工作因子。12 是当前推荐下限（2026 年硬件），
-// 单次验签耗时约 250ms。调高会线性增加 CPU 成本。
-const bcryptCost = 12
-
-// isBcryptHash 判断已存密码是否为 bcrypt 格式（$2a$/$2b$/$2y$ 前缀）。
-// 非 bcrypt 视为历史 SHA-256 + salt 格式。
-func isBcryptHash(hash string) bool {
-	return strings.HasPrefix(hash, "$2a$") || strings.HasPrefix(hash, "$2b$") || strings.HasPrefix(hash, "$2y$")
-}
 
 // UserService 用户业务逻辑层
 type UserService struct {
@@ -42,8 +34,43 @@ func NewUserService(database *gorm.DB) *UserService {
 	}
 }
 
+// GenerateAvailableUsername 生成符合账户格式且未被占用的内部用户名。
+func (s *UserService) GenerateAvailableUsername() (string, error) {
+	return s.generateAvailableUsername(utils.GenerateUUIDv7)
+}
+
+func (s *UserService) generateAvailableUsername(generateID func() (string, error)) (string, error) {
+	for i := 0; i < 5; i++ {
+		id, err := generateID()
+		if err != nil {
+			return "", fmt.Errorf("生成用户名失败: %w", err)
+		}
+
+		token := strings.ReplaceAll(id, "-", "")
+		if len(token) < 16 {
+			return "", fmt.Errorf("生成用户名失败: 随机标识长度不足")
+		}
+
+		username := "u_" + token[:16]
+		exists, err := s.userDao.ExistsUsername(username)
+		if err != nil {
+			return "", fmt.Errorf("检查用户名失败: %w", err)
+		}
+		if !exists {
+			return username, nil
+		}
+	}
+
+	return "", fmt.Errorf("生成用户名失败: 用户名冲突")
+}
+
 // CreateUser 创建用户
 func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse, error) {
+	// 校验账户格式：禁止纯数字、禁止含 "@"（保证登录标识符判断无歧义）
+	if err := utils.ValidateUsernameFormat(req.Username); err != nil {
+		return nil, err
+	}
+
 	// 验证用户名是否已存在
 	exists, err := s.userDao.ExistsUsername(req.Username)
 	if err != nil {
@@ -64,8 +91,14 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		}
 	}
 
-	// 验证手机号是否已存在
+	// 规范化手机号为 E.164 并验证是否已存在
 	if req.Phone != "" {
+		normalized, err := utils.NormalizePhoneToE164(req.Phone, utils.DefaultPhoneRegion)
+		if err != nil {
+			return nil, err
+		}
+		req.Phone = normalized
+
 		exists, err = s.userDao.ExistsPhone(req.Phone)
 		if err != nil {
 			return nil, fmt.Errorf("检查手机号失败: %w", err)
@@ -103,6 +136,7 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 		Status:       model.UserStatusActive,
 		IsActivated:  true,
 		Remark:       req.Remark,
+		Attributes:   filterCreateAttributes(req.Attributes),
 	}
 
 	// 保存到数据库
@@ -113,6 +147,31 @@ func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse,
 	// 转换为响应DTO
 	response := dto.ConvertToUserResponse(user)
 	return &response, nil
+}
+
+// reservedCreateAttributeKeys 创建用户时禁止外部写入的扩展属性键。
+// 邮箱/手机验证状态只能经验证流程置位，避免导入数据篡改 verified 语义。
+var reservedCreateAttributeKeys = map[string]struct{}{
+	"email_verified":        {},
+	"phone_number_verified": {},
+}
+
+// filterCreateAttributes 过滤保留键后返回可安全落库的扩展属性；输入为空或过滤后为空时返回 nil。
+func filterCreateAttributes(attrs map[string]interface{}) model.JSONObject {
+	if len(attrs) == 0 {
+		return nil
+	}
+	filtered := make(model.JSONObject, len(attrs))
+	for k, v := range attrs {
+		if _, reserved := reservedCreateAttributeKeys[k]; reserved {
+			continue
+		}
+		filtered[k] = v
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // GetUserByID 根据ID获取用户
@@ -167,8 +226,14 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 		user.Email = nil
 	}
 
-	// 验证手机号是否已存在（排除自己）
+	// 规范化手机号为 E.164 并验证是否已存在（排除自己）
 	if req.Phone != "" {
+		normalized, err := utils.NormalizePhoneToE164(req.Phone, utils.DefaultPhoneRegion)
+		if err != nil {
+			return nil, err
+		}
+		req.Phone = normalized
+
 		// 检查是否与当前值不同
 		needUpdate := true
 		if user.Phone != nil && *user.Phone == req.Phone {
@@ -234,6 +299,35 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	}
 
 	// 保存更新
+	if err := s.userDao.Update(user); err != nil {
+		return nil, err
+	}
+
+	response := dto.ConvertToUserResponse(user)
+	return &response, nil
+}
+
+// UpdateMyProfile 个人中心自助更新（仅白名单字段，空值表示不修改）。
+// 不复用 UpdateUser：其空 Email/Phone 语义为"清空该字段"，自助场景会造成数据丢失。
+func (s *UserService) UpdateMyProfile(id uint, req *dto.UpdateMyProfileRequest) (*dto.UserResponse, error) {
+	user, err := s.userDao.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Nickname != "" {
+		user.Nickname = req.Nickname
+	}
+	if req.RealName != "" {
+		user.RealName = req.RealName
+	}
+	if req.Avatar != "" {
+		user.Avatar = req.Avatar
+	}
+	if req.Remark != "" {
+		user.Remark = req.Remark
+	}
+
 	if err := s.userDao.Update(user); err != nil {
 		return nil, err
 	}
@@ -407,14 +501,14 @@ func (s *UserService) GetActiveUsersCount() (int64, error) {
 }
 
 // generatePasswordHash 生成密码哈希。
-// 新记录一律使用 bcrypt；salt 字段保留为空字符串（bcrypt 自带 salt）。
+// 新记录统一经 passhash（argon2id）生成；salt 字段保留为空字符串（哈希自带 salt）。
 // 返回值保持既有调用方签名 (salt, hash, err) 不变。
 func (s *UserService) generatePasswordHash(password string) (salt, hash string, err error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	h, err := passhash.Hash(password)
 	if err != nil {
-		return "", "", fmt.Errorf("bcrypt hash failed: %w", err)
+		return "", "", fmt.Errorf("生成密码哈希失败: %w", err)
 	}
-	return "", string(b), nil
+	return "", h, nil
 }
 
 // GeneratePasswordHash 生成密码哈希（公开方法）
@@ -422,23 +516,59 @@ func (s *UserService) GeneratePasswordHash(password string) (salt, hash string, 
 	return s.generatePasswordHash(password)
 }
 
-// verifyPassword 验证密码。
-//   - bcrypt 新格式：忽略 salt，直接 CompareHashAndPassword。
-//   - 历史 SHA-256 + salt 格式：回落到旧校验逻辑，便于老用户登录后透明迁移。
-func (s *UserService) verifyPassword(password, salt, hash string) bool {
-	if isBcryptHash(hash) {
-		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+// verifyAndUpgrade 验证密码并在需要时返回升级后的新哈希。
+//   - 标准编码格式（argon2id / bcrypt / pbkdf2）：交给 passhash 自动分派；
+//     若源算法非 target(argon2id)，newHash 非空表示应持久化升级。
+//   - 历史 SHA-256 + salt 非标准格式：回落到旧校验；成功后用 argon2id 重哈希。
+//
+// 返回 ok=是否匹配；newHash!="" 表示调用方应把新哈希写回（salt 置空）。
+func (s *UserService) verifyAndUpgrade(password, salt, hash string) (ok bool, newHash string) {
+	if passhash.IsRecognized(hash) {
+		return passhash.VerifyAndUpgrade(password, hash)
 	}
+	// 历史 SHA-256 + salt 格式回落。
 	h := sha256.New()
 	h.Write([]byte(password + salt))
-	return hex.EncodeToString(h.Sum(nil)) == hash
+	if hex.EncodeToString(h.Sum(nil)) != hash {
+		return false, ""
+	}
+	// 校验通过，升级为 argon2id；升级失败不影响本次登录（下次再试）。
+	if upgraded, err := passhash.Hash(password); err == nil {
+		return true, upgraded
+	}
+	return true, ""
 }
 
-// ValidateUserForLogin 验证用户登录
-func (s *UserService) ValidateUserForLogin(username, password string) (*dto.UserResponse, error) {
-	// 根据用户名获取用户
-	user, err := s.userDao.GetByUsername(username)
+// verifyPassword 验证密码（仅判定是否匹配，不处理升级）。
+func (s *UserService) verifyPassword(password, salt, hash string) bool {
+	ok, _ := s.verifyAndUpgrade(password, salt, hash)
+	return ok
+}
+
+// ValidateUserForLogin 验证用户登录。
+// account 可以是 用户名 / 手机号 / 邮箱，按输入自动判断类型查找用户。
+// 因用户账户(username) 禁止全数字、禁止含 "@"，三类标识符不会冲突。
+func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserResponse, error) {
+	// 根据标识符类型获取用户
+	var (
+		user *model.User
+		err  error
+	)
+	switch utils.DetectLoginIdentifier(account) {
+	case utils.LoginIdentifierPhone:
+		user, err = s.userDao.GetByPhone(account)
+	case utils.LoginIdentifierEmail:
+		user, err = s.userDao.GetByEmail(account)
+	default:
+		user, err = s.userDao.GetByUsername(account)
+	}
 	if err != nil {
+		// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
+		// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
+		// 用户名 / 手机号 / 邮箱三类标识符均支持旧系统迁移登录。
+		if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(account, password); legacyErr == nil {
+			return resp, nil
+		}
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 
@@ -447,24 +577,171 @@ func (s *UserService) ValidateUserForLogin(username, password string) (*dto.User
 		return nil, fmt.Errorf("用户账户已禁用")
 	}
 
-	// 验证密码
-	if !s.verifyPassword(password, user.Salt, user.PasswordHash) {
-		return nil, fmt.Errorf("用户名或密码错误")
-	}
-
-	// 透明迁移：旧 SHA-256 + salt 格式的用户，登录成功后重哈希为 bcrypt。
-	// 失败只记日志、不影响本次登录（下次登录还会再尝试）。
-	if !isBcryptHash(user.PasswordHash) {
+	// 无密码账号（验证码认领迁移/社交注册）：主表没有哈希，密码校验必败。
+	// 若其关联了已迁移的旧用户记录，用旧系统凭据（legacy_users 里的旧哈希）走脚本校验；
+	// 通过则登录，并把本次明文密码以 argon2id 补进主表，之后走原生密码路径。
+	if user.PasswordHash == "" {
+		if !NewLegacyLoginService(s.database).VerifyMigratedUserPassword(user.ID, account, password) {
+			return nil, fmt.Errorf("用户名或密码错误")
+		}
 		if _, newHash, err := s.generatePasswordHash(password); err == nil {
 			_ = s.userDao.UpdateById(user.ID, map[string]interface{}{
 				"salt":          "",
 				"password_hash": newHash,
 			})
 		}
+		response := dto.ConvertToUserResponse(user)
+		return &response, nil
+	}
+
+	// 验证密码（同时拿到可能的升级哈希）
+	ok, newHash := s.verifyAndUpgrade(password, user.Salt, user.PasswordHash)
+	if !ok {
+		return nil, fmt.Errorf("用户名或密码错误")
+	}
+
+	// 透明迁移：旧算法（bcrypt / 历史 SHA-256+salt）登录成功后升级为 argon2id。
+	// 失败不影响本次登录（下次登录还会再尝试）。
+	if newHash != "" {
+		_ = s.userDao.UpdateById(user.ID, map[string]interface{}{
+			"salt":          "",
+			"password_hash": newHash,
+		})
 	}
 
 	response := dto.ConvertToUserResponse(user)
 	return &response, nil
+}
+
+// ErrLoginAccountNotFound 登录标识符在主 users 表中查无此人（区别于禁用/未验证等失败）。
+// 错误消息经 fmt.Errorf("%s%w", label, ...) 包装成"手机号未注册"等提示；
+// 调用方用 errors.Is 判断是否可回退到迁移数据认领。
+var ErrLoginAccountNotFound = errors.New("未注册")
+
+// GetVerifiedUserForCodeLogin 根据已验证邮箱或手机号获取可登录用户。
+func (s *UserService) GetVerifiedUserForCodeLogin(verificationType VerificationType, receiver string) (*dto.UserResponse, error) {
+	var (
+		user *model.User
+		err  error
+	)
+	identifierLabel := "手机号"
+
+	switch verificationType {
+	case VerificationTypeEmail:
+		identifierLabel = "邮箱"
+		user, err = s.userDao.GetByEmail(receiver)
+	case VerificationTypePhone:
+		user, err = s.userDao.GetByPhone(receiver)
+	default:
+		return nil, fmt.Errorf("不支持的验证码登录类型")
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("%s%w", identifierLabel, ErrLoginAccountNotFound)
+	}
+
+	if !user.CanLogin() {
+		return nil, fmt.Errorf("用户账户已禁用")
+	}
+
+	if verificationType == VerificationTypeEmail && user.EmailVerifiedAt == nil {
+		return nil, fmt.Errorf("邮箱未验证，无法使用验证码登录")
+	}
+	if verificationType == VerificationTypePhone && user.PhoneVerifiedAt == nil {
+		return nil, fmt.Errorf("手机号未验证，无法使用验证码登录")
+	}
+
+	response := dto.ConvertToUserResponse(user)
+	return &response, nil
+}
+
+// MarkContactVerified 把邮箱/手机标记为已验证。
+// 仅供已通过验证码等方式证明联系方式归属的流程调用（如注册时验证码校验通过后）。
+func (s *UserService) MarkContactVerified(userID uint, emailVerified, phoneVerified bool) error {
+	if !emailVerified && !phoneVerified {
+		return nil
+	}
+	now := time.Now()
+	updates := map[string]interface{}{}
+	if emailVerified {
+		updates["email_verified_at"] = now
+	}
+	if phoneVerified {
+		updates["phone_verified_at"] = now
+	}
+	return s.userDao.UpdateById(userID, updates)
+}
+
+// ContactInUse 检查邮箱/手机号是否已被其他用户占用（排除 excludeUserID 自身）。
+func (s *UserService) ContactInUse(verificationType VerificationType, value string, excludeUserID uint) (bool, error) {
+	switch verificationType {
+	case VerificationTypeEmail:
+		return s.userDao.ExistsEmail(value, excludeUserID)
+	case VerificationTypePhone:
+		return s.userDao.ExistsPhone(value, excludeUserID)
+	default:
+		return false, fmt.Errorf("不支持的联系方式类型")
+	}
+}
+
+// UpdateVerifiedContact 更新已通过验证码验证归属的联系方式。
+// 调用方须先完成验证码校验；value 须已规范化（手机号 E.164、邮箱去空白）。
+// 单次 UpdateById 同时写入新值与 verified_at，避免出现"新值未验证"的中间态。
+func (s *UserService) UpdateVerifiedContact(userID uint, verificationType VerificationType, value string) error {
+	now := time.Now()
+	var updates map[string]interface{}
+
+	switch verificationType {
+	case VerificationTypeEmail:
+		exists, err := s.userDao.ExistsEmail(value, userID)
+		if err != nil {
+			return fmt.Errorf("检查邮箱失败: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("邮箱已存在")
+		}
+		updates = map[string]interface{}{"email": value, "email_verified_at": now}
+	case VerificationTypePhone:
+		exists, err := s.userDao.ExistsPhone(value, userID)
+		if err != nil {
+			return fmt.Errorf("检查手机号失败: %w", err)
+		}
+		if exists {
+			return fmt.Errorf("手机号已存在")
+		}
+		updates = map[string]interface{}{"phone": value, "phone_verified_at": now}
+	default:
+		return fmt.Errorf("不支持的联系方式类型")
+	}
+
+	return s.userDao.UpdateById(userID, updates)
+}
+
+// SetInitialPassword 为无密码用户（社交注册）设置初始密码。
+// 已有密码的用户必须走 ChangePassword 验证旧密码，防止会话劫持后直接改密。
+func (s *UserService) SetInitialPassword(userID uint, newPassword string) error {
+	user, err := s.userDao.GetByID(userID)
+	if err != nil {
+		return err
+	}
+
+	if user.PasswordHash != "" {
+		return fmt.Errorf("已设置密码，请使用修改密码功能")
+	}
+
+	salt, passwordHash, err := s.generatePasswordHash(newPassword)
+	if err != nil {
+		return fmt.Errorf("生成密码哈希失败: %w", err)
+	}
+
+	updates := map[string]interface{}{
+		"salt":            salt,
+		"password_hash":   passwordHash,
+		"password_expiry": time.Now().AddDate(0, 3, 0), // 3个月后过期，与 ResetPassword 一致
+		"failure_count":   0,
+	}
+
+	return s.userDao.UpdateById(userID, updates)
 }
 
 // ============= RBAC权限相关方法 =============

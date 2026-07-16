@@ -153,6 +153,23 @@ func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID 
 	return s.UpdateSession(ctx, session)
 }
 
+// ResetAuthentication removes the user binding from an active OIDC session
+// while preserving the original authorization request. A fresh CSRF token is
+// issued so that a token from the previous authenticated state cannot be
+// reused after switching accounts.
+func (s *OIDCSessionService) ResetAuthentication(ctx context.Context, sessionID string) error {
+	session, err := s.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	if err := resetAuthenticationState(session); err != nil {
+		return err
+	}
+
+	return s.UpdateSession(ctx, session)
+}
+
 // MarkAsConsentGranted 标记会话为已授权
 func (s *OIDCSessionService) MarkAsConsentGranted(ctx context.Context, sessionID string) error {
 	session, err := s.GetSession(ctx, sessionID)
@@ -203,6 +220,21 @@ func (s *OIDCSessionService) ExtendSession(ctx context.Context, sessionID string
 // CleanupExpiredSessions Redis 会自动清理过期 key，这里保留为扩展点
 func (s *OIDCSessionService) CleanupExpiredSessions(ctx context.Context) error {
 	_ = ctx
+	return nil
+}
+
+func resetAuthenticationState(session *OIDCSession) error {
+	csrfToken, err := newCsrfToken()
+	if err != nil {
+		return fmt.Errorf("生成CSRF令牌失败: %w", err)
+	}
+
+	session.UserID = nil
+	session.IsAuthenticated = false
+	session.IsConsentGranted = false
+	session.AuthTime = time.Time{}
+	session.CsrfToken = csrfToken
+
 	return nil
 }
 

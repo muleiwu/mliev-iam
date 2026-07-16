@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	mlievpush "github.com/mliev-sdk/push-go"
 	"github.com/redis/go-redis/v9"
 )
@@ -75,8 +77,17 @@ func (s *VerificationCodeService) GenerateCode() (string, error) {
 // receiver: 接收者（邮箱或手机号）
 // verificationType: 验证类型（email 或 phone）
 // sessionID: 会话ID，用于生成唯一的 Redis key
-func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string, verificationType VerificationType, sessionID string) error {
+func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string, verificationType VerificationType, sessionID, traceID string) error {
+	logVerificationCodeInfo(traceID, "发送验证码开始 type=%s receiver=%s session=%s", verificationType, MaskVerificationReceiver(receiver), shortVerificationLogValue(sessionID))
+
 	if s.pushClient == nil {
+		baseURL := ""
+		appID := ""
+		if s.config != nil {
+			baseURL = s.config.BaseURL
+			appID = s.config.AppID
+		}
+		logVerificationCodeError(traceID, "推送服务未配置 baseUrl=%s appId=%s", baseURL, MaskVerificationReceiver(appID))
 		return fmt.Errorf("推送服务未配置")
 	}
 
@@ -84,28 +95,33 @@ func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string,
 	rateLimitKey := s.getRateLimitKey(receiver, verificationType)
 	exists, err := s.redis.Exists(ctx, rateLimitKey).Result()
 	if err != nil {
+		logVerificationCodeError(traceID, "检查发送频率失败 key=%s err=%v", maskVerificationKey(rateLimitKey, receiver), err)
 		return fmt.Errorf("检查发送频率失败: %w", err)
 	}
 	if exists > 0 {
+		logVerificationCodeWarn(traceID, "发送频率限制命中 key=%s type=%s receiver=%s", maskVerificationKey(rateLimitKey, receiver), verificationType, MaskVerificationReceiver(receiver))
 		return fmt.Errorf("发送过于频繁，请稍后再试")
 	}
 
 	// 生成验证码
 	code, err := s.GenerateCode()
 	if err != nil {
+		logVerificationCodeError(traceID, "生成验证码失败 err=%v", err)
 		return err
 	}
 
 	// 存储验证码到 Redis
 	codeKey := s.getCodeKey(receiver, verificationType, sessionID)
 	if err := s.redis.Set(ctx, codeKey, code, s.expiry).Err(); err != nil {
+		logVerificationCodeError(traceID, "存储验证码失败 key=%s err=%v", maskVerificationKey(codeKey, receiver), err)
 		return fmt.Errorf("存储验证码失败: %w", err)
 	}
+	logVerificationCodeInfo(traceID, "验证码已写入Redis key=%s ttl=%s", maskVerificationKey(codeKey, receiver), s.expiry)
 
 	// 设置发送频率限制（60秒内不能重复发送）
 	if err := s.redis.Set(ctx, rateLimitKey, "1", 60*time.Second).Err(); err != nil {
 		// 频率限制设置失败不影响主流程
-		fmt.Printf("设置发送频率限制失败: %v\n", err)
+		logVerificationCodeWarn(traceID, "设置发送频率限制失败 key=%s err=%v", maskVerificationKey(rateLimitKey, receiver), err)
 	}
 
 	// 发送验证码
@@ -118,6 +134,13 @@ func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string,
 		channelID = s.config.EmailChannelID
 		SignatureName = s.config.EmailSignature
 	}
+	if channelID <= 0 {
+		s.redis.Del(ctx, codeKey)
+		s.redis.Del(ctx, rateLimitKey)
+		logVerificationCodeError(traceID, "推送渠道未配置 type=%s channelId=%d", verificationType, channelID)
+		return fmt.Errorf("%s验证码推送渠道未配置", verificationTypeLabel(verificationType))
+	}
+	logVerificationCodeInfo(traceID, "调用推送服务 type=%s receiver=%s channelId=%d signatureConfigured=%t", verificationType, MaskVerificationReceiver(receiver), channelID, SignatureName != "")
 
 	req := &mlievpush.SendMessageRequest{
 		ChannelID:     channelID,
@@ -134,9 +157,11 @@ func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string,
 		// 发送失败时删除存储的验证码
 		s.redis.Del(ctx, codeKey)
 		s.redis.Del(ctx, rateLimitKey)
+		logVerificationCodeError(traceID, "推送服务发送失败 type=%s receiver=%s channelId=%d err=%v", verificationType, MaskVerificationReceiver(receiver), channelID, err)
 		return fmt.Errorf("发送验证码失败: %w", err)
 	}
 
+	logVerificationCodeInfo(traceID, "验证码发送成功 type=%s receiver=%s channelId=%d", verificationType, MaskVerificationReceiver(receiver), channelID)
 	return nil
 }
 
@@ -177,4 +202,76 @@ func (s *VerificationCodeService) getRateLimitKey(receiver string, verificationT
 // IsPushServiceConfigured 检查推送服务是否已配置
 func (s *VerificationCodeService) IsPushServiceConfigured() bool {
 	return s.pushClient != nil
+}
+
+// MaskVerificationReceiver 脱敏验证码接收人，避免日志泄露完整邮箱或手机号。
+func MaskVerificationReceiver(receiver string) string {
+	if receiver == "" {
+		return ""
+	}
+	if strings.Contains(receiver, "@") {
+		parts := strings.SplitN(receiver, "@", 2)
+		local := parts[0]
+		domain := parts[1]
+		if len(local) <= 1 {
+			return local + "***@" + domain
+		}
+		return local[:1] + "***" + local[len(local)-1:] + "@" + domain
+	}
+	if len(receiver) <= 7 {
+		if len(receiver) <= 2 {
+			return "***"
+		}
+		return receiver[:2] + "***"
+	}
+	return receiver[:3] + "****" + receiver[len(receiver)-4:]
+}
+
+func shortVerificationLogValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:8] + "..." + value[len(value)-4:]
+}
+
+func maskVerificationKey(key, receiver string) string {
+	if receiver == "" {
+		return key
+	}
+	return strings.ReplaceAll(key, receiver, MaskVerificationReceiver(receiver))
+}
+
+func verificationTypeLabel(verificationType VerificationType) string {
+	if verificationType == VerificationTypeEmail {
+		return "邮箱"
+	}
+	return "手机"
+}
+
+func logVerificationCodeInfo(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Info(formatVerificationCodeLog(traceID, format, args...))
+	}
+}
+
+func logVerificationCodeWarn(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Warn(formatVerificationCodeLog(traceID, format, args...))
+	}
+}
+
+func logVerificationCodeError(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Error(formatVerificationCodeLog(traceID, format, args...))
+	}
+}
+
+func formatVerificationCodeLog(traceID, format string, args ...any) string {
+	if traceID == "" {
+		traceID = "-"
+	}
+	return fmt.Sprintf("[verification-code] traceId=%s %s", traceID, fmt.Sprintf(format, args...))
 }

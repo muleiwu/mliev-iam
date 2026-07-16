@@ -141,6 +141,10 @@ func (receiver Router) InitConfig() map[string]any {
 			adminApps.GET("/:id", AdminController.ApplicationController{}.GetApplication)
 			adminApps.PUT("/:id", AdminController.ApplicationController{}.UpdateApplication)
 			adminApps.DELETE("/:id", AdminController.ApplicationController{}.DeleteApplication)
+			adminApps.GET("/:id/agreements", AdminController.AgreementController{}.ListApplicationAgreements)
+			adminApps.POST("/:id/agreements", AdminController.AgreementController{}.CreateApplicationAgreement)
+			adminApps.PUT("/:id/agreements/:agreementId", AdminController.AgreementController{}.UpdateApplicationAgreement)
+			adminApps.DELETE("/:id/agreements/:agreementId", AdminController.AgreementController{}.DeleteApplicationAgreement)
 			adminApps.GET("/:id/keys", AdminController.ApplicationController{}.GetApplicationKeys)
 			adminApps.POST("/:id/keys/rotate", AdminController.ApplicationController{}.RotateApplicationKey)
 			adminApps.POST("/:id/secret/reset", AdminController.ApplicationController{}.ResetClientSecret)
@@ -187,6 +191,13 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSettings.GET("/captcha/bindings", AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings)
 			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
 
+			// 管理员协议设置
+			adminAgreements := admin.Group("/agreements")
+			adminAgreements.Use(middleware.AdminAuthMiddleware())
+			adminAgreements.GET("/global", AdminController.AgreementController{}.ListGlobalAgreements)
+			adminAgreements.GET("/global/:code", AdminController.AgreementController{}.GetGlobalAgreement)
+			adminAgreements.PUT("/global/:code", AdminController.AgreementController{}.UpsertGlobalAgreement)
+
 			// 管理员验证码配置
 			adminCaptchaConfigs := admin.Group("/captcha-configs")
 			adminCaptchaConfigs.Use(middleware.AdminAuthMiddleware())
@@ -196,6 +207,23 @@ func (receiver Router) InitConfig() map[string]any {
 			adminCaptchaConfigs.POST("", AdminController.CaptchaConfigController{}.CreateCaptchaConfig)
 			adminCaptchaConfigs.PUT("/:id", AdminController.CaptchaConfigController{}.UpdateCaptchaConfig)
 			adminCaptchaConfigs.DELETE("/:id", AdminController.CaptchaConfigController{}.DeleteCaptchaConfig)
+
+			// 数据迁移模块（迁移源 / 旧用户 / 导入任务）
+			adminMigration := admin.Group("/migration")
+			adminMigration.Use(middleware.AdminAuthMiddleware())
+			adminMigration.GET("/sources", AdminController.MigrationController{}.ListSources)
+			adminMigration.POST("/sources", AdminController.MigrationController{}.CreateSource)
+			adminMigration.GET("/sources/:id", AdminController.MigrationController{}.GetSource)
+			adminMigration.PUT("/sources/:id", AdminController.MigrationController{}.UpdateSource)
+			adminMigration.DELETE("/sources/:id", AdminController.MigrationController{}.DeleteSource)
+			adminMigration.POST("/sources/:id/import", AdminController.MigrationController{}.StartImport)
+			adminMigration.POST("/test-script", AdminController.MigrationController{}.TestScript)
+			adminMigration.POST("/test-connection", AdminController.MigrationController{}.TestConnection)
+			adminMigration.GET("/tasks", AdminController.MigrationController{}.ListTasks)
+			adminMigration.GET("/tasks/:id", AdminController.MigrationController{}.GetTask)
+			adminMigration.POST("/tasks/:id/cancel", AdminController.MigrationController{}.CancelTask)
+			adminMigration.GET("/legacy-users", AdminController.MigrationController{}.ListLegacyUsers)
+			adminMigration.GET("/legacy-users/:id", AdminController.MigrationController{}.GetLegacyUser)
 
 			// === 普通用户路由 ===
 			// 公开：/api/user/login
@@ -210,6 +238,10 @@ func (receiver Router) InitConfig() map[string]any {
 			userAuth.PUT("/password", controller.UserController{}.ChangePassword)
 			userAuth.GET("/social-accounts", controller.SocialAuthController{}.GetUserSocialAccounts)
 			userAuth.GET("/identity-accounts", controller.IdentityAuthController{}.GetUserIdentityAccounts)
+			userAuth.POST("/send-contact-verification-code", controller.UserController{}.SendContactVerificationCode)
+			userAuth.PUT("/email", controller.UserController{}.ChangeEmail)
+			userAuth.PUT("/phone", controller.UserController{}.ChangePhone)
+			userAuth.POST("/set-initial-password", controller.UserController{}.SetInitialPassword)
 
 			// 用户 JWT 令牌管理
 			auth := api.Group("/auth")
@@ -222,17 +254,29 @@ func (receiver Router) InitConfig() map[string]any {
 			captcha := api.Group("/captcha")
 			captcha.POST("/params", controller.CaptchaController{}.GetCaptchaParams)
 
+			// 协议公开接口
+			agreements := api.Group("/agreements")
+			agreements.GET("/global/:code", controller.AgreementController{}.GetGlobalAgreement)
+			agreements.GET("/application", controller.AgreementController{}.GetApplicationAgreement)
+
 			// OIDC 授权流程 API（服务于 /auth 登录 UI）
 			apiOidc := api.Group("/oidc")
 			apiOidc.POST("/login", controller.OIDCAuthFlowController{}.Login)
+			apiOidc.POST("/login-by-code", controller.OIDCAuthFlowController{}.LoginByCode)
 			apiOidc.POST("/register", controller.OIDCAuthFlowController{}.Register)
 			apiOidc.GET("/auth-info", controller.OIDCAuthFlowController{}.GetAuthInfo)
+			apiOidc.GET("/client-config", controller.OIDCAuthFlowController{}.GetClientConfig)
 			apiOidc.GET("/flow-status", controller.OIDCAuthFlowController{}.GetFlowStatus)
+			apiOidc.POST("/send-login-verification-code", controller.OIDCAuthFlowController{}.SendLoginVerificationCode)
 			apiOidc.POST("/send-verification-code", controller.OIDCAuthFlowController{}.SendVerificationCode)
 			apiOidc.POST("/send-register-verification-code", controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)
 			apiOidc.POST("/complete-profile", controller.OIDCAuthFlowController{}.CompleteProfile)
 			apiOidc.GET("/register-settings", controller.OIDCAuthFlowController{}.GetRegisterSettings)
 			apiOidc.POST("/init-session", controller.OIDCAuthFlowController{}.InitSession)
+			oidcAuth := apiOidc.Group("/auth")
+			oidcAuth.POST("/refresh", controller.OIDCAuthFlowController{}.RefreshToken)
+			oidcAuth.POST("/logout", controller.OIDCAuthFlowController{}.Logout)
+			oidcAuth.POST("/switch-account", controller.OIDCAuthFlowController{}.SwitchAccount)
 
 			// === 社会化登录 ===
 			social := router.Group("/social")
@@ -250,6 +294,7 @@ func (receiver Router) InitConfig() map[string]any {
 
 			socialAuth := router.Group("/social")
 			socialAuth.Use(middleware.AuthMiddleware())
+			socialAuth.GET("/bind-auth/:provider", controller.SocialAuthController{}.InitiateBind)
 			socialAuth.POST("/bind/:provider", controller.SocialAuthController{}.BindAccount)
 			socialAuth.DELETE("/unbind/:accountId", controller.SocialAuthController{}.UnbindAccount)
 
@@ -263,15 +308,14 @@ func (receiver Router) InitConfig() map[string]any {
 
 			identityAuth := router.Group("/identity")
 			identityAuth.Use(middleware.AuthMiddleware())
+			identityAuth.GET("/bind-auth/:provider", controller.IdentityAuthController{}.InitiateBind)
 			identityAuth.POST("/bind/:provider", controller.IdentityAuthController{}.BindAccount)
 			identityAuth.DELETE("/unbind/:accountId", controller.IdentityAuthController{}.UnbindAccount)
 
 			// === OIDC 协议端点（公开，按 RFC 规范） ===
-			// 原 Gin .Match(GET|POST, ...) 在此拆成 .GET 和 .POST 双注册
 			oidc := router.Group("/oidc")
 			oidc.GET("/:client_id/authorize", controller.OIDCController{}.Authorize)
 			oidc.POST("/:client_id/authorize", controller.OIDCController{}.Authorize)
-			oidc.GET("/:client_id/token", controller.OIDCController{}.Token)
 			oidc.POST("/:client_id/token", controller.OIDCController{}.Token)
 			oidc.GET("/:client_id/userinfo", controller.OIDCController{}.UserInfo)
 			oidc.POST("/:client_id/userinfo", controller.OIDCController{}.UserInfo)

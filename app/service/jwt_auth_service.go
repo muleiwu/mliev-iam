@@ -49,11 +49,23 @@ func ensureJWTAuthService(jwtAuthService *JWTAuthService) (*JWTAuthService, erro
 	return NewJWTAuthServiceWithError()
 }
 
-// GenerateToken 生成JWT token
-func (s *JWTAuthService) GenerateToken(user *dto.UserResponse) (string, error) {
+// GenerateAdminToken 为管理员会话签发内部 JWT，role 固定为 "admin"。
+// 仅允许在已校验用户具备管理员身份后调用（见 admin AuthController.Login）。
+func (s *JWTAuthService) GenerateAdminToken(user *dto.UserResponse) (string, error) {
 	return s.jwtService.GenerateToken(jwt.TokenSubject{
 		UserID:   user.ID,
 		Username: user.Username,
+		Role:     "admin",
+	}, s.config.GetAccessTokenHours())
+}
+
+// GenerateUserToken 为普通用户会话（个人中心）签发内部 JWT，role 固定为 "user"。
+// 不能复用 GenerateToken：其未设置 Role，底层会回退为 "admin"，导致普通用户越权。
+func (s *JWTAuthService) GenerateUserToken(user *dto.UserResponse) (string, error) {
+	return s.jwtService.GenerateToken(jwt.TokenSubject{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     "user",
 	}, s.config.GetAccessTokenHours())
 }
 

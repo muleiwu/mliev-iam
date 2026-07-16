@@ -61,6 +61,15 @@ func NewIdentityAuthService(db *gorm.DB, redisClient *redis.Client) *IdentityAut
 }
 
 func (s *IdentityAuthService) GetAuthURLWithSessionID(providerIdentifier string, sessionID string) (*dto.SocialAuthURLResponse, error) {
+	return s.getAuthURLWithStateData(providerIdentifier, StateData{SessionID: sessionID})
+}
+
+// GetBindAuthURL 获取用于"已登录用户绑定企业身份源账号"的授权URL（bind 模式 state）
+func (s *IdentityAuthService) GetBindAuthURL(providerIdentifier string, userID uint) (*dto.SocialAuthURLResponse, error) {
+	return s.getAuthURLWithStateData(providerIdentifier, StateData{Mode: StateModeBind, BindUserID: userID})
+}
+
+func (s *IdentityAuthService) getAuthURLWithStateData(providerIdentifier string, stateData StateData) (*dto.SocialAuthURLResponse, error) {
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
 		return nil, err
@@ -77,7 +86,7 @@ func (s *IdentityAuthService) GetAuthURLWithSessionID(providerIdentifier string,
 	if err != nil {
 		return nil, fmt.Errorf("生成state失败: %w", err)
 	}
-	if err := s.storeStateWithSessionID(state, sessionID, 5*time.Minute); err != nil {
+	if err := s.storeStateData(state, stateData, 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("存储state失败: %w", err)
 	}
 
@@ -88,11 +97,16 @@ func (s *IdentityAuthService) GetAuthURLWithSessionID(providerIdentifier string,
 }
 
 func (s *IdentityAuthService) HandleCallback(providerIdentifier, code, state string) (*dto.SocialAuthCallbackResponse, error) {
-	sessionID, valid := s.validateAndGetSessionID(state)
+	stateData, valid := s.ConsumeState(state)
 	if !valid {
 		return nil, fmt.Errorf("无效的state参数")
 	}
 
+	return s.HandleCallbackWithSessionID(providerIdentifier, code, stateData.SessionID)
+}
+
+// HandleCallbackWithSessionID 处理身份源回调（state 已由调用方消费校验）
+func (s *IdentityAuthService) HandleCallbackWithSessionID(providerIdentifier, code, sessionID string) (*dto.SocialAuthCallbackResponse, error) {
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
 		return nil, err
@@ -122,6 +136,11 @@ func (s *IdentityAuthService) BindIdentityAccount(userID uint, providerIdentifie
 	if !s.validateState(state) {
 		return fmt.Errorf("无效的state参数")
 	}
+	return s.BindWithCode(userID, providerIdentifier, code)
+}
+
+// BindWithCode 用授权码为指定用户绑定企业身份源账号（state 已由调用方消费校验）
+func (s *IdentityAuthService) BindWithCode(userID uint, providerIdentifier, code string) error {
 	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
 	if err != nil {
 		return err
@@ -249,7 +268,7 @@ func (s *IdentityAuthService) BindWithExistingUser(bindToken, username, password
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -264,6 +283,23 @@ func (s *IdentityAuthService) BindWithExistingUser(bindToken, username, password
 func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterRequest) (*dto.SocialAuthCallbackResponse, error) {
 	tempUserInfo, err := s.getIdentityUserTemp(req.BindToken)
 	if err != nil {
+		return nil, err
+	}
+
+	agreementService := NewAgreementService(s.db)
+	appID, err := agreementService.ResolveApplicationIDFromSession(context.Background(), req.SessionID, s.redis)
+	if err != nil {
+		return nil, err
+	}
+	requiredAgreements, err := agreementService.ListRequiredRegistrationAgreements(appID)
+	if err != nil {
+		return nil, err
+	}
+	acceptedAgreementKeys := req.AcceptedAgreementKeys
+	if len(acceptedAgreementKeys) == 0 && req.AgreePolicy {
+		acceptedAgreementKeys = AgreementKeys(requiredAgreements)
+	}
+	if err := agreementService.EnsureAgreementsAccepted(requiredAgreements, acceptedAgreementKeys); err != nil {
 		return nil, err
 	}
 
@@ -341,6 +377,10 @@ func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterReques
 		tx.Rollback()
 		return nil, fmt.Errorf("创建身份源账号绑定失败: %w", err)
 	}
+	if err := NewAgreementService(tx).RecordAcceptances(user.ID, appID, requiredAgreements); err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("记录协议同意失败: %w", err)
+	}
 	if err := tx.Commit().Error; err != nil {
 		return nil, fmt.Errorf("提交事务失败: %w", err)
 	}
@@ -359,7 +399,7 @@ func (s *IdentityAuthService) RegisterWithProvider(req *dto.SocialRegisterReques
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -430,7 +470,7 @@ func (s *IdentityAuthService) loginWithIdentityAccount(account *model.UserIdenti
 		return nil, fmt.Errorf("JWT配置错误: %w", err)
 	}
 	s.jwtAuthService = jwtAuthService
-	jwtToken, err := jwtAuthService.GenerateToken(userResponse)
+	jwtToken, err := jwtAuthService.GenerateUserToken(userResponse)
 	if err != nil {
 		return nil, fmt.Errorf("生成令牌失败: %w", err)
 	}
@@ -450,11 +490,12 @@ func (s *IdentityAuthService) generateState() (string, error) {
 	return v7.String(), nil
 }
 
-func (s *IdentityAuthService) storeStateWithSessionID(state string, sessionID string, duration time.Duration) error {
+func (s *IdentityAuthService) storeStateData(state string, stateData StateData, duration time.Duration) error {
 	if s.redis == nil {
 		return fmt.Errorf("Redis 未初始化")
 	}
-	data, err := json.Marshal(StateData{SessionID: sessionID, Timestamp: time.Now().Unix()})
+	stateData.Timestamp = time.Now().Unix()
+	data, err := json.Marshal(stateData)
 	if err != nil {
 		return fmt.Errorf("序列化state数据失败: %w", err)
 	}
@@ -462,30 +503,31 @@ func (s *IdentityAuthService) storeStateWithSessionID(state string, sessionID st
 }
 
 func (s *IdentityAuthService) validateState(state string) bool {
-	_, valid := s.validateAndGetSessionID(state)
+	_, valid := s.ConsumeState(state)
 	return valid
 }
 
-func (s *IdentityAuthService) validateAndGetSessionID(state string) (string, bool) {
+// ConsumeState 校验并消费一次性 state，返回其关联数据
+func (s *IdentityAuthService) ConsumeState(state string) (*StateData, bool) {
 	if s.redis == nil {
-		return "", false
+		return nil, false
 	}
 	data, err := s.redis.Get(context.Background(), s.stateKeyPrefix+state).Result()
 	if errors.Is(err, redis.Nil) {
-		return "", false
+		return nil, false
 	}
 	if err != nil {
 		fmt.Printf("验证身份源state时Redis错误: %v\n", err)
-		return "", false
+		return nil, false
 	}
 	if err := s.redis.Del(context.Background(), s.stateKeyPrefix+state).Err(); err != nil {
 		fmt.Printf("删除身份源state时Redis错误: %v\n", err)
 	}
 	var stateData StateData
 	if err := json.Unmarshal([]byte(data), &stateData); err != nil {
-		return "", true
+		return &StateData{}, true
 	}
-	return stateData.SessionID, true
+	return &stateData, true
 }
 
 func (s *IdentityAuthService) storeIdentityUserTemp(bindToken string, tempUserInfo *TempIdentityUserInfo) error {

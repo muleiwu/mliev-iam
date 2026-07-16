@@ -64,3 +64,11 @@ push:
 #   JWT_ISSUER=mliev-iam
 #   JWT_ACCESS_TOKEN_TTL=1       # 小时
 #   JWT_REFRESH_TOKEN_TTL=30     # 天
+
+oidc:
+  # 是否在 userinfo 的 profile scope 中透出用户的旧系统 ID（legacy external_id）。
+  # 仅在业务系统需要通过 OIDC 完成新旧身份映射时开启；默认关闭。
+  expose_legacy_external_id: false
+  pkce:
+    # 是否允许 PKCE plain 挑战方法（不安全）；默认关闭，仅声明 S256。
+    allow_plain: false

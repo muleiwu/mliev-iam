@@ -2,6 +2,7 @@ package controller
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,11 +10,14 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // OIDCAuthFlowController OIDC授权流程控制器
@@ -30,25 +34,42 @@ type LoginRequest struct {
 	RememberMe    bool               `json:"rememberMe"`              // 记住我
 }
 
+// LoginByCodeRequest 验证码登录请求
+type LoginByCodeRequest struct {
+	SessionID  string `json:"sessionId" binding:"required"`
+	Type       string `json:"type" binding:"required,oneof=email phone"`
+	Receiver   string `json:"receiver" binding:"required"`
+	Code       string `json:"code" binding:"required,len=6"`
+	RememberMe bool   `json:"rememberMe"` // 记住我
+}
+
 // RegisterRequest 注册请求
 type RegisterRequest struct {
-	Username      string             `json:"username" binding:"required"`
-	Email         string             `json:"email" binding:"omitempty,email"`
-	EmailCode     string             `json:"emailCode" binding:"omitempty"`
-	Phone         string             `json:"phone" binding:"omitempty"`
-	PhoneCode     string             `json:"phoneCode" binding:"omitempty"`
-	Password      string             `json:"password" binding:"required,min=6"`
-	RealName      string             `json:"realName" binding:"omitempty"`
-	Nickname      string             `json:"nickname" binding:"omitempty"`
-	SessionID     string             `json:"sessionId,omitempty"`
-	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
+	Username              string             `json:"username" binding:"omitempty"`
+	Email                 string             `json:"email" binding:"omitempty,email"`
+	EmailCode             string             `json:"emailCode" binding:"omitempty"`
+	Phone                 string             `json:"phone" binding:"omitempty"`
+	PhoneCode             string             `json:"phoneCode" binding:"omitempty"`
+	Password              string             `json:"password" binding:"required,min=6"`
+	RealName              string             `json:"realName" binding:"omitempty"`
+	Nickname              string             `json:"nickname" binding:"omitempty"`
+	SessionID             string             `json:"sessionId,omitempty"`
+	RememberMe            bool               `json:"rememberMe"` // 记住我
+	AcceptedAgreementKeys []string           `json:"acceptedAgreementKeys,omitempty"`
+	CaptchaTicket         *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
 // RegisterResponse 注册响应
 type RegisterResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	UserID  uint   `json:"userId,omitempty"`
+	Success                   bool     `json:"success"`
+	Message                   string   `json:"message"`
+	UserID                    uint     `json:"userId,omitempty"`
+	AutoLogin                 bool     `json:"autoLogin,omitempty"`
+	NextURL                   string   `json:"nextUrl,omitempty"`
+	AccessToken               string   `json:"accessToken,omitempty"`
+	ExpiresIn                 int64    `json:"expiresIn,omitempty"`
+	RequiresProfileCompletion bool     `json:"requiresProfileCompletion,omitempty"`
+	MissingFields             []string `json:"missingFields,omitempty"`
 }
 
 // LoginResponse 登录响应
@@ -73,6 +94,13 @@ type LoginResponse struct {
 type ConsentRequest struct {
 	SessionID string `json:"sessionId" binding:"required"`
 	Approved  bool   `json:"approved"`
+	CsrfToken string `json:"csrfToken" binding:"required"`
+}
+
+// SwitchAccountRequest switches the authenticated user while preserving the
+// current OIDC authorization request.
+type SwitchAccountRequest struct {
+	SessionID string `json:"sessionId" binding:"required"`
 	CsrfToken string `json:"csrfToken" binding:"required"`
 }
 
@@ -104,8 +132,54 @@ type AuthInfoResponse struct {
 	} `json:"user"`
 }
 
+// ClientConfigResponse OIDC 登录页客户端配置响应。
+// v1 先用应用基础信息和固定默认值补齐前端契约，不引入额外持久化字段。
+type ClientConfigResponse struct {
+	ClientID         string                    `json:"clientId"`
+	AppName          string                    `json:"appName"`
+	Description      string                    `json:"description,omitempty"`
+	Logo             string                    `json:"logo,omitempty"`
+	Appearance       ClientAppearanceConfig    `json:"appearance"`
+	Features         ClientFeaturesConfig      `json:"features"`
+	LoginMethods     ClientLoginMethods        `json:"loginMethods"`
+	SocialProviders  []string                  `json:"socialProviders"`
+	Locale           string                    `json:"locale"`
+	PrivacyPolicyURL string                    `json:"privacyPolicyUrl,omitempty"`
+	TermsURL         string                    `json:"termsUrl,omitempty"`
+	Agreements       []dto.ClientAgreementLink `json:"agreements"`
+}
+
+type ClientAppearanceConfig struct {
+	PrimaryColor string `json:"primaryColor,omitempty"`
+	BorderRadius string `json:"borderRadius,omitempty"`
+	DarkMode     string `json:"darkMode,omitempty"`
+}
+
+type ClientFeaturesConfig struct {
+	Registration     bool `json:"registration"`
+	SocialLogin      bool `json:"socialLogin"`
+	IdentityLogin    bool `json:"identityLogin"`
+	RememberMe       bool `json:"rememberMe"`
+	ForgotPassword   bool `json:"forgotPassword"`
+	PasswordStrength bool `json:"passwordStrength"`
+}
+
+type ClientLoginMethods struct {
+	Username bool `json:"username"`
+	Email    bool `json:"email"`
+	Phone    bool `json:"phone"`
+}
+
 // SendVerificationCodeRequest 发送验证码请求
 type SendVerificationCodeRequest struct {
+	SessionID     string             `json:"sessionId" binding:"required"`
+	Type          string             `json:"type" binding:"required,oneof=email phone"`
+	Receiver      string             `json:"receiver" binding:"required"`
+	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
+}
+
+// SendLoginVerificationCodeRequest 发送登录验证码请求
+type SendLoginVerificationCodeRequest struct {
 	SessionID     string             `json:"sessionId" binding:"required"`
 	Type          string             `json:"type" binding:"required,oneof=email phone"`
 	Receiver      string             `json:"receiver" binding:"required"`
@@ -119,10 +193,96 @@ type SendRegisterVerificationCodeRequest struct {
 	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
 }
 
+func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAgreementLink) ClientConfigResponse {
+	response := ClientConfigResponse{
+		ClientID:    app.UUID,
+		AppName:     app.Name,
+		Description: app.Description,
+		Appearance: ClientAppearanceConfig{
+			PrimaryColor: "#3b82f6",
+			DarkMode:     "auto",
+		},
+		Features: ClientFeaturesConfig{
+			Registration:     true,
+			SocialLogin:      true,
+			IdentityLogin:    true,
+			RememberMe:       true,
+			ForgotPassword:   false,
+			PasswordStrength: true,
+		},
+		LoginMethods: ClientLoginMethods{
+			Username: true,
+			Email:    true,
+			Phone:    true,
+		},
+		SocialProviders: []string{},
+		Locale:          "zh-CN",
+		Agreements:      agreements,
+	}
+
+	for _, agreement := range agreements {
+		if agreement.Scope != string(model.AgreementScopeGlobal) {
+			continue
+		}
+		switch agreement.Code {
+		case model.AgreementCodePrivacy:
+			response.PrivacyPolicyURL = agreement.URL
+		case model.AgreementCodeTerms:
+			response.TermsURL = agreement.URL
+		}
+	}
+
+	return response
+}
+
+func validateClientConfigSession(clientID string, session *service.OIDCSession) error {
+	if session == nil {
+		return fmt.Errorf("会话已过期或不存在，请重新发起授权")
+	}
+	if session.ClientID != clientID {
+		return fmt.Errorf("会话与客户端不匹配")
+	}
+	return nil
+}
+
+func resolveClientConfigClientID(
+	clientID string,
+	sessionID string,
+	getSession func(string) (*service.OIDCSession, error),
+) (string, error) {
+	clientID = strings.TrimSpace(clientID)
+	sessionID = strings.TrimSpace(sessionID)
+	if clientID == "" && sessionID == "" {
+		return "", fmt.Errorf("缺少client_id或session_id参数，请重新发起授权")
+	}
+	if sessionID == "" {
+		return clientID, nil
+	}
+	if getSession == nil {
+		return "", fmt.Errorf("无法读取授权会话，请重新发起授权")
+	}
+
+	session, err := getSession(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("无效的会话ID或会话已过期")
+	}
+	if session == nil || strings.TrimSpace(session.ClientID) == "" {
+		return "", fmt.Errorf("会话缺少客户端信息，请重新发起授权")
+	}
+	if clientID == "" {
+		return strings.TrimSpace(session.ClientID), nil
+	}
+	if err := validateClientConfigSession(clientID, session); err != nil {
+		return "", err
+	}
+	return clientID, nil
+}
+
 // SendVerificationCodeResponse 发送验证码响应
 type SendVerificationCodeResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+	TraceID string `json:"traceId,omitempty"`
 }
 
 // CompleteProfileRequest 完善信息请求
@@ -139,6 +299,48 @@ type CompleteProfileResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	NextURL string `json:"nextUrl,omitempty"`
+}
+
+// GetClientConfig 获取 OIDC 登录页客户端配置
+// GET /api/oidc/client-config
+func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContextInterface) {
+	clientID, err := resolveClientConfigClientID(
+		ctx.Query("client_id"),
+		ctx.Query("session_id"),
+		func(sessionID string) (*service.OIDCSession, error) {
+			sessionService := service.NewOIDCSessionService(helper.GetRedis())
+			return sessionService.GetSession(ctx.Request().Context(), sessionID)
+		},
+	)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	db := helper.GetDatabase()
+	appService := service.NewApplicationService(db)
+	app, err := appService.GetApplicationByClientID(clientID)
+	if err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationNotFound) {
+			errCode = constants.ErrCodeNotFound
+		}
+		c.Error(ctx, errCode, err.Error())
+		return
+	}
+	if !app.IsActive {
+		c.Error(ctx, constants.ErrCodeForbidden, "应用已被禁用")
+		return
+	}
+
+	agreementService := service.NewAgreementService(db)
+	agreementLinks, err := agreementService.BuildClientAgreementLinks(app)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "获取协议配置失败: "+err.Error())
+		return
+	}
+
+	c.Success(ctx, buildClientConfigResponse(app, agreementLinks))
 }
 
 // Login OIDC登录接口
@@ -177,13 +379,25 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		return
 	}
 
-	// 3. 标记会话为已认证
-	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), req.SessionID, user.ID); err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, "更新会话失败: "+err.Error())
+	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
 		return
 	}
 
-	// 4. 立即生成 OIDC Token
+	c.Success(ctx, response)
+}
+
+func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterContextInterface, sessionService *service.OIDCSessionService, session *service.OIDCSession, sessionID string, user *dto.UserResponse, rememberMe bool) (*LoginResponse, error) {
+	// 标记会话为已认证
+	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID); err != nil {
+		return nil, fmt.Errorf("更新会话失败: %w", err)
+	}
+
+	// 签发个人中心会话 Cookie（先于 OIDC Token 生成，后者降级失败不影响该 Cookie）
+	issueUserSessionCookie(ctx, user, rememberMe)
+
+	// 立即生成 OIDC Token
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	appService := service.NewApplicationService(helper.GetDatabase())
 	app, err := appService.GetApplicationByClientID(session.ClientID)
@@ -206,9 +420,9 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 			accessToken = tokenResponse.AccessToken
 			expiresIn = tokenResponse.ExpiresIn
 
-			// 5. 设置 Refresh Token 到 HttpOnly Cookie
+			// 设置 Refresh Token 到 HttpOnly Cookie
 			maxAge := 0 // 默认会话期
-			if req.RememberMe {
+			if rememberMe {
 				maxAge = 7 * 24 * 60 * 60 // 7天
 			}
 
@@ -224,10 +438,9 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		}
 	}
 
-	// 6. 检查 scope 是否需要用户完善信息
+	// 检查 scope 是否需要用户完善信息
 	missingFields := c.checkMissingUserInfo(session.Scope, user)
 
-	// 7. 返回成功响应
 	response := LoginResponse{
 		Success: true,
 		Message: "登录成功",
@@ -248,10 +461,76 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		// 需要完善信息，跳转到信息完善页面
 		response.RequiresProfileCompletion = true
 		response.MissingFields = missingFields
-		response.NextURL = "/auth/#/oidc/complete-profile?session_id=" + req.SessionID + "&missing_fields=" + strings.Join(missingFields, ",")
+		response.NextURL = "/auth/#/oidc/complete-profile?session_id=" + sessionID + "&missing_fields=" + strings.Join(missingFields, ",")
 	} else {
 		// 信息完整，直接跳转到授权确认页面
-		response.NextURL = "/auth/#/oidc/consent?session_id=" + req.SessionID
+		response.NextURL = "/auth/#/oidc/consent?session_id=" + sessionID
+	}
+
+	return &response, nil
+}
+
+// LoginByCode OIDC 验证码登录接口
+// POST /api/oidc/login-by-code
+func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInterface) {
+	var req LoginByCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+
+	verificationType := requestVerificationType(req.Type)
+	userService := service.NewUserService(helper.GetDatabase())
+	user, err := userService.GetVerifiedUserForCodeLogin(verificationType, req.Receiver)
+	if err != nil {
+		// 主表未注册但迁移数据里有可认领的旧用户时不报错：等验证码证明归属后再认领建号。
+		// 其余错误（禁用/未验证）维持原判。
+		claimable := errors.Is(err, service.ErrLoginAccountNotFound) &&
+			service.NewLegacyLoginService(helper.GetDatabase()).HasPendingCodeLoginUser(verificationType, req.Receiver)
+		if !claimable {
+			code := constants.ErrCodeBadRequest
+			if strings.Contains(err.Error(), "禁用") {
+				code = constants.ErrCodeUnauthorized
+			}
+			c.Error(ctx, code, err.Error())
+			return
+		}
+		user = nil
+	}
+
+	config := getVerificationCodeConfig()
+	if config == nil {
+		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		return
+	}
+
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+	loginVerificationSessionID := buildLoginVerificationSessionID(req.SessionID, verificationType, req.Receiver)
+	if err := verificationService.VerifyCode(ctx.Request().Context(), req.Receiver, verificationType, loginVerificationSessionID, req.Code); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "验证码错误或已过期")
+		return
+	}
+
+	if user == nil {
+		// 验证码已证明联系方式归属：从迁移数据认领旧用户，免密自动注册后继续登录。
+		user, err = service.NewLegacyLoginService(helper.GetDatabase()).PromoteByVerifiedReceiver(verificationType, req.Receiver)
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeInternal, "旧系统账号迁移失败，请稍后重试")
+			return
+		}
+	}
+
+	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+		return
 	}
 
 	c.Success(ctx, response)
@@ -273,20 +552,31 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 1. 如果有sessionId，验证会话是否存在
+	var registrationAppID *uint
+	var oidcSession *service.OIDCSession
+
+	// 1. 如果有sessionId，验证会话是否存在并解析应用
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		_, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+		session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
 		if err != nil {
 			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 			return
 		}
+		appService := service.NewApplicationService(helper.GetDatabase())
+		app, err := appService.GetApplicationByClientID(session.ClientID)
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话应用")
+			return
+		}
+		registrationAppID = &app.ID
+		oidcSession = session
 	}
 
 	// 2. 根据配置验证注册字段
 	settingService := service.NewSettingService(helper.GetDatabase())
 	createUserReq := &dto.CreateUserRequest{
-		Username: req.Username,
+		Username: strings.TrimSpace(req.Username),
 		Email:    req.Email,
 		Password: req.Password,
 		RealName: req.RealName,
@@ -299,8 +589,27 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
+	if createUserReq.Username == "" {
+		userService := service.NewUserService(helper.GetDatabase())
+		generatedUsername, err := userService.GenerateAvailableUsername()
+		if err != nil {
+			c.Error(ctx, constants.ErrCodeInternal, err.Error())
+			return
+		}
+		createUserReq.Username = generatedUsername
+	}
+
+	agreementService := service.NewAgreementService(helper.GetDatabase())
+	requiredAgreements, err := agreementService.ValidateRegistrationAcceptance(registrationAppID, req.AcceptedAgreementKeys)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
 	// 3. 验证邮箱和手机验证码
-	config := c.getVerificationCodeConfig()
+	emailCodeVerified := false
+	phoneCodeVerified := false
+	config := getVerificationCodeConfig()
 	if config != nil {
 		verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
 
@@ -311,6 +620,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 				c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
 				return
 			}
+			emailCodeVerified = true
 		}
 
 		// 验证手机验证码（如果提供了手机号）
@@ -320,12 +630,40 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 				c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
 				return
 			}
+			phoneCodeVerified = true
 		}
 	}
 
-	// 4. 创建用户
-	userService := service.NewUserService(helper.GetDatabase())
-	userResponse, err := userService.CreateUser(createUserReq)
+	// 4. 创建用户并记录协议同意
+	var userResponse *dto.UserResponse
+	err = helper.GetDatabase().Transaction(func(tx *gorm.DB) error {
+		txUserService := service.NewUserService(tx)
+		resp, err := txUserService.CreateUser(createUserReq)
+		if err != nil {
+			return err
+		}
+		txAgreementService := service.NewAgreementService(tx)
+		if err := txAgreementService.RecordAcceptances(resp.ID, registrationAppID, requiredAgreements); err != nil {
+			return err
+		}
+		// 验证码已证明联系方式归属：标记已验证，并尝试关联迁移数据里的同联系方式旧用户
+		// （合入 legacy 身份映射属性、回填迁移状态）。
+		if err := txUserService.MarkContactVerified(resp.ID, emailCodeVerified, phoneCodeVerified); err != nil {
+			return err
+		}
+		verifiedEmail, verifiedPhone := "", ""
+		if emailCodeVerified {
+			verifiedEmail = createUserReq.Email
+		}
+		if phoneCodeVerified {
+			verifiedPhone = createUserReq.Phone // CreateUser 已规范化为 E.164
+		}
+		if err := service.NewLegacyLoginService(tx).LinkOnRegistration(resp.ID, verifiedEmail, verifiedPhone); err != nil {
+			return err
+		}
+		userResponse = resp
+		return nil
+	})
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -340,11 +678,12 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 5. 如果有会话，标记为已认证
-	if req.SessionID != "" {
+	// 5. 如果有会话，自动登录并衔接授权流程（生成 token、写 refresh_token cookie、返回 NextURL）
+	if req.SessionID != "" && oidcSession != nil {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), req.SessionID, userResponse.ID); err != nil {
-			// 注册成功但更新会话失败，仍返回成功
+		loginResp, err := c.completeOIDCLogin(ctx, sessionService, oidcSession, req.SessionID, userResponse, req.RememberMe)
+		if err != nil {
+			// 注册成功但自动登录失败，降级为手动登录
 			response := RegisterResponse{
 				Success: true,
 				Message: "注册成功，但会话更新失败，请重新登录",
@@ -353,6 +692,19 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 			c.Success(ctx, response)
 			return
 		}
+
+		c.Success(ctx, RegisterResponse{
+			Success:                   true,
+			Message:                   "注册成功",
+			UserID:                    userResponse.ID,
+			AutoLogin:                 true,
+			NextURL:                   loginResp.NextURL,
+			AccessToken:               loginResp.AccessToken,
+			ExpiresIn:                 loginResp.ExpiresIn,
+			RequiresProfileCompletion: loginResp.RequiresProfileCompletion,
+			MissingFields:             loginResp.MissingFields,
+		})
+		return
 	}
 
 	// 6. 返回成功响应
@@ -608,38 +960,145 @@ func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []st
 	return scopes
 }
 
-// getVerificationCodeConfig 从数据库获取验证码服务配置
-func (c OIDCAuthFlowController) getVerificationCodeConfig() *service.VerificationCodeConfig {
-	// 从数据库获取推送服务配置
-	settingService := service.NewSettingService(helper.GetDatabase())
-	pushSettings, err := settingService.GetPushSettings()
+func newVerificationCodeTraceID() string {
+	v7, err := uuid.NewV7()
 	if err != nil {
-		// 配置获取失败，返回 nil
-		return nil
+		v7 = uuid.New()
+	}
+	return v7.String()
+}
+
+func withTraceID(message, traceID string) string {
+	if traceID == "" {
+		return message
+	}
+	return fmt.Sprintf("%s（追踪ID：%s）", message, traceID)
+}
+
+func shortControllerLogValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:8] + "..." + value[len(value)-4:]
+}
+
+func requestVerificationType(value string) service.VerificationType {
+	if value == "email" {
+		return service.VerificationTypeEmail
+	}
+	return service.VerificationTypePhone
+}
+
+func buildLoginVerificationSessionID(sessionID string, verificationType service.VerificationType, receiver string) string {
+	return fmt.Sprintf("login:%s:%s:%s", sessionID, verificationType, receiver)
+}
+
+func (c OIDCAuthFlowController) logVerificationCodeControllerInfo(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Info(formatVerificationCodeControllerLog(traceID, format, args...))
+	}
+}
+
+func (c OIDCAuthFlowController) logVerificationCodeControllerWarn(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Warn(formatVerificationCodeControllerLog(traceID, format, args...))
+	}
+}
+
+func (c OIDCAuthFlowController) logVerificationCodeControllerError(traceID, format string, args ...any) {
+	if logger := helper.GetLogger(); logger != nil {
+		logger.Error(formatVerificationCodeControllerLog(traceID, format, args...))
+	}
+}
+
+func formatVerificationCodeControllerLog(traceID, format string, args ...any) string {
+	if traceID == "" {
+		traceID = "-"
+	}
+	return fmt.Sprintf("[verification-code] traceId=%s %s", traceID, fmt.Sprintf(format, args...))
+}
+
+// SendLoginVerificationCode 发送登录验证码接口
+// POST /api/oidc/send-login-verification-code
+func (c OIDCAuthFlowController) SendLoginVerificationCode(ctx httpInterfaces.RouterContextInterface) {
+	traceID := newVerificationCodeTraceID()
+	var req SendLoginVerificationCodeRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.logVerificationCodeControllerError(traceID, "登录验证码请求参数错误 err=%v", err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("请求参数错误: "+err.Error(), traceID))
+		return
 	}
 
-	// 检查必填字段
-	if pushSettings.BaseURL == "" || pushSettings.AppID == "" || pushSettings.AppSecret == "" {
-		return nil
+	verificationType := requestVerificationType(req.Type)
+	captchaScene := "sendSms"
+	if verificationType == service.VerificationTypeEmail {
+		captchaScene = "sendEmail"
+	}
+	c.logVerificationCodeControllerInfo(traceID, "发送登录验证码请求 scene=%s type=%s receiver=%s session=%s clientIp=%s", captchaScene, req.Type, service.MaskVerificationReceiver(req.Receiver), shortControllerLogValue(req.SessionID), ctx.ClientIP())
+
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
+		c.logVerificationCodeControllerWarn(traceID, "登录验证码校验失败 scene=%s err=%v", captchaScene, err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
+		return
+	}
+	c.logVerificationCodeControllerInfo(traceID, "登录验证码校验通过 scene=%s", captchaScene)
+
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	if _, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID); err != nil {
+		c.logVerificationCodeControllerWarn(traceID, "登录验证码OIDC会话不存在或过期 session=%s err=%v", shortControllerLogValue(req.SessionID), err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("无效的会话ID或会话已过期", traceID))
+		return
 	}
 
-	return &service.VerificationCodeConfig{
-		BaseURL:        pushSettings.BaseURL,
-		AppID:          pushSettings.AppID,
-		AppSecret:      pushSettings.AppSecret,
-		SMSChannelID:   pushSettings.SMSChannelID,
-		EmailChannelID: pushSettings.EmailChannelID,
-		SMSSignature:   pushSettings.SMSSignature,
-		EmailSignature: pushSettings.EmailSignature,
+	userService := service.NewUserService(helper.GetDatabase())
+	if _, err := userService.GetVerifiedUserForCodeLogin(verificationType, req.Receiver); err != nil {
+		// 主表未注册但迁移数据里有可认领的旧用户时放行发码：登录时验证码通过即认领迁移。
+		claimable := errors.Is(err, service.ErrLoginAccountNotFound) &&
+			service.NewLegacyLoginService(helper.GetDatabase()).HasPendingCodeLoginUser(verificationType, req.Receiver)
+		if !claimable {
+			c.logVerificationCodeControllerWarn(traceID, "登录验证码账号校验失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+			c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
+			return
+		}
+		c.logVerificationCodeControllerInfo(traceID, "主表未注册但命中可认领旧用户，放行发码 type=%s receiver=%s", verificationType, service.MaskVerificationReceiver(req.Receiver))
 	}
+
+	config := getVerificationCodeConfig()
+	if config == nil {
+		c.logVerificationCodeControllerError(traceID, "登录验证码服务未配置")
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
+		return
+	}
+
+	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+	loginVerificationSessionID := buildLoginVerificationSessionID(req.SessionID, verificationType, req.Receiver)
+	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, loginVerificationSessionID, traceID); err != nil {
+		c.logVerificationCodeControllerError(traceID, "登录验证码发送失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID(err.Error(), traceID))
+		return
+	}
+
+	response := SendVerificationCodeResponse{
+		Success: true,
+		Message: "验证码已发送",
+		TraceID: traceID,
+	}
+
+	c.Success(ctx, response)
 }
 
 // SendVerificationCode 发送验证码接口
 // POST /api/oidc/send-verification-code
 func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterContextInterface) {
+	traceID := newVerificationCodeTraceID()
 	var req SendVerificationCodeRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		c.logVerificationCodeControllerError(traceID, "请求参数错误 err=%v", err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("请求参数错误: "+err.Error(), traceID))
 		return
 	}
 
@@ -648,29 +1107,35 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterCo
 	if req.Type == "email" {
 		captchaScene = "sendEmail"
 	}
+	c.logVerificationCodeControllerInfo(traceID, "发送验证码请求 scene=%s type=%s receiver=%s session=%s clientIp=%s", captchaScene, req.Type, service.MaskVerificationReceiver(req.Receiver), shortControllerLogValue(req.SessionID), ctx.ClientIP())
 	captchaManager := captcha.NewManager(helper.GetDatabase())
 	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		c.logVerificationCodeControllerWarn(traceID, "验证码校验失败 scene=%s err=%v", captchaScene, err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
 		return
 	}
+	c.logVerificationCodeControllerInfo(traceID, "验证码校验通过 scene=%s", captchaScene)
 
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
 	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
 	if err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		c.logVerificationCodeControllerWarn(traceID, "OIDC会话不存在或过期 session=%s err=%v", shortControllerLogValue(req.SessionID), err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("无效的会话ID或会话已过期", traceID))
 		return
 	}
 
 	if !session.IsAuthenticated || session.UserID == nil {
-		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
+		c.logVerificationCodeControllerWarn(traceID, "OIDC会话未认证 session=%s", shortControllerLogValue(req.SessionID))
+		c.Error(ctx, constants.ErrCodeUnauthorized, withTraceID("用户尚未认证", traceID))
 		return
 	}
 
 	// 2. 获取验证码服务配置
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
-		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		c.logVerificationCodeControllerError(traceID, "验证码服务未配置")
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
 		return
 	}
 
@@ -684,14 +1149,16 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterCo
 		verificationType = service.VerificationTypePhone
 	}
 
-	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, req.SessionID); err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, req.SessionID, traceID); err != nil {
+		c.logVerificationCodeControllerError(traceID, "验证码发送失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID(err.Error(), traceID))
 		return
 	}
 
 	response := SendVerificationCodeResponse{
 		Success: true,
 		Message: "验证码已发送",
+		TraceID: traceID,
 	}
 
 	c.Success(ctx, response)
@@ -734,7 +1201,7 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 	}
 
 	// 2. 获取验证码服务配置
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
 		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
 		return
@@ -820,9 +1287,11 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 // SendRegisterVerificationCode 发送注册验证码接口（无需登录认证）
 // POST /api/oidc/send-register-verification-code
 func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.RouterContextInterface) {
+	traceID := newVerificationCodeTraceID()
 	var req SendRegisterVerificationCodeRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		c.logVerificationCodeControllerError(traceID, "注册验证码请求参数错误 err=%v", err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("请求参数错误: "+err.Error(), traceID))
 		return
 	}
 
@@ -831,16 +1300,20 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.
 	if req.Type == "email" {
 		captchaScene = "sendEmail"
 	}
+	c.logVerificationCodeControllerInfo(traceID, "发送注册验证码请求 scene=%s type=%s receiver=%s clientIp=%s", captchaScene, req.Type, service.MaskVerificationReceiver(req.Receiver), ctx.ClientIP())
 	captchaManager := captcha.NewManager(helper.GetDatabase())
 	if err := captchaManager.ValidateForScene(captchaScene, req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		c.logVerificationCodeControllerWarn(traceID, "注册验证码校验失败 scene=%s err=%v", captchaScene, err)
+		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID(err.Error(), traceID))
 		return
 	}
+	c.logVerificationCodeControllerInfo(traceID, "注册验证码校验通过 scene=%s", captchaScene)
 
 	// 1. 获取验证码服务配置
-	config := c.getVerificationCodeConfig()
+	config := getVerificationCodeConfig()
 	if config == nil {
-		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
+		c.logVerificationCodeControllerError(traceID, "注册验证码服务未配置")
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID("验证码服务未配置", traceID))
 		return
 	}
 
@@ -858,14 +1331,16 @@ func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.
 	// 这样可以保证每个接收者有独立的验证码
 	sessionID := "register:" + req.Receiver
 
-	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, sessionID); err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+	if err := verificationService.SendCode(ctx.Request().Context(), req.Receiver, verificationType, sessionID, traceID); err != nil {
+		c.logVerificationCodeControllerError(traceID, "注册验证码发送失败 type=%s receiver=%s err=%v", verificationType, service.MaskVerificationReceiver(req.Receiver), err)
+		c.Error(ctx, constants.ErrCodeInternal, withTraceID(err.Error(), traceID))
 		return
 	}
 
 	response := SendVerificationCodeResponse{
 		Success: true,
 		Message: "验证码已发送",
+		TraceID: traceID,
 	}
 
 	c.Success(ctx, response)
@@ -879,7 +1354,7 @@ type RefreshTokenResponse struct {
 }
 
 // RefreshToken 刷新访问令牌
-// POST /api/auth/refresh
+// POST /api/oidc/auth/refresh
 func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInterface) {
 	// 1. 从 Cookie 获取 Refresh Token
 	refreshToken, err := ctx.Cookie("refresh_token")
@@ -938,8 +1413,51 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 }
 
 // Logout 登出接口
-// POST /api/auth/logout
+// POST /api/oidc/auth/logout
 func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface) {
+	c.revokeRefreshTokenCookie(ctx)
+	c.Success(ctx, map[string]any{"success": true, "message": "登出成功"})
+}
+
+// SwitchAccount clears the current user from an OIDC authorization session,
+// preserving the client request so the next login can continue the same flow.
+// It also clears the browser-level SSO cookie to prevent the previous account
+// from being silently selected on a later authorization request.
+// POST /api/oidc/auth/switch-account
+func (c OIDCAuthFlowController) SwitchAccount(ctx httpInterfaces.RouterContextInterface) {
+	var req SwitchAccountRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+
+	if !session.IsAuthenticated || session.UserID == nil {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
+		return
+	}
+
+	if !validSwitchAccountCSRF(session, req.CsrfToken) {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "CSRF 校验失败")
+		return
+	}
+
+	if err := sessionService.ResetAuthentication(ctx.Request().Context(), req.SessionID); err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "切换账号失败: "+err.Error())
+		return
+	}
+
+	c.revokeRefreshTokenCookie(ctx)
+	c.Success(ctx, map[string]any{"success": true, "message": "已切换账号"})
+}
+
+func (c OIDCAuthFlowController) revokeRefreshTokenCookie(ctx httpInterfaces.RouterContextInterface) {
 	refreshToken, err := ctx.Cookie("refresh_token")
 	if err == nil && refreshToken != "" {
 		tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
@@ -948,7 +1466,12 @@ func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface
 		}
 	}
 	ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
-	c.Success(ctx, map[string]any{"success": true, "message": "登出成功"})
+	clearUserSessionCookie(ctx)
+}
+
+func validSwitchAccountCSRF(session *service.OIDCSession, csrfToken string) bool {
+	return session != nil && session.CsrfToken != "" &&
+		subtle.ConstantTimeCompare([]byte(csrfToken), []byte(session.CsrfToken)) == 1
 }
 
 // FlowStatusResponse 流程状态响应
@@ -1130,6 +1653,7 @@ type InitSessionRequest struct {
 	Nonce               string `json:"nonce"`
 	CodeChallenge       string `json:"codeChallenge"`
 	CodeChallengeMethod string `json:"codeChallengeMethod"`
+	Prompt              string `json:"prompt"`
 }
 
 // InitSessionResponse 初始化OIDC会话响应
@@ -1167,7 +1691,7 @@ func (c OIDCAuthFlowController) InitSession(ctx httpInterfaces.RouterContextInte
 		req.ResponseType,
 		req.CodeChallenge,
 		req.CodeChallengeMethod,
-		"",
+		req.Prompt,
 	)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "创建会话失败: "+err.Error())

@@ -16,6 +16,9 @@ type CreateUserRequest struct {
 	Avatar   string `json:"avatar" validate:"max=255" binding:"omitempty"`
 	Password string `json:"password" validate:"required,min=6" binding:"required"`
 	Remark   string `json:"remark" binding:"omitempty"`
+	// Attributes 扩展属性，写入用户 attributes（如旧系统身份映射信息）。
+	// 保留键 email_verified / phone_number_verified 会在落库时被过滤。
+	Attributes map[string]interface{} `json:"attributes" binding:"omitempty"`
 }
 
 // UpdateUserRequest 更新用户请求
@@ -34,10 +37,52 @@ type UpdateUserRequest struct {
 	PhoneVerified *bool                  `json:"phoneVerified" binding:"omitempty"`
 }
 
+// UpdateMyProfileRequest 个人中心自助更新请求（严格白名单）。
+// 不含邮箱/手机号（需验证流程）、状态/验证位（管理员字段），
+// 防止自助接口被用于越权修改或清空敏感字段。
+type UpdateMyProfileRequest struct {
+	Nickname string `json:"nickname" binding:"omitempty,max=50"`
+	RealName string `json:"realName" binding:"omitempty,max=50"`
+	Avatar   string `json:"avatar" binding:"omitempty,max=255"`
+	Remark   string `json:"remark" binding:"omitempty"`
+}
+
 // ChangePasswordRequest 修改密码请求
 type ChangePasswordRequest struct {
 	OldPassword string `json:"oldPassword" validate:"required" binding:"required"`
 	NewPassword string `json:"newPassword" validate:"required,min=6" binding:"required"`
+}
+
+// SetInitialPasswordRequest 设置初始密码请求（仅限当前无密码的用户，如社交注册用户）
+type SetInitialPasswordRequest struct {
+	NewPassword string `json:"newPassword" binding:"required,min=6"`
+}
+
+// AccountLoginRequest 个人中心独立登录请求（不依赖 OIDC session）
+type AccountLoginRequest struct {
+	Username      string         `json:"username" binding:"required"`
+	Password      string         `json:"password" binding:"required"`
+	CaptchaTicket *CaptchaTicket `json:"captchaTicket,omitempty"`
+	RememberMe    bool           `json:"rememberMe"`
+}
+
+// SendContactVerificationCodeRequest 个人中心改绑邮箱/手机发送验证码请求
+type SendContactVerificationCodeRequest struct {
+	Type          string         `json:"type" binding:"required,oneof=email phone"`
+	Receiver      string         `json:"receiver" binding:"required"`
+	CaptchaTicket *CaptchaTicket `json:"captchaTicket,omitempty"`
+}
+
+// ChangeEmailRequest 改绑邮箱请求
+type ChangeEmailRequest struct {
+	Email string `json:"email" binding:"required,email,max=100"`
+	Code  string `json:"code" binding:"required,len=6"`
+}
+
+// ChangePhoneRequest 改绑手机号请求
+type ChangePhoneRequest struct {
+	Phone string `json:"phone" binding:"required,max=20"`
+	Code  string `json:"code" binding:"required,len=6"`
 }
 
 // UserQueryRequest 用户查询请求
@@ -72,6 +117,7 @@ type UserResponse struct {
 	PhoneVerified   bool                   `json:"phoneVerified"`
 	EmailVerifiedAt *time.Time             `json:"emailVerifiedAt"`
 	PhoneVerifiedAt *time.Time             `json:"phoneVerifiedAt"`
+	HasPassword     bool                   `json:"hasPassword"` // 是否已设置密码（社交注册用户可能没有）
 	LoginCount      int64                  `json:"loginCount"`
 	LastLoginAt     *time.Time             `json:"lastLoginAt"`
 	LastLoginIP     string                 `json:"lastLoginIP"`
@@ -134,6 +180,7 @@ func ConvertToUserResponse(user *model.User) UserResponse {
 		PhoneVerified:   phoneVerified,
 		EmailVerifiedAt: user.EmailVerifiedAt,
 		PhoneVerifiedAt: user.PhoneVerifiedAt,
+		HasPassword:     user.PasswordHash != "",
 		LoginCount:      user.LoginCount,
 		LastLoginAt:     user.LastLoginAt,
 		LastLoginIP:     user.LastLoginIP,

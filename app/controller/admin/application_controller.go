@@ -428,7 +428,7 @@ func (ac ApplicationController) ResetClientSecret(c httpInterfaces.RouterContext
 		errCode := constants.ErrCodeInternal
 		if errors.Is(err, service.ErrApplicationNotFound) {
 			errCode = constants.ErrCodeNotFound
-		} else if strings.Contains(err.Error(), "只有 OIDC") {
+		} else if strings.Contains(err.Error(), "只有 OIDC") || strings.Contains(err.Error(), "公开客户端") {
 			errCode = constants.ErrCodeBadRequest
 		}
 		ac.Error(c, errCode, err.Error())
