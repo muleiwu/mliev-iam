@@ -1249,15 +1249,19 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 
 	updateReq := &dto.UpdateUserRequest{}
 
-	// 只更新用户提供的字段，未提供的保留原值
+	// 只更新用户提供的字段，未提供的保留原值；
+	// 本接口写入的邮箱/手机号均已通过验证码校验，需同步标记为已验证
+	verified := true
 	if req.Email != "" {
 		updateReq.Email = req.Email
+		updateReq.EmailVerified = &verified
 	} else if currentUser.Email != nil {
 		updateReq.Email = *currentUser.Email
 	}
 
 	if req.Phone != "" {
 		updateReq.Phone = req.Phone
+		updateReq.PhoneVerified = &verified
 	} else if currentUser.Phone != nil {
 		updateReq.Phone = *currentUser.Phone
 	}
