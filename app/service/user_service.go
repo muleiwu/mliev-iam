@@ -655,6 +655,44 @@ func (s *UserService) GetVerifiedUserForCodeLogin(verificationType VerificationT
 	return &response, nil
 }
 
+// GetVerifiedUserForPasswordReset 根据已验证邮箱或手机号获取可找回密码的用户。
+// 与 GetVerifiedUserForCodeLogin 逻辑一致，但错误文案面向找回密码场景。
+func (s *UserService) GetVerifiedUserForPasswordReset(verificationType VerificationType, receiver string) (*dto.UserResponse, error) {
+	var (
+		user *model.User
+		err  error
+	)
+	identifierLabel := "手机号"
+
+	switch verificationType {
+	case VerificationTypeEmail:
+		identifierLabel = "邮箱"
+		user, err = s.userDao.GetByEmail(receiver)
+	case VerificationTypePhone:
+		user, err = s.userDao.GetByPhone(receiver)
+	default:
+		return nil, fmt.Errorf("不支持的找回密码验证类型")
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("该%s未绑定任何账号", identifierLabel)
+	}
+
+	if !user.CanLogin() {
+		return nil, fmt.Errorf("用户账户已禁用")
+	}
+
+	if verificationType == VerificationTypeEmail && user.EmailVerifiedAt == nil {
+		return nil, fmt.Errorf("邮箱未验证，无法用于找回密码，请联系管理员")
+	}
+	if verificationType == VerificationTypePhone && user.PhoneVerifiedAt == nil {
+		return nil, fmt.Errorf("手机号未验证，无法用于找回密码，请联系管理员")
+	}
+
+	response := dto.ConvertToUserResponse(user)
+	return &response, nil
+}
+
 // MarkContactVerified 把邮箱/手机标记为已验证。
 // 仅供已通过验证码等方式证明联系方式归属的流程调用（如注册时验证码校验通过后）。
 func (s *UserService) MarkContactVerified(userID uint, emailVerified, phoneVerified bool) error {

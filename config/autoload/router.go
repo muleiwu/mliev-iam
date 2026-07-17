@@ -190,6 +190,13 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSettings.PUT("/push/config", AdminController.SettingController{}.UpdatePushSettings)
 			adminSettings.GET("/captcha/bindings", AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings)
 			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
+			adminSettings.GET("/storage/config", AdminController.SettingController{}.GetStorageSettings)
+			adminSettings.PUT("/storage/config", AdminController.SettingController{}.UpdateStorageSettings)
+
+			// 管理员附件上传（用户头像等）
+			adminAttachments := admin.Group("/attachments")
+			adminAttachments.Use(middleware.AdminAuthMiddleware())
+			adminAttachments.POST("/avatar", AdminController.AttachmentController{}.UploadAvatar)
 
 			// 管理员协议设置
 			adminAgreements := admin.Group("/agreements")
@@ -242,6 +249,7 @@ func (receiver Router) InitConfig() map[string]any {
 			userAuth.PUT("/email", controller.UserController{}.ChangeEmail)
 			userAuth.PUT("/phone", controller.UserController{}.ChangePhone)
 			userAuth.POST("/set-initial-password", controller.UserController{}.SetInitialPassword)
+			userAuth.POST("/avatar", controller.AttachmentController{}.UploadMyAvatar)
 
 			// 用户 JWT 令牌管理
 			auth := api.Group("/auth")
@@ -270,6 +278,8 @@ func (receiver Router) InitConfig() map[string]any {
 			apiOidc.POST("/send-login-verification-code", controller.OIDCAuthFlowController{}.SendLoginVerificationCode)
 			apiOidc.POST("/send-verification-code", controller.OIDCAuthFlowController{}.SendVerificationCode)
 			apiOidc.POST("/send-register-verification-code", controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)
+			apiOidc.POST("/send-reset-password-code", controller.OIDCAuthFlowController{}.SendResetPasswordCode)
+			apiOidc.POST("/reset-password", controller.OIDCAuthFlowController{}.ResetPasswordByCode)
 			apiOidc.POST("/complete-profile", controller.OIDCAuthFlowController{}.CompleteProfile)
 			apiOidc.GET("/register-settings", controller.OIDCAuthFlowController{}.GetRegisterSettings)
 			apiOidc.POST("/init-session", controller.OIDCAuthFlowController{}.InitSession)
@@ -277,6 +287,10 @@ func (receiver Router) InitConfig() map[string]any {
 			oidcAuth.POST("/refresh", controller.OIDCAuthFlowController{}.RefreshToken)
 			oidcAuth.POST("/logout", controller.OIDCAuthFlowController{}.Logout)
 			oidcAuth.POST("/switch-account", controller.OIDCAuthFlowController{}.SwitchAccount)
+
+			// === 附件访问（公开，302 跳转到真实存储地址）===
+			attachments := router.Group("/attachments")
+			attachments.GET("/:uuid", controller.AttachmentController{}.RedirectAttachment)
 
 			// === 社会化登录 ===
 			social := router.Group("/social")
