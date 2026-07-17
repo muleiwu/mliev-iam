@@ -75,6 +75,10 @@ const (
 	CaptchaSceneBindingsKey = "captcha_scene_bindings"
 	// CaptchaCategory 验证码相关配置分类
 	CaptchaCategory = "captcha"
+	// StorageSettingsConfigKey 对象存储配置的key
+	StorageSettingsConfigKey = "storage_settings_config"
+	// StorageCategory 存储相关配置分类
+	StorageCategory = "storage"
 )
 
 // SettingService 设置服务
@@ -455,6 +459,71 @@ func (s *SettingService) getDefaultPushSettings() *dto.PushSettings {
 		EmailChannelID: 2,
 		SMSSignature:   "",
 		EmailSignature: "",
+	}
+}
+
+// GetStorageSettings 获取对象存储配置
+func (s *SettingService) GetStorageSettings() (*dto.StorageSettings, error) {
+	setting, err := s.settingDao.GetByKey(StorageSettingsConfigKey)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 返回默认配置
+			return s.getDefaultStorageSettings(), nil
+		}
+		return nil, fmt.Errorf("获取对象存储配置失败: %w", err)
+	}
+
+	var config dto.StorageSettings
+	if err := json.Unmarshal([]byte(setting.Value), &config); err != nil {
+		// 如果解析失败，返回默认配置
+		return s.getDefaultStorageSettings(), nil
+	}
+
+	return &config, nil
+}
+
+// UpdateStorageSettings 更新对象存储配置
+func (s *SettingService) UpdateStorageSettings(req *dto.UpdateStorageSettingsRequest) error {
+	config := dto.StorageSettings{
+		Enabled:     req.Enabled,
+		Endpoint:    req.Endpoint,
+		Region:      req.Region,
+		Bucket:      req.Bucket,
+		AccessKey:   req.AccessKey,
+		SecretKey:   req.SecretKey,
+		CDN:         req.CDN,
+		UploadPath:  req.UploadPath,
+		MaxFileSize: req.MaxFileSize,
+		PublicRead:  req.PublicRead,
+	}
+
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+
+	setting := &model.Setting{
+		Key:      StorageSettingsConfigKey,
+		Value:    string(configJSON),
+		Category: StorageCategory,
+		Remark:   "对象存储配置",
+	}
+
+	if err := s.settingDao.CreateOrUpdate(setting); err != nil {
+		return fmt.Errorf("保存对象存储配置失败: %w", err)
+	}
+
+	return nil
+}
+
+// getDefaultStorageSettings 获取默认的对象存储配置
+func (s *SettingService) getDefaultStorageSettings() *dto.StorageSettings {
+	return &dto.StorageSettings{
+		Enabled:     false,
+		Region:      "us-east-1",
+		UploadPath:  "iam",
+		MaxFileSize: 5,
+		PublicRead:  false,
 	}
 }
 

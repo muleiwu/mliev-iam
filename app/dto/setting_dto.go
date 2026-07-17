@@ -75,3 +75,31 @@ type UpdatePushSettingsRequest struct {
 	SMSSignature   string `json:"smsSignature"`
 	EmailSignature string `json:"emailSignature"`
 }
+
+// StorageSettings 对象存储（S3 兼容）配置
+type StorageSettings struct {
+	Enabled     bool   `json:"enabled"`
+	Endpoint    string `json:"endpoint"`    // S3 兼容 endpoint，留空表示 AWS 官方
+	Region      string `json:"region"`
+	Bucket      string `json:"bucket"`
+	AccessKey   string `json:"accessKey"`
+	SecretKey   string `json:"secretKey"`
+	CDN         string `json:"cdn"`         // CDN 加速域名，留空则 302 跳转到预签名地址
+	UploadPath  string `json:"uploadPath"`  // 存储 key 前缀，如 iam/avatar
+	MaxFileSize int64  `json:"maxFileSize"` // 单文件大小上限（MB）
+	PublicRead  bool   `json:"publicRead"`  // 上传时设置 public-read ACL
+}
+
+// UpdateStorageSettingsRequest 更新对象存储配置请求
+type UpdateStorageSettingsRequest struct {
+	Enabled     bool   `json:"enabled"`
+	Endpoint    string `json:"endpoint"`
+	Region      string `json:"region"`
+	Bucket      string `json:"bucket"`
+	AccessKey   string `json:"accessKey"`
+	SecretKey   string `json:"secretKey"`
+	CDN         string `json:"cdn"`
+	UploadPath  string `json:"uploadPath"`
+	MaxFileSize int64  `json:"maxFileSize"`
+	PublicRead  bool   `json:"publicRead"`
+}

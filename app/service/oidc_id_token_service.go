@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash"
+	"net/url"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -301,12 +303,24 @@ func joinScopes(scopes []string) string {
 	return result
 }
 
+// resolveAvatarURL 把站内相对头像路径（/attachments/{uuid}）解析为绝对地址；外链 URL 原样返回。
+func (s *OIDCIDTokenService) resolveAvatarURL(avatar string) string {
+	if avatar == "" || !strings.HasPrefix(avatar, "/") {
+		return avatar
+	}
+	issuerURL, err := url.Parse(s.issuer)
+	if err != nil || issuerURL.Host == "" {
+		return avatar
+	}
+	return issuerURL.Scheme + "://" + issuerURL.Host + avatar
+}
+
 // addProfileClaims 添加profile scope的claims
 func (s *OIDCIDTokenService) addProfileClaims(claims *IDTokenClaims, user *model.User) {
 	claims.Name = user.RealName
 	claims.Nickname = user.Nickname
 	claims.PreferredUsername = user.Username
-	claims.Picture = user.Avatar
+	claims.Picture = s.resolveAvatarURL(user.Avatar)
 	claims.UpdatedAt = user.UpdatedAt.Unix()
 
 	// 从扩展属性中获取其他profile信息
