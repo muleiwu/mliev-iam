@@ -340,7 +340,11 @@ func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContext
 		return
 	}
 
-	c.Success(ctx, buildClientConfigResponse(app, agreementLinks))
+	response := buildClientConfigResponse(app, agreementLinks)
+	// 找回密码依赖验证码推送服务，未配置时不向前端暴露入口
+	response.Features.ForgotPassword = getVerificationCodeConfig() != nil
+
+	c.Success(ctx, response)
 }
 
 // Login OIDC登录接口
