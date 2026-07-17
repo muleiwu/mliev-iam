@@ -162,6 +162,8 @@ func (uc UserController) UpdateUserProfile(c httpInterfaces.RouterContextInterfa
 		errCode := constants.ErrCodeInternal
 		if strings.Contains(err.Error(), "用户不存在") {
 			errCode = constants.ErrCodeUserNotFound
+		} else if strings.Contains(err.Error(), "头像地址不合法") {
+			errCode = constants.ErrCodeBadRequest
 		}
 		uc.Error(c, errCode, err.Error())
 		return
