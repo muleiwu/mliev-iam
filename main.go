@@ -8,10 +8,10 @@ import (
 	"github.com/muleiwu/gomander"
 )
 
-//go:embed templates/**
+//go:embed all:templates
 var templateFS embed.FS
 
-//go:embed static/**
+//go:embed all:static
 var staticFs embed.FS
 
 func main() {
