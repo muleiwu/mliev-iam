@@ -70,7 +70,12 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatalf("预置 social provider 模板数量错误，期望 7，实际 %d", providerCount)
 	}
 
-	const expectedMaxVersion int64 = 20260617190000
+	// attachments 表（用户头像附件）存在
+	if err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='attachments'").Scan(&name); err != nil {
+		t.Fatalf("attachments 未创建: %v", err)
+	}
+
+	const expectedMaxVersion int64 = 20260717120000
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)

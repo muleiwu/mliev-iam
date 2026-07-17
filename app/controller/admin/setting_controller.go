@@ -177,3 +177,36 @@ func (c SettingController) UpdatePushSettings(ctx httpInterfaces.RouterContextIn
 
 	c.Success(ctx, map[string]any{"message": "更新成功"})
 }
+
+// GetStorageSettings 获取对象存储配置
+// GET /api/admin/settings/storage/config
+func (c SettingController) GetStorageSettings(ctx httpInterfaces.RouterContextInterface) {
+	settingService := service.NewSettingService(helper.GetDatabase())
+
+	config, err := settingService.GetStorageSettings()
+	if err != nil {
+		c.Error(ctx, 500, err.Error())
+		return
+	}
+
+	c.Success(ctx, config)
+}
+
+// UpdateStorageSettings 更新对象存储配置
+// PUT /api/admin/settings/storage/config
+func (c SettingController) UpdateStorageSettings(ctx httpInterfaces.RouterContextInterface) {
+	var req dto.UpdateStorageSettingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, 400, "请求参数错误: "+err.Error())
+		return
+	}
+
+	settingService := service.NewSettingService(helper.GetDatabase())
+
+	if err := settingService.UpdateStorageSettings(&req); err != nil {
+		c.Error(ctx, 500, err.Error())
+		return
+	}
+
+	c.Success(ctx, map[string]any{"message": "更新成功"})
+}

@@ -196,6 +196,11 @@ func (oc OIDCController) UserInfo(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
+	// 站内相对头像路径（/attachments/{uuid}）转为绝对地址
+	if strings.HasPrefix(response.Picture, "/") {
+		response.Picture = utils.GetBaseURL(c, response.Picture)
+	}
+
 	c.JSON(http.StatusOK, response)
 }
 
