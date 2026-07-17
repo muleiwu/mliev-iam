@@ -76,7 +76,7 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 		t.Fatalf("expected enabled feature defaults: %+v", data.Features)
 	}
 	if data.Features.ForgotPassword {
-		t.Fatalf("forgot password must default to disabled")
+		t.Fatalf("forgot password must be disabled when verification-code service is unconfigured")
 	}
 	if !data.LoginMethods.Username || !data.LoginMethods.Email || !data.LoginMethods.Phone {
 		t.Fatalf("unexpected login method defaults: %+v", data.LoginMethods)

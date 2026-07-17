@@ -270,6 +270,8 @@ func (receiver Router) InitConfig() map[string]any {
 			apiOidc.POST("/send-login-verification-code", controller.OIDCAuthFlowController{}.SendLoginVerificationCode)
 			apiOidc.POST("/send-verification-code", controller.OIDCAuthFlowController{}.SendVerificationCode)
 			apiOidc.POST("/send-register-verification-code", controller.OIDCAuthFlowController{}.SendRegisterVerificationCode)
+			apiOidc.POST("/send-reset-password-code", controller.OIDCAuthFlowController{}.SendResetPasswordCode)
+			apiOidc.POST("/reset-password", controller.OIDCAuthFlowController{}.ResetPasswordByCode)
 			apiOidc.POST("/complete-profile", controller.OIDCAuthFlowController{}.CompleteProfile)
 			apiOidc.GET("/register-settings", controller.OIDCAuthFlowController{}.GetRegisterSettings)
 			apiOidc.POST("/init-session", controller.OIDCAuthFlowController{}.InitSession)
