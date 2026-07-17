@@ -104,7 +104,15 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 
 	issueUserSessionCookie(c, response, req.RememberMe)
 
-	uc.SuccessWithMessage(c, "登录成功", response)
+	uc.SuccessWithMessage(c, "登录成功", sanitizeSelfProfile(response))
+}
+
+// sanitizeSelfProfile 清空自助接口不应下发的管理员字段（备注为管理端内部标注）。
+func sanitizeSelfProfile(resp *dto.UserResponse) *dto.UserResponse {
+	if resp != nil {
+		resp.Remark = ""
+	}
+	return resp
 }
 
 // GetUserProfile 获取当前用户信息
@@ -127,7 +135,7 @@ func (uc UserController) GetUserProfile(c httpInterfaces.RouterContextInterface)
 		return
 	}
 
-	uc.Success(c, response)
+	uc.Success(c, sanitizeSelfProfile(response))
 }
 
 // UpdateUserProfile 更新当前用户信息（自助白名单字段）
@@ -159,7 +167,7 @@ func (uc UserController) UpdateUserProfile(c httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	uc.SuccessWithMessage(c, "个人信息更新成功", response)
+	uc.SuccessWithMessage(c, "个人信息更新成功", sanitizeSelfProfile(response))
 }
 
 // SetInitialPassword 无密码用户（社交注册）设置初始密码

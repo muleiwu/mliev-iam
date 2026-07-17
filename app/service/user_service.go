@@ -324,9 +324,6 @@ func (s *UserService) UpdateMyProfile(id uint, req *dto.UpdateMyProfileRequest) 
 	if req.Avatar != "" {
 		user.Avatar = req.Avatar
 	}
-	if req.Remark != "" {
-		user.Remark = req.Remark
-	}
 
 	if err := s.userDao.Update(user); err != nil {
 		return nil, err
