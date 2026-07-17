@@ -38,13 +38,12 @@ type UpdateUserRequest struct {
 }
 
 // UpdateMyProfileRequest 个人中心自助更新请求（严格白名单）。
-// 不含邮箱/手机号（需验证流程）、状态/验证位（管理员字段），
+// 不含邮箱/手机号（需验证流程）、状态/验证位/备注（管理员字段），
 // 防止自助接口被用于越权修改或清空敏感字段。
 type UpdateMyProfileRequest struct {
 	Nickname string `json:"nickname" binding:"omitempty,max=50"`
 	RealName string `json:"realName" binding:"omitempty,max=50"`
 	Avatar   string `json:"avatar" binding:"omitempty,max=255"`
-	Remark   string `json:"remark" binding:"omitempty"`
 }
 
 // ChangePasswordRequest 修改密码请求
