@@ -43,6 +43,7 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 		UUID:           "client-a",
 		Name:           "测试应用",
 		Description:    "用于 OIDC 登录页",
+		Icon:           "/attachments/018f47df-7f5b-7f88-a7bd-1d3d9a69ea12",
 		ProtocolType:   string(model.ProtocolTypeOIDC),
 		ProtocolConfig: map[string]interface{}{"clientId": "client-a"},
 		IsActive:       true,
@@ -69,6 +70,9 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 	if data.ClientID != "client-a" || data.AppName != "测试应用" || data.Description != "用于 OIDC 登录页" {
 		t.Fatalf("unexpected client identity: %+v", data)
 	}
+	if data.Logo != app.Icon {
+		t.Fatalf("logo = %q, want %q", data.Logo, app.Icon)
+	}
 	if data.Appearance.PrimaryColor != "#3b82f6" || data.Appearance.DarkMode != "auto" {
 		t.Fatalf("unexpected appearance defaults: %+v", data.Appearance)
 	}
@@ -89,6 +93,22 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 	}
 	if len(data.Agreements) != 0 || data.TermsURL != "" || data.PrivacyPolicyURL != "" {
 		t.Fatalf("disabled default agreements must not be returned: %+v", data)
+	}
+}
+
+func TestBuildFlowStatusClientIncludesApplicationIcon(t *testing.T) {
+	app := &model.Application{
+		Name:        "流程测试应用",
+		Description: "用于测试授权流程品牌信息",
+		Icon:        "/attachments/018f47df-7f5b-7f88-a7bd-1d3d9a69ea12",
+	}
+
+	client := buildFlowStatusClient(app, "client-a")
+	if client.ClientID != "client-a" || client.Name != app.Name || client.Description != app.Description {
+		t.Fatalf("unexpected flow status client: %+v", client)
+	}
+	if client.Logo != app.Icon {
+		t.Fatalf("logo = %q, want %q", client.Logo, app.Icon)
 	}
 }
 

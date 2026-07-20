@@ -6,6 +6,7 @@ package dto
 type CreateApplicationRequest struct {
 	Name           string                 `json:"name" binding:"required" validate:"max=100"`
 	Description    string                 `json:"description" validate:"max=500"`
+	Icon           string                 `json:"icon" validate:"max=255"`
 	ProtocolType   string                 `json:"protocolType" binding:"required,oneof=oidc saml cas oauth2"`
 	ProtocolConfig map[string]interface{} `json:"protocolConfig" binding:"required"`
 }
@@ -14,6 +15,7 @@ type CreateApplicationRequest struct {
 type UpdateApplicationRequest struct {
 	Name           *string                 `json:"name,omitempty" validate:"max=100"`
 	Description    *string                 `json:"description,omitempty" validate:"max=500"`
+	Icon           *string                 `json:"icon,omitempty" validate:"omitempty,max=255"`
 	ProtocolConfig *map[string]interface{} `json:"protocolConfig,omitempty"`
 	IsActive       *bool                   `json:"isActive,omitempty"`
 }
@@ -24,6 +26,7 @@ type ApplicationResponse struct {
 	UUID           string                 `json:"uuid"`
 	Name           string                 `json:"name"`
 	Description    string                 `json:"description"`
+	Icon           string                 `json:"icon"`
 	ProtocolType   string                 `json:"protocolType"`
 	ProtocolConfig map[string]interface{} `json:"protocolConfig"`
 	IsActive       bool                   `json:"isActive"`

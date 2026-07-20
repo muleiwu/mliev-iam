@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
@@ -15,13 +16,15 @@ import (
 
 // Custom errors
 var (
-	ErrApplicationNotFound = errors.New("应用不存在")
-	ErrApplicationDisabled = errors.New("应用已被禁用")
+	ErrApplicationNotFound    = errors.New("应用不存在")
+	ErrApplicationDisabled    = errors.New("应用已被禁用")
+	ErrInvalidApplicationIcon = errors.New("应用图标无效")
 )
 
 // ApplicationService 应用服务
 type ApplicationService struct {
 	appDAO          *dao.ApplicationDAO
+	attachmentDAO   *dao.AttachmentDao
 	protocolFactory *protocol.ProtocolHandlerFactory
 	db              *gorm.DB
 }
@@ -30,6 +33,7 @@ type ApplicationService struct {
 func NewApplicationService(db *gorm.DB) *ApplicationService {
 	return &ApplicationService{
 		appDAO:          dao.NewApplicationDAO(db),
+		attachmentDAO:   dao.NewAttachmentDao(db),
 		protocolFactory: protocol.NewProtocolHandlerFactory(db),
 		db:              db,
 	}
@@ -37,6 +41,11 @@ func NewApplicationService(db *gorm.DB) *ApplicationService {
 
 // CreateApplication 创建应用
 func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest, creatorID uint) (*dto.ApplicationResponse, error) {
+	req.Icon = strings.TrimSpace(req.Icon)
+	if err := s.validateApplicationIcon(req.Icon); err != nil {
+		return nil, err
+	}
+
 	// 1. 验证协议类型
 	if !s.protocolFactory.IsProtocolSupported(req.ProtocolType) {
 		return nil, fmt.Errorf("不支持的协议类型: %s", req.ProtocolType)
@@ -82,6 +91,7 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 		UUID:            appUUID.String(),
 		Name:            req.Name,
 		Description:     req.Description,
+		Icon:            req.Icon,
 		ProtocolType:    req.ProtocolType,
 		ProtocolConfig:  preparedConfig,
 		CreatedByUserID: &creatorID,
@@ -169,6 +179,13 @@ func (s *ApplicationService) UpdateApplication(id uint, req *dto.UpdateApplicati
 	}
 	if req.Description != nil {
 		app.Description = *req.Description
+	}
+	if req.Icon != nil {
+		icon := strings.TrimSpace(*req.Icon)
+		if err := s.validateApplicationIcon(icon); err != nil {
+			return nil, err
+		}
+		app.Icon = icon
 	}
 	if req.IsActive != nil {
 		app.IsActive = *req.IsActive
@@ -296,6 +313,7 @@ func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig
 		UUID:         app.UUID,
 		Name:         app.Name,
 		Description:  app.Description,
+		Icon:         app.Icon,
 		ProtocolType: app.ProtocolType,
 		IsActive:     app.IsActive,
 		IsVerified:   app.IsVerified,
@@ -318,6 +336,35 @@ func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig
 	}
 
 	return response
+}
+
+// validateApplicationIcon 仅允许引用由应用图标上传接口创建的内部附件。
+func (s *ApplicationService) validateApplicationIcon(icon string) error {
+	if icon == "" {
+		return nil
+	}
+
+	const prefix = "/attachments/"
+	attachmentUUID, ok := strings.CutPrefix(icon, prefix)
+	if !ok || attachmentUUID == "" || strings.Contains(attachmentUUID, "/") {
+		return fmt.Errorf("%w：请先通过应用图标上传接口上传图片", ErrInvalidApplicationIcon)
+	}
+	if _, err := uuid.Parse(attachmentUUID); err != nil {
+		return fmt.Errorf("%w：附件地址格式错误", ErrInvalidApplicationIcon)
+	}
+
+	attachment, err := s.attachmentDAO.GetByUUID(attachmentUUID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w：附件不存在", ErrInvalidApplicationIcon)
+		}
+		return fmt.Errorf("校验应用图标失败: %w", err)
+	}
+	if attachment.BizType != model.AttachmentBizTypeApplicationIcon {
+		return fmt.Errorf("%w：附件类型不匹配", ErrInvalidApplicationIcon)
+	}
+
+	return nil
 }
 
 // ResetClientSecret 重置应用的客户端密钥（仅 OIDC）

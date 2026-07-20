@@ -29,6 +29,13 @@ var avatarAllowedMimeTypes = []string{
 	"image/svg+xml",
 }
 
+// 应用图标会在管理端裁剪为 PNG；接口同时兼容常见的安全栅格格式。
+var applicationIconAllowedMimeTypes = []string{
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+}
+
 const presignedURLExpiry = 15 * time.Minute
 
 // StorageUploadResult S3 上传结果
@@ -82,6 +89,15 @@ func NewStorageService(ctx context.Context) (*StorageService, error) {
 
 // UploadAvatarFile 上传头像文件到对象存储，返回存储 key 与元信息。
 func (s *StorageService) UploadAvatarFile(ctx context.Context, file *multipart.FileHeader) (*StorageUploadResult, error) {
+	return s.uploadImageFile(ctx, file, avatarAllowedMimeTypes)
+}
+
+// UploadApplicationIconFile 上传应用图标文件到对象存储。
+func (s *StorageService) UploadApplicationIconFile(ctx context.Context, file *multipart.FileHeader) (*StorageUploadResult, error) {
+	return s.uploadImageFile(ctx, file, applicationIconAllowedMimeTypes)
+}
+
+func (s *StorageService) uploadImageFile(ctx context.Context, file *multipart.FileHeader, allowedMimeTypes []string) (*StorageUploadResult, error) {
 	maxSizeMB := s.config.MaxFileSize
 	if maxSizeMB <= 0 {
 		maxSizeMB = 5
@@ -111,14 +127,14 @@ func (s *StorageService) UploadAvatarFile(ctx context.Context, file *multipart.F
 	}
 
 	allowed := false
-	for _, t := range avatarAllowedMimeTypes {
+	for _, t := range allowedMimeTypes {
 		if mimeType == t {
 			allowed = true
 			break
 		}
 	}
 	if !allowed {
-		return nil, errors.New("不支持的图片类型（仅支持 jpeg/png/webp/svg）")
+		return nil, errors.New("不支持的图片类型")
 	}
 
 	if _, err := src.Seek(0, 0); err != nil {
