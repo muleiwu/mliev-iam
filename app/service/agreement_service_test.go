@@ -111,3 +111,68 @@ func TestAgreementServicePublicAgreementRequiresEnabled(t *testing.T) {
 		t.Fatalf("err = %v, want ErrAgreementDisabled", err)
 	}
 }
+
+func TestAgreementServicePublicGlobalAgreementHasNoApplicationBranding(t *testing.T) {
+	db := newAgreementServiceTestDB(t)
+	svc := NewAgreementService(db)
+	if _, err := svc.UpsertGlobalAgreement(model.AgreementCodeTerms, &dto.AgreementUpsertRequest{
+		Title:     "服务协议",
+		ContentMD: "# Terms",
+		Enabled:   true,
+		Sort:      10,
+	}); err != nil {
+		t.Fatalf("upsert terms: %v", err)
+	}
+
+	response, err := svc.GetPublicGlobalAgreement(model.AgreementCodeTerms)
+	if err != nil {
+		t.Fatalf("get public global agreement: %v", err)
+	}
+	if response.AppName != "" || response.AppIcon != "" {
+		t.Fatalf("global agreement must not contain app branding: %+v", response)
+	}
+}
+
+func TestAgreementServicePublicApplicationAgreementIncludesBranding(t *testing.T) {
+	db := newAgreementServiceTestDB(t)
+	app := &model.Application{
+		UUID:           "client-branding",
+		Name:           "品牌测试应用",
+		Icon:           "/attachments/018f47df-7f5b-7f88-a7bd-1d3d9a69ea12",
+		ProtocolType:   string(model.ProtocolTypeOIDC),
+		ProtocolConfig: map[string]interface{}{"clientId": "client-branding"},
+		IsActive:       true,
+	}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatalf("create app: %v", err)
+	}
+
+	svc := NewAgreementService(db)
+	if _, err := svc.CreateApplicationAgreement(app.ID, &dto.AgreementUpsertRequest{
+		Code:      "branding-policy",
+		Title:     "品牌协议",
+		ContentMD: "# Branding",
+		Enabled:   true,
+	}); err != nil {
+		t.Fatalf("create app agreement: %v", err)
+	}
+
+	response, err := svc.GetPublicApplicationAgreement(app.UUID, "branding-policy")
+	if err != nil {
+		t.Fatalf("get public app agreement: %v", err)
+	}
+	if response.AppName != app.Name || response.AppIcon != app.Icon {
+		t.Fatalf("unexpected app branding: %+v", response)
+	}
+
+	if err := db.Model(app).Update("icon", "").Error; err != nil {
+		t.Fatalf("clear app icon: %v", err)
+	}
+	response, err = svc.GetPublicApplicationAgreement(app.UUID, "branding-policy")
+	if err != nil {
+		t.Fatalf("get public app agreement without icon: %v", err)
+	}
+	if response.AppIcon != "" {
+		t.Fatalf("app icon = %q, want empty", response.AppIcon)
+	}
+}

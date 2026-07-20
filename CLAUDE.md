@@ -113,3 +113,21 @@ The app supports SIGHUP for graceful restart (re-assembly without process exit) 
 - Database migration is automatic via GORM AutoMigrate at startup (configured in `config/autoload/migration.go`)
 - The `Application` model is protocol-agnostic with a `ProtocolType` field and JSON `ProtocolConfig`
 - Handler functions are always wrapped via `WrapHandler`—never register raw `gin.HandlerFunc` directly
+
+## Design Context
+
+### Users
+IAM administrators, security and operations teams, and developers integrating OIDC/OAuth2 applications. They work in an enterprise admin console where identity configuration must be fast to scan, precise, and safe to change.
+
+### Brand Personality
+Modern, trustworthy, clear. The interface may feel light and energetic while preserving the professionalism and predictability expected from an enterprise identity security product.
+
+### Aesthetic Direction
+Extend the existing Vben and Ant Design system. Use MLiev Identity Blue as a restrained accent with subtly blue-tinted neutrals. Support light/dark themes, narrow screens, and keyboard use. Avoid decorative gradients, glassmorphism, showy motion, and deeply nested cards.
+
+### Design Principles
+- Establish the application's identity, state, and current task before protocol details.
+- Use explicit action labels, visible focus states, and actionable error recovery.
+- Reuse existing design tokens and Ant Design interactions instead of creating isolated visual patterns.
+- Keep optional configuration lightweight and provide dependable defaults when absent.
+- Design for dark mode, keyboard access, narrow screens, long names, and reduced motion from the start.

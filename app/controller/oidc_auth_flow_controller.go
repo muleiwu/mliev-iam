@@ -198,6 +198,7 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 		ClientID:    app.UUID,
 		AppName:     app.Name,
 		Description: app.Description,
+		Logo:        app.Icon,
 		Appearance: ClientAppearanceConfig{
 			PrimaryColor: "#3b82f6",
 			DarkMode:     "auto",
@@ -1249,15 +1250,19 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 
 	updateReq := &dto.UpdateUserRequest{}
 
-	// 只更新用户提供的字段，未提供的保留原值
+	// 只更新用户提供的字段，未提供的保留原值；
+	// 本接口写入的邮箱/手机号均已通过验证码校验，需同步标记为已验证
+	verified := true
 	if req.Email != "" {
 		updateReq.Email = req.Email
+		updateReq.EmailVerified = &verified
 	} else if currentUser.Email != nil {
 		updateReq.Email = *currentUser.Email
 	}
 
 	if req.Phone != "" {
 		updateReq.Phone = req.Phone
+		updateReq.PhoneVerified = &verified
 	} else if currentUser.Phone != nil {
 		updateReq.Phone = *currentUser.Phone
 	}
@@ -1501,6 +1506,15 @@ type FlowStatusClient struct {
 	Logo        string `json:"logo,omitempty"`
 }
 
+func buildFlowStatusClient(app *model.Application, clientID string) *FlowStatusClient {
+	return &FlowStatusClient{
+		ClientID:    clientID,
+		Name:        app.Name,
+		Description: app.Description,
+		Logo:        app.Icon,
+	}
+}
+
 // FlowStatusUser 流程状态中的用户信息
 type FlowStatusUser struct {
 	ID       uint   `json:"id"`
@@ -1559,11 +1573,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		return
 	}
 
-	clientInfo := &FlowStatusClient{
-		ClientID:    session.ClientID,
-		Name:        app.Name,
-		Description: app.Description,
-	}
+	clientInfo := buildFlowStatusClient(app, session.ClientID)
 
 	// 3. 如果未认证，返回 needs_login
 	if !session.IsAuthenticated || session.UserID == nil {

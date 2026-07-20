@@ -31,6 +31,7 @@ type AgreementPublicResponse struct {
 	ContentMD string `json:"contentMd"`
 	UpdatedAt string `json:"updatedAt"`
 	AppName   string `json:"appName,omitempty"`
+	AppIcon   string `json:"appIcon,omitempty"`
 }
 
 // ClientAgreementLink OIDC 前端注册页协议链接。

@@ -40,6 +40,26 @@ func (s *AttachmentService) UploadAvatar(ctx context.Context, file *multipart.Fi
 		return nil, err
 	}
 
+	return s.saveUploadedImage(file, result, uploaderUserID, model.AttachmentBizTypeAvatar)
+}
+
+// UploadApplicationIcon 上传应用图标并登记独立的附件业务类型。
+func (s *AttachmentService) UploadApplicationIcon(ctx context.Context, file *multipart.FileHeader, uploaderUserID uint) (*dto.UploadAvatarResponse, error) {
+	storageService, err := NewStorageService(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := storageService.UploadApplicationIconFile(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.saveUploadedImage(file, result, uploaderUserID, model.AttachmentBizTypeApplicationIcon)
+}
+
+func (s *AttachmentService) saveUploadedImage(file *multipart.FileHeader, result *StorageUploadResult, uploaderUserID uint, bizType string) (*dto.UploadAvatarResponse, error) {
+
 	attachment := &model.Attachment{
 		UUID:           uuid.NewString(),
 		FileName:       file.Filename,
@@ -47,7 +67,7 @@ func (s *AttachmentService) UploadAvatar(ctx context.Context, file *multipart.Fi
 		MimeType:       result.MimeType,
 		StorageType:    model.AttachmentStorageTypeS3,
 		StorageKey:     result.StorageKey,
-		BizType:        model.AttachmentBizTypeAvatar,
+		BizType:        bizType,
 		UploaderUserID: uploaderUserID,
 	}
 	if err := s.attachmentDao.Create(attachment); err != nil {

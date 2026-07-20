@@ -40,6 +40,13 @@ const (
 	userFailureCountColumn                         = "failure_count"
 )
 
+// gooseVersionRecord 用于通过 GORM 写入 goose 的版本表，避免手工拼接表名和 SQL。
+type gooseVersionRecord struct {
+	VersionID int64     `gorm:"column:version_id"`
+	IsApplied bool      `gorm:"column:is_applied"`
+	Timestamp time.Time `gorm:"column:tstamp"`
+}
+
 // baselineLegacyVersions 是本次重构之前已在生产 MySQL 上部署过的迁移版本集合。
 // 如果检测到 sentinel 表存在但 goose_db_version 里无任何记录（历史上通过
 // AutoMigrate 起家、还未引入 goose），把这些版本标记为 applied，避免
@@ -155,10 +162,11 @@ func markGooseVersionAppliedIfMissing(gormDB *gorm.DB, version int64, reason str
 		return nil
 	}
 
-	if err := gormDB.Exec(
-		"INSERT INTO "+goose.TableName()+" (version_id, is_applied, tstamp) VALUES (?, ?, ?)",
-		version, true, time.Now(),
-	).Error; err != nil {
+	if err := gormDB.Table(goose.TableName()).Create(&gooseVersionRecord{
+		VersionID: version,
+		IsApplied: true,
+		Timestamp: time.Now(),
+	}).Error; err != nil {
 		return fmt.Errorf("写入 goose version=%d 失败: %w", version, err)
 	}
 
@@ -197,10 +205,11 @@ func baselineIfLegacyMySQL(db *sql.DB, gormDB *gorm.DB, logger Logger) error {
 		if count > 0 {
 			continue
 		}
-		if err := gormDB.Exec(
-			"INSERT INTO "+goose.TableName()+" (version_id, is_applied, tstamp) VALUES (?, ?, ?)",
-			v, true, now,
-		).Error; err != nil {
+		if err := gormDB.Table(goose.TableName()).Create(&gooseVersionRecord{
+			VersionID: v,
+			IsApplied: true,
+			Timestamp: now,
+		}).Error; err != nil {
 			return fmt.Errorf("写入 baseline version=%d: %w", v, err)
 		}
 	}

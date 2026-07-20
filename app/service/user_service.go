@@ -13,8 +13,22 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// dicebearAvatarPrefix 预设头像服务地址前缀（与 frontend-oidc AvatarPicker 保持一致）。
+const dicebearAvatarPrefix = "https://dicebear.mliev.com/"
+
+// isAllowedAvatarURL 校验自助设置的头像地址：仅允许对象存储附件（/attachments/{uuid}）
+// 或 DiceBear 预设头像服务，防止把任意外部 URL 存为头像。
+func isAllowedAvatarURL(avatar string) bool {
+	if rest, ok := strings.CutPrefix(avatar, "/attachments/"); ok {
+		_, err := uuid.Parse(rest)
+		return err == nil
+	}
+	return strings.HasPrefix(avatar, dicebearAvatarPrefix)
+}
 
 // UserService 用户业务逻辑层
 type UserService struct {
@@ -322,10 +336,10 @@ func (s *UserService) UpdateMyProfile(id uint, req *dto.UpdateMyProfileRequest) 
 		user.RealName = req.RealName
 	}
 	if req.Avatar != "" {
+		if !isAllowedAvatarURL(req.Avatar) {
+			return nil, errors.New("头像地址不合法")
+		}
 		user.Avatar = req.Avatar
-	}
-	if req.Remark != "" {
-		user.Remark = req.Remark
 	}
 
 	if err := s.userDao.Update(user); err != nil {

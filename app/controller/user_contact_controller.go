@@ -190,5 +190,5 @@ func (uc UserController) changeContact(c httpInterfaces.RouterContextInterface, 
 	if verificationType == service.VerificationTypePhone {
 		message = "手机号修改成功"
 	}
-	uc.SuccessWithMessage(c, message, response)
+	uc.SuccessWithMessage(c, message, sanitizeSelfProfile(response))
 }
