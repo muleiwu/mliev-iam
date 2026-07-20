@@ -34,3 +34,24 @@ func (c AttachmentController) UploadAvatar(ctx httpInterfaces.RouterContextInter
 
 	c.Success(ctx, response)
 }
+
+// UploadApplicationIcon 管理端上传应用图标。
+// POST /api/admin/attachments/application-icon
+func (c AttachmentController) UploadApplicationIcon(ctx httpInterfaces.RouterContextInterface) {
+	uploaderID, _ := middleware.GetCurrentUserID(ctx)
+
+	file, err := ctx.FormFile("file")
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请选择要上传的应用图标")
+		return
+	}
+
+	attachmentService := service.NewAttachmentService(helper.GetDatabase())
+	response, err := attachmentService.UploadApplicationIcon(ctx.Request().Context(), file, uploaderID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	c.Success(ctx, response)
+}

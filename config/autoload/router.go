@@ -197,6 +197,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminAttachments := admin.Group("/attachments")
 			adminAttachments.Use(middleware.AdminAuthMiddleware())
 			adminAttachments.POST("/avatar", AdminController.AttachmentController{}.UploadAvatar)
+			adminAttachments.POST("/application-icon", AdminController.AttachmentController{}.UploadApplicationIcon)
 
 			// 管理员协议设置
 			adminAgreements := admin.Group("/agreements")

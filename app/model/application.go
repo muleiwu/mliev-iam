@@ -24,6 +24,7 @@ type Application struct {
 	UUID        string `gorm:"size:36;uniqueIndex:uk_applications_uuid,priority:1;not null" json:"uuid" validate:"required"`
 	Name        string `gorm:"size:100;not null" json:"name" validate:"required"`
 	Description string `gorm:"type:text" json:"description"`
+	Icon        string `gorm:"size:255;not null;default:''" json:"icon" validate:"max=255"`
 
 	// 协议类型和配置
 	ProtocolType   string                 `gorm:"size:20;not null;index" json:"protocolType" validate:"required,oneof=oidc saml cas oauth2"`

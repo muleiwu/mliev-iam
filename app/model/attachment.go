@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	AttachmentStorageTypeS3 = "s3"
-	AttachmentBizTypeAvatar = "avatar"
+	AttachmentStorageTypeS3          = "s3"
+	AttachmentBizTypeAvatar          = "avatar"
+	AttachmentBizTypeApplicationIcon = "application_icon"
 )
 
 // Attachment 上传到对象存储的附件记录。

@@ -75,13 +75,35 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatalf("attachments 未创建: %v", err)
 	}
 
-	const expectedMaxVersion int64 = 20260717120000
+	var applicationIconColumnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('applications') WHERE name = 'icon'`).Scan(&applicationIconColumnCount); err != nil {
+		t.Fatal(err)
+	}
+	if applicationIconColumnCount != 1 {
+		t.Fatal("applications 表缺少 icon 列")
+	}
+
+	const expectedMaxVersion int64 = 20260720120000
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
 	if maxV != expectedMaxVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", expectedMaxVersion, maxV)
+	}
+
+	goose.SetBaseFS(FS)
+	if err := goose.DownTo(db, "sqlite", 20260717120000); err != nil {
+		t.Fatalf("回滚应用图标迁移失败: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('applications') WHERE name = 'icon'`).Scan(&applicationIconColumnCount); err != nil {
+		t.Fatal(err)
+	}
+	if applicationIconColumnCount != 0 {
+		t.Fatal("回滚后 applications.icon 仍然存在")
+	}
+	if err := goose.Up(db, "sqlite"); err != nil {
+		t.Fatalf("重新应用应用图标迁移失败: %v", err)
 	}
 }
 

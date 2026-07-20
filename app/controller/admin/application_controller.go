@@ -45,7 +45,7 @@ func (ac ApplicationController) CreateApplication(c httpInterfaces.RouterContext
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
-		if strings.Contains(errMsg, "不支持的协议类型") {
+		if strings.Contains(errMsg, "不支持的协议类型") || errors.Is(err, service.ErrInvalidApplicationIcon) {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(errMsg, "请求参数错误") || strings.Contains(errMsg, "至少需要") || strings.Contains(errMsg, "必须包含") {
 			errCode = constants.ErrCodeBadRequest
@@ -154,6 +154,8 @@ func (ac ApplicationController) UpdateApplication(c httpInterfaces.RouterContext
 
 		if errors.Is(err, service.ErrApplicationNotFound) {
 			errCode = constants.ErrCodeNotFound
+		} else if errors.Is(err, service.ErrInvalidApplicationIcon) {
+			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(err.Error(), "请求参数错误") || strings.Contains(err.Error(), "至少需要") || strings.Contains(err.Error(), "必须包含") {
 			errCode = constants.ErrCodeBadRequest
 		}

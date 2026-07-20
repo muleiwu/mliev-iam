@@ -198,6 +198,7 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 		ClientID:    app.UUID,
 		AppName:     app.Name,
 		Description: app.Description,
+		Logo:        app.Icon,
 		Appearance: ClientAppearanceConfig{
 			PrimaryColor: "#3b82f6",
 			DarkMode:     "auto",
@@ -1505,6 +1506,15 @@ type FlowStatusClient struct {
 	Logo        string `json:"logo,omitempty"`
 }
 
+func buildFlowStatusClient(app *model.Application, clientID string) *FlowStatusClient {
+	return &FlowStatusClient{
+		ClientID:    clientID,
+		Name:        app.Name,
+		Description: app.Description,
+		Logo:        app.Icon,
+	}
+}
+
 // FlowStatusUser 流程状态中的用户信息
 type FlowStatusUser struct {
 	ID       uint   `json:"id"`
@@ -1563,11 +1573,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		return
 	}
 
-	clientInfo := &FlowStatusClient{
-		ClientID:    session.ClientID,
-		Name:        app.Name,
-		Description: app.Description,
-	}
+	clientInfo := buildFlowStatusClient(app, session.ClientID)
 
 	// 3. 如果未认证，返回 needs_login
 	if !session.IsAuthenticated || session.UserID == nil {
