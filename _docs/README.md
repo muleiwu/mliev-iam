@@ -12,6 +12,10 @@ MLiev IAM 正式品牌 Logo 源文件、设计含义、标准色和使用规则�
 
 评估飞书、企业微信、钉钉作为 IAM 上游企业身份源的对接方案，包含当前项目能力盘点、平台差异、建议领域模型、同步流程、IAM 统一认证服务能力清单和实施路线。
 
+### 身份凭据主密钥使用与轮换 - [`IDENTITY_CREDENTIALS_KEY_MANAGEMENT.md`](IDENTITY_CREDENTIALS_KEY_MANAGEMENT.md)
+
+说明身份凭据主密钥的保护范围、首次配置、Kubernetes 注入、版本化密钥环、安全轮换、存量密文迁移、旧密钥删除门槛和故障恢复流程。
+
 ### 1. 部门管理API - `department_api.yaml`
 
 部门管理模块的完整API文档，包含以下功能：
