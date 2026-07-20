@@ -319,7 +319,7 @@ func (s *AgreementService) GetPublicGlobalAgreement(code string) (*dto.Agreement
 	if !agreement.Enabled {
 		return nil, ErrAgreementDisabled
 	}
-	return s.toPublicResponse(agreement, ""), nil
+	return s.toPublicResponse(agreement, "", ""), nil
 }
 
 // GetPublicApplicationAgreement 获取公开应用协议。
@@ -351,7 +351,7 @@ func (s *AgreementService) GetPublicApplicationAgreement(clientID, code string) 
 	if !agreement.Enabled {
 		return nil, ErrAgreementDisabled
 	}
-	return s.toPublicResponse(agreement, app.Name), nil
+	return s.toPublicResponse(agreement, app.Name, app.Icon), nil
 }
 
 // BuildClientAgreementLinks 构造 OIDC 前端协议链接。
@@ -530,7 +530,7 @@ func (s *AgreementService) toAgreementResponses(agreements []*model.Agreement) [
 	return responses
 }
 
-func (s *AgreementService) toPublicResponse(agreement *model.Agreement, appName string) *dto.AgreementPublicResponse {
+func (s *AgreementService) toPublicResponse(agreement *model.Agreement, appName, appIcon string) *dto.AgreementPublicResponse {
 	return &dto.AgreementPublicResponse{
 		Scope:     agreement.Scope,
 		Code:      agreement.Code,
@@ -538,5 +538,6 @@ func (s *AgreementService) toPublicResponse(agreement *model.Agreement, appName 
 		ContentMD: agreement.ContentMD,
 		UpdatedAt: agreement.UpdatedAt.Format(time.RFC3339),
 		AppName:   appName,
+		AppIcon:   appIcon,
 	}
 }
