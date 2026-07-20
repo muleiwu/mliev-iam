@@ -83,9 +83,13 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		_ = oc.trySSO(c, sessionService, session, req, false)
 	}
 
-	// 5. 重定向到统一的前端授权入口（编排器）
-	authorizeURL := "/auth/#/oidc/authorize?session_id=" + session.SessionID
-	c.Redirect(http.StatusFound, authorizeURL)
+	loginTicket, err := sessionService.CreateLoginTicket(rctx, session)
+	if err != nil {
+		_ = sessionService.DeleteSession(rctx, session.SessionID)
+		oc.redirectWithError(c, req.RedirectURI, "server_error", "创建浏览器登录票据失败", req.State)
+		return
+	}
+	c.Redirect(http.StatusFound, oidcLoginURL(loginTicket, session.SessionID))
 }
 
 // promptHas 判断空格分隔的 prompt 参数中是否包含指定值（OIDC Core §3.1.2.1）
@@ -436,6 +440,10 @@ func (oc OIDCController) trySSO(
 	}
 
 	userService := service.NewUserService(db)
+	userModel, userErr := userService.GetUserModelByID(oldToken.UserID)
+	if userErr != nil || userModel == nil || !userModel.CanLogin() {
+		return false
+	}
 	user, userErr := userService.GetUserByID(oldToken.UserID)
 	if userErr != nil || user == nil {
 		return false

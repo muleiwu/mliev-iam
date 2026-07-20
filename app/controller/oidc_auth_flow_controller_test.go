@@ -76,7 +76,7 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 	if data.Appearance.PrimaryColor != "#3b82f6" || data.Appearance.DarkMode != "auto" {
 		t.Fatalf("unexpected appearance defaults: %+v", data.Appearance)
 	}
-	if !data.Features.Registration || !data.Features.SocialLogin || !data.Features.IdentityLogin || !data.Features.RememberMe || !data.Features.PasswordStrength {
+	if !data.Features.Registration || !data.Features.SocialLogin || !data.Features.EnterpriseLogin || !data.Features.RememberMe || !data.Features.PasswordStrength {
 		t.Fatalf("expected enabled feature defaults: %+v", data.Features)
 	}
 	if data.Features.ForgotPassword {

@@ -10,25 +10,23 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 const defaultHTTPTimeout = 10 * time.Second
 
 type baseAdapter struct {
-	Provider *model.IdentityProvider
+	Provider *Provider
 	Client   *http.Client
 }
 
-func newBaseAdapter(provider *model.IdentityProvider) baseAdapter {
+func newBaseAdapter(provider *Provider) baseAdapter {
 	return baseAdapter{
 		Provider: provider,
 		Client:   &http.Client{Timeout: defaultHTTPTimeout},
 	}
 }
 
-func (a *baseAdapter) GetProviderType() model.IdentityProviderType {
+func (a *baseAdapter) GetProviderType() ProviderType {
 	return a.Provider.Type
 }
 

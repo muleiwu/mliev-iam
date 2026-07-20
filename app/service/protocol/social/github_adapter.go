@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"golang.org/x/oauth2"
 )
 
@@ -24,7 +23,7 @@ type GitHubAdapter struct {
 	*GenericOAuth2Adapter
 }
 
-func NewGitHubAdapter(provider *model.SocialProvider) *GitHubAdapter {
+func NewGitHubAdapter(provider *Provider) *GitHubAdapter {
 	provider.AuthURL = githubAuthURL
 	provider.TokenURL = githubTokenURL
 	provider.UserInfoURL = githubUserInfoURL

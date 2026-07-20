@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"golang.org/x/oauth2"
 )
 
@@ -34,7 +33,7 @@ type OIDCAdapter struct {
 
 // NewOIDCAdapter 创建 OIDC 适配器。
 // resolver 可为 nil；此时若 provider 已手工填写 Auth/Token/UserInfo URL 则仍可工作。
-func NewOIDCAdapter(provider *model.SocialProvider, resolver OIDCResolver) (*OIDCAdapter, error) {
+func NewOIDCAdapter(provider *Provider, resolver OIDCResolver) (*OIDCAdapter, error) {
 	issuer, _ := getAttrString(provider.Attributes, "issuer")
 
 	if resolver != nil && issuer != "" {

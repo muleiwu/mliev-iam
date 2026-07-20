@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 const (
@@ -22,7 +20,7 @@ type WeComAdapter struct {
 	baseAdapter
 }
 
-func NewWeComAdapter(provider *model.IdentityProvider) *WeComAdapter {
+func NewWeComAdapter(provider *Provider) *WeComAdapter {
 	return &WeComAdapter{baseAdapter: newBaseAdapter(provider)}
 }
 

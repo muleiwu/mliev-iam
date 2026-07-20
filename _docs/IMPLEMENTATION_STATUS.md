@@ -1,5 +1,39 @@
 # 实施状态报告
 
+> **2026-07-20 修复复验更新：** 原审计中的阻断、高风险和中风险代码项已按 01 → 04 顺序整改并通过本地自动化检查；生产发布仍被真实 MySQL/PostgreSQL 演练、真实 Redis/浏览器对抗验收以及飞书/企微/钉钉测试企业联调阻塞。下方旧项目记录仅作为历史交付记录，不代表企业身份系统的最新生产状态。
+
+## 企业身份连接与目录同步（2026-07-20，审计后状态）
+
+| 阶段 | 最新状态 | 已交付与待整改 |
+| --- | --- | --- |
+| 01 统一身份连接 | 代码整改完成，生产验收中 | 浏览器绑定、原子 state/continuation、三段二维码、统一 principal/conflict、字段级连接更新、capability 健康、keyring 和旧运行时代码删除已完成；待真实 Redis/浏览器对抗测试与 MySQL/PostgreSQL 硬切演练。 |
+| 02 飞书手动同步 | 代码整改完成，真实飞书待验收 | Contact v3 根部门遍历、不可变快照、supersede、operation lease、部门移动/删除、关系撤销、字段所有权与活跃唯一约束已完成；待真实飞书测试企业闭环。 |
+| 03 自动化与治理 | 代码整改完成，真实多实例待验收 | 最大尝试次数、死信、租约复查、优雅停机、禁用取消、错误分类和同步中心已完成；待 MySQL/PostgreSQL 多实例/崩溃/停机演练。 |
+| 04 企业微信与钉钉 | 契约测试完成，真实联调阻塞 | 三平台统一完整性、scope、字段权限、稳定标识与 fixture 契约已完成，新增 `sandbox` 硬门槛；当前未注入三家测试企业凭据。 |
+
+当前约束与发布提醒：
+
+- 部署优先配置 `IDENTITY_CREDENTIALS_KEYS` 与 `IDENTITY_CREDENTIALS_ACTIVE_KEY_VERSION`；旧 `IDENTITY_CREDENTIALS_KEY` 仅作为 version 1 兼容输入。缺失、坏版本或存量密文不可解密都会阻止启动。
+- MySQL 8.4、PostgreSQL 16 已增加 testcontainers 空库/存量硬切/坏密钥/活跃唯一约束测试；测试代码可编译，但本机 Docker 守护进程未启动，尚未取得真实执行结论。
+- 旧 social/identity API、回调和四张旧表不保留兼容层，客户端与第三方回调地址必须同步发布。
+- 2026-07-20 本地验收：`go test ./...`、关键服务 race、`go vet ./...`、管理端本轮 lint/typecheck/build、OIDC 前端 typecheck/build 全部通过。
+- 飞书、企业微信和钉钉真实测试企业验收均为硬门槛；缺少凭据时 directory/events capability 必须保持关闭。
+
+### 本轮验证结果
+
+| 验证 | 结果 |
+| --- | --- |
+| `GOCACHE=/tmp/mliev-iam-go-cache GOWORK=off go test ./...` | 通过 |
+| 关键服务 `go test -race`、`go vet ./...` | 通过 |
+| 管理端本轮 ESLint、`vue-tsc`、Vite production build | 通过；仅有依赖版本/分包 warning |
+| OIDC 前端 `vue-tsc -b`、Vite production build | 通过；仅有既存动态/静态 import warning |
+| `go test -tags=integration ./migrations -run '^$'` | testcontainers 验收代码编译通过 |
+| 实际 `TestMigrationDialects` | 阻塞：本机没有可用 Docker provider |
+| `go test -tags=sandbox ... -run '^$'` | 三平台真实验收代码编译通过 |
+| 实际三平台 Sandbox | 阻塞：未注入测试企业环境变量 |
+
+---
+
 ## ✅ 已完成的工作
 
 ### Backend（后端）- 100% 完成
@@ -202,4 +236,3 @@
 
 *最后更新：2025-10-09*
 *状态：✅ Backend完成，✅ Frontend完成*
-

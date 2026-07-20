@@ -158,7 +158,7 @@ type ClientAppearanceConfig struct {
 type ClientFeaturesConfig struct {
 	Registration     bool `json:"registration"`
 	SocialLogin      bool `json:"socialLogin"`
-	IdentityLogin    bool `json:"identityLogin"`
+	EnterpriseLogin  bool `json:"enterpriseLogin"`
 	RememberMe       bool `json:"rememberMe"`
 	ForgotPassword   bool `json:"forgotPassword"`
 	PasswordStrength bool `json:"passwordStrength"`
@@ -206,7 +206,7 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 		Features: ClientFeaturesConfig{
 			Registration:     true,
 			SocialLogin:      true,
-			IdentityLogin:    true,
+			EnterpriseLogin:  true,
 			RememberMe:       true,
 			ForgotPassword:   false,
 			PasswordStrength: true,
@@ -310,7 +310,7 @@ func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContext
 		ctx.Query("session_id"),
 		func(sessionID string) (*service.OIDCSession, error) {
 			sessionService := service.NewOIDCSessionService(helper.GetRedis())
-			return sessionService.GetSession(ctx.Request().Context(), sessionID)
+			return getBoundOIDCSession(ctx, sessionService, sessionID)
 		},
 	)
 	if err != nil {
@@ -366,7 +366,7 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 
 	// 1. 验证会话是否存在
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -485,7 +485,7 @@ func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInte
 	}
 
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -563,7 +563,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	// 1. 如果有sessionId，验证会话是否存在并解析应用
 	if req.SessionID != "" {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+		session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 		if err != nil {
 			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 			return
@@ -733,7 +733,7 @@ func (c OIDCAuthFlowController) Consent(ctx httpInterfaces.RouterContextInterfac
 
 	// 1. 获取会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -854,7 +854,7 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx httpInterfaces.RouterContextInte
 
 	// 1. 获取会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), sessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, sessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -1053,7 +1053,7 @@ func (c OIDCAuthFlowController) SendLoginVerificationCode(ctx httpInterfaces.Rou
 	c.logVerificationCodeControllerInfo(traceID, "登录验证码校验通过 scene=%s", captchaScene)
 
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	if _, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID); err != nil {
+	if _, err := getBoundOIDCSession(ctx, sessionService, req.SessionID); err != nil {
 		c.logVerificationCodeControllerWarn(traceID, "登录验证码OIDC会话不存在或过期 session=%s err=%v", shortControllerLogValue(req.SessionID), err)
 		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("无效的会话ID或会话已过期", traceID))
 		return
@@ -1123,7 +1123,7 @@ func (c OIDCAuthFlowController) SendVerificationCode(ctx httpInterfaces.RouterCo
 
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 	if err != nil {
 		c.logVerificationCodeControllerWarn(traceID, "OIDC会话不存在或过期 session=%s err=%v", shortControllerLogValue(req.SessionID), err)
 		c.Error(ctx, constants.ErrCodeBadRequest, withTraceID("无效的会话ID或会话已过期", traceID))
@@ -1194,7 +1194,7 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 
 	// 1. 验证会话是否存在且已认证
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -1441,7 +1441,7 @@ func (c OIDCAuthFlowController) SwitchAccount(ctx httpInterfaces.RouterContextIn
 	}
 
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), req.SessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
 		return
@@ -1545,7 +1545,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 
 	// 1. 获取会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := sessionService.GetSession(ctx.Request().Context(), sessionID)
+	session, err := getBoundOIDCSession(ctx, sessionService, sessionID)
 	if err != nil {
 		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
@@ -1672,8 +1672,23 @@ type InitSessionRequest struct {
 
 // InitSessionResponse 初始化OIDC会话响应
 type InitSessionResponse struct {
-	SessionID string `json:"sessionId"`
-	LoginURL  string `json:"loginUrl"` // 供 iframe src 使用的登录表单 URL
+	SessionID   string `json:"sessionId"`
+	LoginURL    string `json:"loginUrl"` // 供 iframe src 使用的登录表单 URL
+	LoginTicket string `json:"loginTicket"`
+}
+
+// BindSession consumes the one-time login ticket in the browser that will
+// actually render the login UI and installs the HttpOnly binding cookie.
+func (c OIDCAuthFlowController) BindSession(ctx httpInterfaces.RouterContextInterface) {
+	ticket := ctx.Query("ticket")
+	sessions := service.NewOIDCSessionService(helper.GetRedis())
+	value, err := sessions.ConsumeLoginTicket(ctx.Request().Context(), ticket)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	setOIDCBrowserBindingCookie(ctx, value.SessionID, value.BrowserToken)
+	ctx.Redirect(http.StatusFound, safeOIDCReturnTo(ctx.Query("return_to"), value.SessionID))
 }
 
 // InitSession 初始化OIDC会话
@@ -1712,11 +1727,17 @@ func (c OIDCAuthFlowController) InitSession(ctx httpInterfaces.RouterContextInte
 		return
 	}
 
-	// 3. 构建登录表单URL（供iframe src使用）
-	loginURL := "/auth/#/oidc/authorize?session_id=" + session.SessionID
+	loginTicket, err := sessionService.CreateLoginTicket(ctx.Request().Context(), session)
+	if err != nil {
+		_ = sessionService.DeleteSession(ctx.Request().Context(), session.SessionID)
+		c.Error(ctx, constants.ErrCodeInternal, "创建一次性登录票据失败: "+err.Error())
+		return
+	}
+	loginURL := oidcLoginURL(loginTicket, session.SessionID)
 
 	c.Success(ctx, InitSessionResponse{
-		SessionID: session.SessionID,
-		LoginURL:  loginURL,
+		SessionID:   session.SessionID,
+		LoginURL:    loginURL,
+		LoginTicket: loginTicket,
 	})
 }
