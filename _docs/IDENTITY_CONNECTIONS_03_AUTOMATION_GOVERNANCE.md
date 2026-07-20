@@ -1,8 +1,9 @@
 # 身份连接 03：自动同步、任务队列与治理
 
-> 状态：已实施并通过后端与管理端验收（2026-07-20）
+> 状态：代码整改完成，真实多实例与进程级验收中
 > 前置：[02 飞书手动同步](./IDENTITY_CONNECTIONS_02_FEISHU_MANUAL_SYNC.md)
 > 后继：[04 企业微信与钉钉](./IDENTITY_CONNECTIONS_04_WECOM_DINGTALK.md)
+> 修复计划：[企业身份连接修复与生产验收计划](./IDENTITY_CONNECTIONS_REMEDIATION_PLAN.md)
 
 ## 1. 目标
 
@@ -119,3 +120,14 @@ Webhook 在验签、幂等落库和入队成功后立即响应；实际读取与
 ## 11. 阶段依赖
 
 04 的平台事件适配器只接入本阶段 `EventAdapter`、inbox 和 job，不允许自建平台专用队列。
+
+## 12. 2026-07-20 修复复验
+
+- [x] claim 限制 `attempts < max_attempts`，到上限的过期 leased job 原子进入 dead letter；管理员 retry 重置 attempts、租约和错误。
+- [x] 停机顺序调整为 scheduler → 停止 claim → 最多 30 秒排空 → 取消，最终状态使用独立 5 秒 context。
+- [x] worker 与 ApplyRun 传播 context，并在 change 事务前复查 job lease 与 directory operation lease。
+- [x] 连接/策略禁用或 capability 移除会取消 pending/retry_wait；入队、领取与执行前均重新校验。
+- [x] `Retry-After` 支持秒数和 HTTP-date；429/网络/5xx 可重试，凭据/权限错误进入管理员处理状态。
+- [x] 同步中心展示 superseded、change retry、principal conflict、capability 健康、operation lease、死信和重放结果。
+- [x] 队列上限、租约接管、重试清零、禁用拒绝、事件幂等及关键服务 race 测试通过。
+- [ ] 当前仅完成 SQLite/单进程自动化验证；MySQL/PostgreSQL 多实例抢占、连续九次进程崩溃、真实停机排空与 reconciliation 仍需在启用 Docker 的验收环境执行。

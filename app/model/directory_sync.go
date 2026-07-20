@@ -21,6 +21,7 @@ const (
 	DirectoryRunSucceeded    DirectoryRunStatus = "succeeded"
 	DirectoryRunFailed       DirectoryRunStatus = "failed"
 	DirectoryRunCancelled    DirectoryRunStatus = "cancelled"
+	DirectoryRunSuperseded   DirectoryRunStatus = "superseded"
 )
 
 type DirectoryChangeType string
@@ -118,6 +119,9 @@ type DirectorySyncRun struct {
 	ID               uint                `gorm:"primaryKey" json:"id"`
 	ConnectionID     uint                `gorm:"not null;index" json:"connectionId"`
 	SnapshotVersion  string              `gorm:"size:64;not null;uniqueIndex" json:"snapshotVersion"`
+	ScopeHash        string              `gorm:"size:64;index" json:"scopeHash"`
+	IsComplete       bool                `gorm:"not null;default:false" json:"isComplete"`
+	SupersededAt     *time.Time          `json:"supersededAt,omitempty"`
 	TriggerType      string              `gorm:"size:20;not null;default:manual" json:"triggerType"`
 	Status           DirectoryRunStatus  `gorm:"size:30;not null;index" json:"status"`
 	TotalUsers       int                 `json:"totalUsers"`
@@ -138,24 +142,54 @@ type DirectorySyncRun struct {
 func (*DirectorySyncRun) TableName() string { return "directory_sync_runs" }
 
 type DirectorySyncChange struct {
-	ID           uint                  `gorm:"primaryKey" json:"id"`
-	RunID        uint                  `gorm:"not null;index" json:"runId"`
-	ConnectionID uint                  `gorm:"not null;index" json:"connectionId"`
-	ChangeType   DirectoryChangeType   `gorm:"size:20;not null;index" json:"changeType"`
-	ObjectType   DirectoryObjectType   `gorm:"size:20;not null;index" json:"objectType"`
-	ObjectKey    string                `gorm:"size:255;not null;index" json:"objectKey"`
-	Status       DirectoryChangeStatus `gorm:"size:20;not null;default:pending;index" json:"status"`
-	RiskLevel    string                `gorm:"size:20;not null;default:low;index" json:"riskLevel"`
-	BeforeData   JSONObject            `gorm:"column:before_json;type:json" json:"before"`
-	AfterData    JSONObject            `gorm:"column:after_json;type:json" json:"after"`
-	MatchReason  string                `gorm:"size:255" json:"matchReason"`
-	ErrorMessage string                `gorm:"type:text" json:"errorMessage"`
-	ReviewedBy   *uint                 `gorm:"index" json:"reviewedBy,omitempty"`
-	ReviewedAt   *time.Time            `json:"reviewedAt,omitempty"`
-	AppliedAt    *time.Time            `json:"appliedAt,omitempty"`
-	CreatedAt    time.Time             `json:"createdAt"`
-	UpdatedAt    time.Time             `json:"updatedAt"`
-	Run          *DirectorySyncRun     `gorm:"foreignKey:RunID" json:"-"`
+	ID               uint                  `gorm:"primaryKey" json:"id"`
+	RunID            uint                  `gorm:"not null;index" json:"runId"`
+	ConnectionID     uint                  `gorm:"not null;index" json:"connectionId"`
+	ChangeType       DirectoryChangeType   `gorm:"size:20;not null;index" json:"changeType"`
+	ObjectType       DirectoryObjectType   `gorm:"size:20;not null;index" json:"objectType"`
+	ObjectKey        string                `gorm:"size:255;not null;index" json:"objectKey"`
+	SnapshotObjectID *uint                 `gorm:"index" json:"snapshotObjectId,omitempty"`
+	Status           DirectoryChangeStatus `gorm:"size:20;not null;default:pending;index" json:"status"`
+	RiskLevel        string                `gorm:"size:20;not null;default:low;index" json:"riskLevel"`
+	BeforeData       JSONObject            `gorm:"column:before_json;type:json" json:"before"`
+	AfterData        JSONObject            `gorm:"column:after_json;type:json" json:"after"`
+	MatchReason      string                `gorm:"size:255" json:"matchReason"`
+	ErrorMessage     string                `gorm:"type:text" json:"errorMessage"`
+	AttemptCount     int                   `gorm:"not null;default:0" json:"attemptCount"`
+	LastAttemptAt    *time.Time            `json:"lastAttemptAt,omitempty"`
+	ReviewedBy       *uint                 `gorm:"index" json:"reviewedBy,omitempty"`
+	ReviewedAt       *time.Time            `json:"reviewedAt,omitempty"`
+	AppliedAt        *time.Time            `json:"appliedAt,omitempty"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
+	Run              *DirectorySyncRun     `gorm:"foreignKey:RunID" json:"-"`
 }
 
 func (*DirectorySyncChange) TableName() string { return "directory_sync_changes" }
+
+// DirectorySyncSnapshotObject is immutable evidence for a single preview.
+// Changes reference this row so applying run A can never read data overwritten
+// by a later run B.
+type DirectorySyncSnapshotObject struct {
+	ID           uint                `gorm:"primaryKey" json:"id"`
+	RunID        uint                `gorm:"not null;uniqueIndex:uk_directory_snapshot_object" json:"runId"`
+	ConnectionID uint                `gorm:"not null;index" json:"connectionId"`
+	ObjectType   DirectoryObjectType `gorm:"size:20;not null;uniqueIndex:uk_directory_snapshot_object" json:"objectType"`
+	ObjectKey    string              `gorm:"size:255;not null;uniqueIndex:uk_directory_snapshot_object" json:"objectKey"`
+	Payload      JSONObject          `gorm:"column:payload_json;type:json;not null" json:"payload"`
+	ContentHash  string              `gorm:"size:64;not null;index" json:"contentHash"`
+	CreatedAt    time.Time           `json:"createdAt"`
+}
+
+func (*DirectorySyncSnapshotObject) TableName() string { return "directory_sync_snapshot_objects" }
+
+type DirectoryOperationLease struct {
+	LeaseKey       string    `gorm:"primaryKey;size:255" json:"leaseKey"`
+	Owner          string    `gorm:"size:120;not null;index" json:"owner"`
+	RunID          *uint     `gorm:"index" json:"runId,omitempty"`
+	LeaseExpiresAt time.Time `gorm:"not null;index" json:"leaseExpiresAt"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+func (*DirectoryOperationLease) TableName() string { return "directory_operation_leases" }

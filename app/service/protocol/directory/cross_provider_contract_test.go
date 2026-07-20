@@ -36,15 +36,21 @@ func TestDirectoryAdaptersProduceEquivalentSemanticContract(t *testing.T) {
 	}
 	var expected []string
 	for index, adapter := range adapters {
-		orgs, err := adapter.ListOrgUnits(context.Background(), "")
+		reader, ok := adapter.(SnapshotReader)
+		if !ok {
+			t.Fatalf("provider %d does not implement complete snapshots", index)
+		}
+		snapshot, err := reader.ReadSnapshot(context.Background(), SyncScope{IncludeDescendants: true, IncludeInactive: true})
 		if err != nil {
 			t.Fatal(err)
 		}
-		users, err := adapter.ListUsers(context.Background(), "")
-		if err != nil {
-			t.Fatal(err)
+		if !snapshot.Completeness.PaginationComplete || snapshot.Completeness.ScopeHash == "" {
+			t.Fatalf("provider %d returned incomplete snapshot: %#v", index, snapshot.Completeness)
 		}
-		projection := semanticDirectoryProjection(orgs.Items, users.Items)
+		if snapshot.Completeness.FieldPermissions["email"] != "granted" || snapshot.Completeness.FieldPermissions["phone"] != "not_granted" {
+			t.Fatalf("provider %d field permission semantics differ: %#v", index, snapshot.Completeness.FieldPermissions)
+		}
+		projection := semanticDirectoryProjection(snapshot.OrgUnits, snapshot.Users)
 		if index == 0 {
 			expected = projection
 			continue
@@ -92,13 +98,25 @@ func serveFeishuContractFixture(t *testing.T, w http.ResponseWriter, r *http.Req
 	switch r.URL.Path {
 	case "/open-apis/auth/v3/tenant_access_token/internal":
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "token"})
-	case "/open-apis/contact/v3/departments":
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"items": []map[string]any{{"open_department_id": "root", "name": "总部"}, {"open_department_id": "eng", "parent_department_id": "root", "name": "研发"}}}})
-	case "/open-apis/contact/v3/users":
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"items": []map[string]any{
-			{"user_id": "ada", "name": "Ada", "email": "ada@example.com", "job_title": "Lead", "department_ids": []string{"eng", "root"}, "primary_department_id": "eng", "leader_department_ids": []string{"eng"}, "status": map[string]any{"is_activated": true}},
-			{"user_id": "grace", "name": "Grace", "email": "grace@example.com", "job_title": "Engineer", "department_ids": []string{"eng"}, "status": map[string]any{"is_resigned": true}},
-		}}})
+	case "/open-apis/contact/v3/departments/0/children":
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []map[string]any{{"open_department_id": "root", "parent_department_id": "0", "name": "总部"}}}})
+	case "/open-apis/contact/v3/departments/root/children":
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []map[string]any{{"open_department_id": "eng", "parent_department_id": "root", "name": "研发"}}}})
+	case "/open-apis/contact/v3/departments/eng/children":
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []any{}}})
+	case "/open-apis/contact/v3/users/find_by_department":
+		departmentID := r.URL.Query().Get("department_id")
+		users := []map[string]any{}
+		if departmentID == "root" {
+			users = append(users, map[string]any{"user_id": "ada", "name": "Ada", "email": "ada@example.com", "job_title": "Lead", "department_ids": []string{"eng", "root"}, "primary_department_id": "eng", "leader_department_ids": []string{"eng"}, "status": map[string]any{"is_activated": true}})
+		}
+		if departmentID == "eng" {
+			users = append(users,
+				map[string]any{"user_id": "ada", "name": "Ada", "email": "ada@example.com", "job_title": "Lead", "department_ids": []string{"eng", "root"}, "primary_department_id": "eng", "leader_department_ids": []string{"eng"}, "status": map[string]any{"is_activated": true}},
+				map[string]any{"user_id": "grace", "name": "Grace", "email": "grace@example.com", "job_title": "Engineer", "department_ids": []string{"eng"}, "status": map[string]any{"is_resigned": true}},
+			)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": users}})
 	default:
 		t.Fatalf("unexpected Feishu fixture path %s", r.URL.Path)
 	}

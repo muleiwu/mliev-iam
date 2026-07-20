@@ -88,7 +88,7 @@ func (s *ExternalEventService) Receive(ctx context.Context, identifier string, h
 		return nil, err
 	}
 	aadPurpose := "external_event:" + event.ProviderEventID
-	envelope, err := cipher.Encrypt(payload, credentialcrypto.AAD(connection.ID, aadPurpose, credentialcrypto.KeyVersion))
+	envelope, err := cipher.Encrypt(payload, credentialcrypto.AAD(connection.ID, aadPurpose, cipher.ActiveKeyVersion()))
 	if err != nil {
 		return nil, err
 	}

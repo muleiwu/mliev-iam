@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -64,7 +66,9 @@ func NewSocialQRCodeService(db *gorm.DB, rdb *redis.Client) *SocialQRCodeService
 
 // qrSession Redis 里存的会话状态
 type qrSession struct {
-	Ticket               string `json:"ticket"`
+	ScanHandle           string `json:"scanHandle"`
+	PollTokenHash        string `json:"pollTokenHash"`
+	ConfirmTokenHash     string `json:"confirmTokenHash,omitempty"`
 	ConnectionID         uint   `json:"connectionId"`
 	ConnectionIdentifier string `json:"connectionIdentifier"`
 	State                string `json:"state"`
@@ -73,7 +77,8 @@ type qrSession struct {
 	Nickname             string `json:"nickname,omitempty"`
 	Avatar               string `json:"avatar,omitempty"`
 	UserID               uint   `json:"userId,omitempty"`
-	BindToken            string `json:"bindToken,omitempty"`
+	ContinuationID       string `json:"continuationId,omitempty"`
+	ContinuationCSRF     string `json:"continuationCsrf,omitempty"`
 	SessionID            string `json:"sessionId,omitempty"`
 	CreatedAt            int64  `json:"createdAt"`
 }
@@ -91,17 +96,22 @@ func (s *SocialQRCodeService) CreateSession(
 	if !connection.IsEnabled() {
 		return nil, fmt.Errorf("提供商未启用")
 	}
-	if connection.Category != model.ConnectionCategorySocial || connection.ProviderType != string(model.ProviderTypeWeChatMiniProgram) {
+	if connection.Category != model.ConnectionCategorySocial || connection.ProviderType != "wechat_miniprogram" {
 		return nil, fmt.Errorf("提供商 %s 不是微信小程序类型", providerIdentifier)
 	}
 	if _, err := BuildAuthenticationAdapter(s.db, connection, s.redis); err != nil {
 		return nil, err
 	}
 
-	ticket := shortTicket()
+	scanHandle := shortTicket()
+	pollToken, err := newCsrfToken()
+	if err != nil {
+		return nil, err
+	}
 
 	session := qrSession{
-		Ticket:               ticket,
+		ScanHandle:           scanHandle,
+		PollTokenHash:        qrTokenHash(pollToken),
 		ConnectionID:         connection.ID,
 		ConnectionIdentifier: connection.Identifier,
 		State:                QRStatePending,
@@ -113,9 +123,9 @@ func (s *SocialQRCodeService) CreateSession(
 	}
 
 	resp := &dto.MPQRCodeCreateResponse{
-		Ticket:    ticket,
-		Scene:     "t=" + ticket,
-		ExpiresIn: int(qrSessionTTL / time.Second),
+		ScanHandle: scanHandle,
+		PollToken:  pollToken,
+		ExpiresIn:  int(qrSessionTTL / time.Second),
 	}
 
 	// 尝试抓小程序码；失败不阻断（PC 可退化为展示 scene 字符串让测试人员手工跳进小程序）。
@@ -131,7 +141,7 @@ func (s *SocialQRCodeService) CreateSession(
 	clientID, _ := credentials["clientId"].(string)
 	clientSecret, _ := credentials["clientSecret"].(string)
 	if credentialErr == nil {
-		if pngB64, err := s.fetchWxacode(ctx, clientID, clientSecret, resp.Scene, page, envVersion); err == nil {
+		if pngB64, err := s.fetchWxacode(ctx, clientID, clientSecret, "h="+scanHandle, page, envVersion); err == nil {
 			resp.QRCode = "data:image/png;base64," + pngB64
 		} else {
 			fmt.Printf("[qrcode] 拉取小程序码失败: %v\n", err)
@@ -146,14 +156,17 @@ func (s *SocialQRCodeService) CreateSession(
 // GetStatus PC 端轮询状态。
 func (s *SocialQRCodeService) GetStatus(
 	ctx context.Context,
-	ticket string,
+	scanHandle, pollToken string,
 ) (*dto.MPQRCodeStatusResponse, error) {
-	session, err := s.loadSession(ctx, ticket)
+	session, err := s.loadSession(ctx, scanHandle)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return &dto.MPQRCodeStatusResponse{State: QRStateExpired}, nil
 		}
 		return nil, err
+	}
+	if !qrTokenMatches(session.PollTokenHash, pollToken) {
+		return nil, fmt.Errorf("二维码轮询凭据无效")
 	}
 
 	resp := &dto.MPQRCodeStatusResponse{
@@ -163,27 +176,22 @@ func (s *SocialQRCodeService) GetStatus(
 
 	switch session.State {
 	case QRStateConfirmed:
-		// 已确认且已绑定：按需生成 JWT。
+		// JWT 不再通过轮询响应返回；controller 直接签发 HttpOnly Cookie。
+		userModel, err := s.userService.GetUserModelByID(session.UserID)
+		if err != nil || userModel == nil || !userModel.CanLogin() {
+			return nil, fmt.Errorf("用户未激活或已禁用")
+		}
 		userResp, err := s.userService.GetUserByID(session.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("获取用户信息失败: %w", err)
 		}
-		jwtAuthService, err := ensureJWTAuthService(s.jwtAuthService)
-		if err != nil {
-			return nil, fmt.Errorf("JWT配置错误: %w", err)
-		}
-		s.jwtAuthService = jwtAuthService
-		token, err := jwtAuthService.GenerateUserToken(userResp)
-		if err != nil {
-			return nil, fmt.Errorf("生成令牌失败: %w", err)
-		}
-		resp.Token = token
 		resp.User = userResp
 		// 确认后立即回收票据，避免重复使用
-		_ = s.deleteSession(ctx, ticket)
+		_ = s.deleteSession(ctx, scanHandle)
 
 	case QRStateNeedsBind:
-		resp.BindToken = session.BindToken
+		resp.ContinuationID = session.ContinuationID
+		resp.ContinuationCSRF = session.ContinuationCSRF
 		resp.SocialInfo = &dto.MPSocialBrief{
 			Nickname: session.Nickname,
 			Avatar:   session.Avatar,
@@ -191,28 +199,28 @@ func (s *SocialQRCodeService) GetStatus(
 		// 票据转交给 PC 后续调用 /external-auth/bind-with-login 或 /external-auth/register
 		// 不在这里删除，避免 PC 页面刷新后丢失引导信息；到期由 Redis TTL 回收
 	case QRStateCanceled:
-		_ = s.deleteSession(ctx, ticket)
+		_ = s.deleteSession(ctx, scanHandle)
 	}
 
 	return resp, nil
 }
 
-func (s *SocialQRCodeService) GetStatusForConnection(ctx context.Context, identifier, ticket string) (*dto.MPQRCodeStatusResponse, error) {
-	if err := s.ensureSessionConnection(ctx, identifier, ticket); err != nil {
+func (s *SocialQRCodeService) GetStatusForConnection(ctx context.Context, identifier, scanHandle, pollToken string) (*dto.MPQRCodeStatusResponse, error) {
+	if err := s.ensureSessionConnection(ctx, identifier, scanHandle); err != nil {
 		return nil, err
 	}
-	return s.GetStatus(ctx, ticket)
+	return s.GetStatus(ctx, scanHandle, pollToken)
 }
 
 func (s *SocialQRCodeService) ScanForConnection(ctx context.Context, identifier string, req *dto.MPQRCodeScanRequest) (*dto.MPQRCodeScanResponse, error) {
-	if err := s.ensureSessionConnection(ctx, identifier, req.Ticket); err != nil {
+	if err := s.ensureSessionConnection(ctx, identifier, req.ScanHandle); err != nil {
 		return nil, err
 	}
 	return s.Scan(ctx, req)
 }
 
 func (s *SocialQRCodeService) ConfirmForConnection(ctx context.Context, identifier string, req *dto.MPQRCodeConfirmRequest) error {
-	if err := s.ensureSessionConnection(ctx, identifier, req.Ticket); err != nil {
+	if err := s.ensureSessionConnection(ctx, identifier, req.ScanHandle); err != nil {
 		return err
 	}
 	return s.Confirm(ctx, req)
@@ -237,7 +245,7 @@ func (s *SocialQRCodeService) Scan(
 	ctx context.Context,
 	req *dto.MPQRCodeScanRequest,
 ) (*dto.MPQRCodeScanResponse, error) {
-	session, err := s.loadSession(ctx, req.Ticket)
+	session, err := s.loadSession(ctx, req.ScanHandle)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil, fmt.Errorf("扫码会话已过期")
@@ -282,6 +290,11 @@ func (s *SocialQRCodeService) Scan(
 	}
 
 	session.State = QRStateScanned
+	confirmToken, err := newCsrfToken()
+	if err != nil {
+		return nil, err
+	}
+	session.ConfirmTokenHash = qrTokenHash(confirmToken)
 	session.OpenID = primary.Value
 	for _, identifier := range profile.Identifiers {
 		if identifier.Namespace == model.IdentifierNamespaceUnionID {
@@ -291,7 +304,7 @@ func (s *SocialQRCodeService) Scan(
 	session.Nickname = nickname
 	session.Avatar = avatar
 
-	resp := &dto.MPQRCodeScanResponse{State: QRStateScanned, Nickname: nickname, Avatar: avatar}
+	resp := &dto.MPQRCodeScanResponse{State: QRStateScanned, Nickname: nickname, Avatar: avatar, ConfirmToken: confirmToken}
 
 	// 查已绑定账号
 	var principal model.ExternalPrincipal
@@ -313,18 +326,15 @@ func (s *SocialQRCodeService) Scan(
 			}
 		}
 	} else {
-		// 预先生成 bindToken + 存临时社交信息，手机端确认后 PC 端可以直接拿去走绑定/注册
-		bindToken := uuid.New().String()
+		// 预先生成服务端 continuation；PC 只会收到 CSRF，ID 写入 HttpOnly Cookie。
 		profile.DisplayName = nickname
 		profile.Avatar = avatar
-		temp := ExternalTempProfile{
-			ConnectionID: connection.ID, Profile: profile, Category: connection.Category,
-			Connection: connection.Name, Identifier: connection.Identifier,
-		}
-		if err := s.authService.storeJSON(externalTempKeyPrefix+bindToken, temp, 15*time.Minute); err != nil {
+		continuationID, csrf, err := s.authService.storeContinuation(connection, profile, session.SessionID)
+		if err != nil {
 			return nil, fmt.Errorf("存储临时用户信息失败: %w", err)
 		}
-		session.BindToken = bindToken
+		session.ContinuationID = continuationID
+		session.ContinuationCSRF = csrf
 		resp.PendingAction = "bind"
 	}
 
@@ -339,12 +349,15 @@ func (s *SocialQRCodeService) Confirm(
 	ctx context.Context,
 	req *dto.MPQRCodeConfirmRequest,
 ) error {
-	session, err := s.loadSession(ctx, req.Ticket)
+	session, err := s.loadSession(ctx, req.ScanHandle)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("扫码会话已过期")
 		}
 		return err
+	}
+	if !qrTokenMatches(session.ConfirmTokenHash, req.ConfirmToken) {
+		return fmt.Errorf("二维码确认凭据无效")
 	}
 	if session.State != QRStateScanned && req.Action == "confirm" {
 		return fmt.Errorf("扫码会话尚未完成扫码")
@@ -368,8 +381,8 @@ func (s *SocialQRCodeService) Confirm(
 
 // ==================== Redis 读写 ====================
 
-func (s *SocialQRCodeService) keyFor(ticket string) string {
-	return qrSessionKey + ticket
+func (s *SocialQRCodeService) keyFor(scanHandle string) string {
+	return qrSessionKey + scanHandle
 }
 
 func (s *SocialQRCodeService) saveSession(ctx context.Context, session *qrSession) error {
@@ -377,11 +390,11 @@ func (s *SocialQRCodeService) saveSession(ctx context.Context, session *qrSessio
 	if err != nil {
 		return fmt.Errorf("序列化扫码会话失败: %w", err)
 	}
-	return s.redis.Set(ctx, s.keyFor(session.Ticket), data, qrSessionTTL).Err()
+	return s.redis.Set(ctx, s.keyFor(session.ScanHandle), data, qrSessionTTL).Err()
 }
 
-func (s *SocialQRCodeService) loadSession(ctx context.Context, ticket string) (*qrSession, error) {
-	raw, err := s.redis.Get(ctx, s.keyFor(ticket)).Result()
+func (s *SocialQRCodeService) loadSession(ctx context.Context, scanHandle string) (*qrSession, error) {
+	raw, err := s.redis.Get(ctx, s.keyFor(scanHandle)).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -392,8 +405,20 @@ func (s *SocialQRCodeService) loadSession(ctx context.Context, ticket string) (*
 	return &session, nil
 }
 
-func (s *SocialQRCodeService) deleteSession(ctx context.Context, ticket string) error {
-	return s.redis.Del(ctx, s.keyFor(ticket)).Err()
+func (s *SocialQRCodeService) deleteSession(ctx context.Context, scanHandle string) error {
+	return s.redis.Del(ctx, s.keyFor(scanHandle)).Err()
+}
+
+func qrTokenHash(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+func qrTokenMatches(expectedHash, token string) bool {
+	if expectedHash == "" || token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expectedHash), []byte(qrTokenHash(token))) == 1
 }
 
 // ==================== 小程序码拉取 ====================

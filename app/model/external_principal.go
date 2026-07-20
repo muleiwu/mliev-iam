@@ -20,6 +20,7 @@ const (
 	IdentifierNamespaceLoginSubject    IdentifierNamespace = "login_subject"
 	IdentifierNamespaceDirectoryUserID IdentifierNamespace = "directory_user_id"
 	IdentifierNamespaceOpenID          IdentifierNamespace = "open_id"
+	IdentifierNamespaceOpenUserID      IdentifierNamespace = "open_userid"
 	IdentifierNamespaceUnionID         IdentifierNamespace = "union_id"
 )
 

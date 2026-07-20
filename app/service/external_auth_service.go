@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +39,8 @@ type ExternalTempProfile struct {
 	Category     model.ConnectionCategory  `json:"category"`
 	Connection   string                    `json:"connection"`
 	Identifier   string                    `json:"identifier"`
+	SessionID    string                    `json:"sessionId,omitempty"`
+	CSRFHash     string                    `json:"csrfHash"`
 }
 
 func NewExternalAuthService(db *gorm.DB, redisClient *redis.Client) *ExternalAuthService {
@@ -46,12 +51,12 @@ func NewExternalAuthService(db *gorm.DB, redisClient *redis.Client) *ExternalAut
 	}
 }
 
-func (s *ExternalAuthService) GetAuthURL(identifier, sessionID string) (*dto.SocialAuthURLResponse, error) {
-	return s.authURL(identifier, StateData{SessionID: sessionID})
+func (s *ExternalAuthService) GetAuthURL(identifier, sessionID, openerOrigin, browserBindingHash string) (*dto.SocialAuthURLResponse, error) {
+	return s.authURL(identifier, StateData{SessionID: sessionID, OpenerOrigin: openerOrigin, BrowserBindingHash: browserBindingHash})
 }
 
-func (s *ExternalAuthService) GetBindAuthURL(identifier string, userID uint) (*dto.SocialAuthURLResponse, error) {
-	return s.authURL(identifier, StateData{Mode: StateModeBind, BindUserID: userID})
+func (s *ExternalAuthService) GetBindAuthURL(identifier string, userID uint, openerOrigin string) (*dto.SocialAuthURLResponse, error) {
+	return s.authURL(identifier, StateData{Mode: StateModeBind, BindUserID: userID, OpenerOrigin: openerOrigin})
 }
 
 func (s *ExternalAuthService) authURL(identifier string, stateData StateData) (*dto.SocialAuthURLResponse, error) {
@@ -68,6 +73,7 @@ func (s *ExternalAuthService) authURL(identifier string, stateData StateData) (*
 		return nil, err
 	}
 	stateData.Timestamp = time.Now().Unix()
+	stateData.ConnectionIdentifier = connection.Identifier
 	if err := s.storeJSON(externalStateKeyPrefix+state.String(), stateData, 5*time.Minute); err != nil {
 		return nil, fmt.Errorf("保存认证 state 失败: %w", err)
 	}
@@ -75,17 +81,13 @@ func (s *ExternalAuthService) authURL(identifier string, stateData StateData) (*
 	return &dto.SocialAuthURLResponse{AuthURL: authURL, State: state.String()}, nil
 }
 
-func (s *ExternalAuthService) ConsumeState(state string) (*StateData, bool) {
+func (s *ExternalAuthService) ConsumeState(ctx context.Context, state string) (*StateData, bool) {
 	if s.redis == nil || state == "" {
 		return nil, false
 	}
-	ctx := context.Background()
 	key := externalStateKeyPrefix + state
-	data, err := s.redis.Get(ctx, key).Bytes()
+	data, err := s.redis.GetDel(ctx, key).Bytes()
 	if err != nil {
-		return nil, false
-	}
-	if err := s.redis.Del(ctx, key).Err(); err != nil {
 		return nil, false
 	}
 	var stateData StateData
@@ -149,22 +151,34 @@ func (s *ExternalAuthService) completeAuthentication(connection *model.IdentityC
 		}
 	}
 
-	bindToken := uuid.NewString()
-	temp := ExternalTempProfile{
-		ConnectionID: connection.ID, Profile: profile, Category: connection.Category,
-		Connection: connection.Name, Identifier: connection.Identifier,
-	}
-	if err := s.storeJSON(externalTempKeyPrefix+bindToken, temp, 15*time.Minute); err != nil {
+	continuationID, csrf, err := s.storeContinuation(connection, profile, sessionID)
+	if err != nil {
 		return nil, fmt.Errorf("保存临时外部身份失败: %w", err)
 	}
-	return &dto.SocialAuthCallbackResponse{NeedsBind: true, BindToken: bindToken, SessionID: sessionID}, nil
+	return &dto.SocialAuthCallbackResponse{NeedsBind: true, ContinuationCSRF: csrf, SessionID: sessionID, ContinuationID: continuationID}, nil
 }
 
-func (s *ExternalAuthService) GetTempProfile(bindToken string) (*ExternalTempProfile, error) {
+func (s *ExternalAuthService) storeContinuation(connection *model.IdentityConnection, profile *protocol.ExternalProfile, sessionID string) (string, string, error) {
+	continuationID := uuid.NewString()
+	csrf, err := newCsrfToken()
+	if err != nil {
+		return "", "", err
+	}
+	csrfDigest := sha256.Sum256([]byte(csrf))
+	temp := ExternalTempProfile{ConnectionID: connection.ID, Profile: profile, Category: connection.Category,
+		Connection: connection.Name, Identifier: connection.Identifier, SessionID: sessionID,
+		CSRFHash: base64.RawURLEncoding.EncodeToString(csrfDigest[:])}
+	if err := s.storeJSON(externalTempKeyPrefix+continuationID, temp, 15*time.Minute); err != nil {
+		return "", "", err
+	}
+	return continuationID, csrf, nil
+}
+
+func (s *ExternalAuthService) GetTempProfile(continuationID string) (*ExternalTempProfile, error) {
 	if s.redis == nil {
 		return nil, fmt.Errorf("Redis 未初始化")
 	}
-	data, err := s.redis.Get(context.Background(), externalTempKeyPrefix+bindToken).Bytes()
+	data, err := s.redis.Get(context.Background(), externalTempKeyPrefix+continuationID).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("绑定令牌无效或已过期")
 	}
@@ -176,6 +190,45 @@ func (s *ExternalAuthService) GetTempProfile(bindToken string) (*ExternalTempPro
 		return nil, err
 	}
 	return &temp, nil
+}
+
+func validateContinuationCSRF(temp *ExternalTempProfile, csrf string) bool {
+	if temp == nil || temp.CSRFHash == "" || csrf == "" {
+		return false
+	}
+	digest := sha256.Sum256([]byte(csrf))
+	actual := base64.RawURLEncoding.EncodeToString(digest[:])
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(temp.CSRFHash)) == 1
+}
+
+func (s *ExternalAuthService) lockContinuation(ctx context.Context, continuationID, csrf string) (*ExternalTempProfile, func(), error) {
+	if s.redis == nil || continuationID == "" {
+		return nil, nil, errors.New("continuation 无效或已过期")
+	}
+	lockKey := externalTempKeyPrefix + continuationID + ":lock"
+	lockToken := uuid.NewString()
+	locked, err := s.redis.SetNX(ctx, lockKey, lockToken, 30*time.Second).Result()
+	if err != nil || !locked {
+		return nil, nil, errors.New("continuation 正在处理，请稍后重试")
+	}
+	release := func() {
+		const releaseScript = `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`
+		_ = s.redis.Eval(context.Background(), releaseScript, []string{lockKey}, lockToken).Err()
+	}
+	temp, err := s.GetTempProfile(continuationID)
+	if err != nil || !validateContinuationCSRF(temp, csrf) {
+		release()
+		return nil, nil, errors.New("continuation 校验失败或已过期")
+	}
+	return temp, release, nil
+}
+
+func (s *ExternalAuthService) consumeContinuation(ctx context.Context, continuationID string) error {
+	result, err := s.redis.GetDel(ctx, externalTempKeyPrefix+continuationID).Result()
+	if err != nil || result == "" {
+		return errors.New("continuation 已被使用")
+	}
+	return nil
 }
 
 func (s *ExternalAuthService) BindWithCode(userID uint, identifier, code string) error {
@@ -194,27 +247,35 @@ func (s *ExternalAuthService) BindWithCode(userID uint, identifier, code string)
 	return s.attachProfile(s.db, connection.ID, userID, profile)
 }
 
-func (s *ExternalAuthService) BindWithExistingUser(bindToken, username, password string) (*dto.SocialAuthCallbackResponse, error) {
-	temp, err := s.GetTempProfile(bindToken)
+func (s *ExternalAuthService) BindWithExistingUser(ctx context.Context, continuationID, csrf, username, password string) (*dto.SocialAuthCallbackResponse, error) {
+	temp, release, err := s.lockContinuation(ctx, continuationID, csrf)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	user, err := s.userService.ValidateUserForLogin(username, password)
 	if err != nil {
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
+	if err := s.consumeContinuation(ctx, continuationID); err != nil {
+		return nil, err
+	}
 	if err := s.attachProfile(s.db, temp.ConnectionID, user.ID, temp.Profile); err != nil {
 		return nil, err
 	}
-	_ = s.deleteTemp(bindToken)
-	return s.loginUser(user.ID, false)
+	response, err := s.loginUser(user.ID, false)
+	if response != nil {
+		response.SessionID = temp.SessionID
+	}
+	return response, err
 }
 
-func (s *ExternalAuthService) Register(req *dto.SocialRegisterRequest) (*dto.SocialAuthCallbackResponse, error) {
-	temp, err := s.GetTempProfile(req.BindToken)
+func (s *ExternalAuthService) Register(ctx context.Context, continuationID string, req *dto.SocialRegisterRequest) (*dto.SocialAuthCallbackResponse, error) {
+	temp, release, err := s.lockContinuation(ctx, continuationID, req.ContinuationCSRF)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	agreementService := NewAgreementService(s.db)
 	appID, err := agreementService.ResolveApplicationIDFromSession(context.Background(), req.SessionID, s.redis)
 	if err != nil {
@@ -257,6 +318,9 @@ func (s *ExternalAuthService) Register(req *dto.SocialRegisterRequest) (*dto.Soc
 		Nickname: temp.Profile.DisplayName, Avatar: temp.Profile.Avatar, Salt: salt,
 		PasswordHash: passwordHash, Status: model.UserStatusActive, IsActivated: true,
 	}
+	if err := s.consumeContinuation(ctx, continuationID); err != nil {
+		return nil, err
+	}
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		if err := dao.NewUserDao(tx).Create(user); err != nil {
 			return err
@@ -269,8 +333,42 @@ func (s *ExternalAuthService) Register(req *dto.SocialRegisterRequest) (*dto.Soc
 	if err != nil {
 		return nil, fmt.Errorf("注册外部身份用户失败: %w", err)
 	}
-	_ = s.deleteTemp(req.BindToken)
-	return s.loginUser(user.ID, true)
+	response, err := s.loginUser(user.ID, true)
+	if response != nil {
+		response.SessionID = temp.SessionID
+	}
+	return response, err
+}
+
+func (s *ExternalAuthService) CheckContinuationRateLimit(ctx context.Context, continuationID, clientIP, account string) error {
+	if s.redis == nil {
+		return errors.New("Redis 未初始化")
+	}
+	digestKey := func(value string) string {
+		digest := sha256.Sum256([]byte(value))
+		return base64.RawURLEncoding.EncodeToString(digest[:12])
+	}
+	checks := []struct {
+		key string
+		max int64
+	}{
+		{"external-auth:limit:continuation:" + digestKey(continuationID), 10},
+		{"external-auth:limit:ip:" + digestKey(clientIP), 30},
+		{"external-auth:limit:account:" + digestKey(account), 10},
+	}
+	for _, check := range checks {
+		count, err := s.redis.Incr(ctx, check.key).Result()
+		if err != nil {
+			return err
+		}
+		if count == 1 {
+			_ = s.redis.Expire(ctx, check.key, 5*time.Minute).Err()
+		}
+		if count > check.max {
+			return errors.New("尝试次数过多，请稍后重试")
+		}
+	}
+	return nil
 }
 
 func (s *ExternalAuthService) ListUserIdentities(userID uint) ([]dto.ExternalIdentityResponse, error) {
@@ -350,39 +448,26 @@ func (s *ExternalAuthService) enabledAdapter(identifier string) (*model.Identity
 }
 
 func (s *ExternalAuthService) findPrincipal(connectionID uint, profile *protocol.ExternalProfile) (*model.ExternalPrincipal, error) {
-	primary, err := primaryLoginSubject(profile)
-	if err != nil {
+	if _, err := primaryLoginSubject(profile); err != nil {
 		return nil, err
 	}
-	var principal model.ExternalPrincipal
-	err = s.db.Joins("JOIN external_identifiers ei ON ei.principal_id = external_principals.id").
-		Where("ei.connection_id = ? AND ei.namespace = ? AND ei.value = ?", connectionID, model.IdentifierNamespaceLoginSubject, primary.Value).
-		First(&principal).Error
-	if err != nil {
-		return nil, err
-	}
-	return &principal, nil
+	return NewExternalPrincipalResolver(s.db).Resolve(connectionID, profilePrincipalIdentifiers(profile), false)
 }
 
 func (s *ExternalAuthService) attachProfile(db *gorm.DB, connectionID, userID uint, profile *protocol.ExternalProfile) error {
-	primary, err := primaryLoginSubject(profile)
-	if err != nil {
+	if _, err := primaryLoginSubject(profile); err != nil {
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
-		var existingIdentifier model.ExternalIdentifier
-		err := tx.Where("connection_id = ? AND namespace = ? AND value = ?", connectionID, model.IdentifierNamespaceLoginSubject, primary.Value).First(&existingIdentifier).Error
-		if err == nil {
-			var principal model.ExternalPrincipal
-			if err := tx.First(&principal, existingIdentifier.PrincipalID).Error; err != nil {
-				return err
-			}
+		resolver := NewExternalPrincipalResolver(tx)
+		principal, err := resolver.Resolve(connectionID, profilePrincipalIdentifiers(profile), false)
+		if err == nil && principal != nil {
 			if principal.UserID != nil && *principal.UserID != userID {
 				return fmt.Errorf("该外部账号已被其他用户绑定")
 			}
 			principal.UserID = &userID
 			principal.Status = model.PrincipalStatusActive
-			return tx.Save(&principal).Error
+			return tx.Save(principal).Error
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -394,7 +479,7 @@ func (s *ExternalAuthService) attachProfile(db *gorm.DB, connectionID, userID ui
 		if userConnectionCount > 0 {
 			return fmt.Errorf("您已绑定该连接的其他外部账号")
 		}
-		principal := &model.ExternalPrincipal{
+		principal = &model.ExternalPrincipal{
 			ConnectionID: connectionID, UserID: &userID, Status: model.PrincipalStatusActive,
 			DisplayName: profile.DisplayName, Avatar: profile.Avatar, Email: profile.Email,
 			Phone: profile.Phone, RawProfile: model.JSONObject(profile.Raw),
@@ -402,22 +487,19 @@ func (s *ExternalAuthService) attachProfile(db *gorm.DB, connectionID, userID ui
 		if err := tx.Create(principal).Error; err != nil {
 			return err
 		}
-		for _, identifier := range profile.Identifiers {
-			if identifier.Value == "" {
-				continue
-			}
-			externalIdentifier := model.ExternalIdentifier{
-				ConnectionID: connectionID, PrincipalID: principal.ID, Namespace: identifier.Namespace,
-				Value: identifier.Value, IsPrimary: identifier.Primary,
-			}
-			if err := tx.Create(&externalIdentifier).Error; err != nil {
-				if identifier.Primary {
-					return err
-				}
-			}
-		}
-		return nil
+		return resolver.EnsureIdentifiers(tx, principal, profilePrincipalIdentifiers(profile))
 	})
+}
+
+func profilePrincipalIdentifiers(profile *protocol.ExternalProfile) []PrincipalIdentifierInput {
+	if profile == nil {
+		return nil
+	}
+	result := make([]PrincipalIdentifierInput, 0, len(profile.Identifiers))
+	for _, identifier := range profile.Identifiers {
+		result = append(result, PrincipalIdentifierInput{Namespace: identifier.Namespace, Value: identifier.Value, Primary: identifier.Primary})
+	}
+	return result
 }
 
 func (s *ExternalAuthService) refreshPrincipal(principal *model.ExternalPrincipal, profile *protocol.ExternalProfile, loggedIn bool) error {
@@ -440,6 +522,13 @@ func (s *ExternalAuthService) loginPrincipal(principal *model.ExternalPrincipal)
 }
 
 func (s *ExternalAuthService) loginUser(userID uint, isNew bool) (*dto.SocialAuthCallbackResponse, error) {
+	userModel, err := s.userDAO.GetByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if !userModel.CanLogin() {
+		return nil, fmt.Errorf("用户未激活、已禁用或会话已撤销")
+	}
 	userResponse, err := s.userService.GetUserByID(userID)
 	if err != nil {
 		return nil, err
@@ -485,11 +574,4 @@ func (s *ExternalAuthService) storeJSON(key string, value any, ttl time.Duration
 		return err
 	}
 	return s.redis.Set(context.Background(), key, data, ttl).Err()
-}
-
-func (s *ExternalAuthService) deleteTemp(bindToken string) error {
-	if s.redis == nil {
-		return nil
-	}
-	return s.redis.Del(context.Background(), externalTempKeyPrefix+bindToken).Err()
 }

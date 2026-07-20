@@ -86,3 +86,36 @@ func TestFeishuAdapterRequiresSeparatedDirectoryCredentials(t *testing.T) {
 		t.Fatal("缺少 appSecret/tenantKey 时应拒绝创建目录适配器")
 	}
 }
+
+func TestFeishuSnapshotIncludesExplicitRootDepartment(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "tenant-token"})
+		case "/open-apis/contact/v3/departments/root":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"department": map[string]any{
+				"open_department_id": "root", "parent_department_id": "outside", "name": "可见根",
+			}}})
+		case "/open-apis/contact/v3/departments/root/children":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []any{}}})
+		case "/open-apis/contact/v3/users/find_by_department":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"has_more": false, "items": []map[string]any{{
+				"user_id": "u-1", "name": "Ada", "department_ids": []string{"root"}, "primary_department_id": "root", "status": map[string]any{"is_activated": true},
+			}}}})
+		default:
+			t.Fatalf("unexpected Feishu path %s", r.URL.Path)
+		}
+	})
+	adapter, err := NewFeishuAdapter(map[string]any{"appId": "app", "appSecret": "secret", "tenantKey": "tenant-a", "baseUrl": "https://feishu.test"}, directoryTestClient(handler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := adapter.ReadSnapshot(context.Background(), SyncScope{RootExternalOrgUnitIDs: []string{"root"}, IncludeDescendants: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.OrgUnits) != 1 || snapshot.OrgUnits[0].ExternalID != "root" || len(snapshot.Users) != 1 || len(snapshot.Users[0].Memberships) != 1 {
+		t.Fatalf("explicit root snapshot is incomplete: %#v", snapshot)
+	}
+}

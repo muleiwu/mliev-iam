@@ -1,8 +1,9 @@
 # 身份连接 01：统一连接与外部身份
 
-> 状态：已实施并通过后端、管理端与 OIDC 前端验收（2026-07-20）
+> 状态：代码整改完成，生产安全与真实数据库验收中
 > 前置：无
 > 后继：[02 飞书手动同步](./IDENTITY_CONNECTIONS_02_FEISHU_MANUAL_SYNC.md)
+> 修复计划：[企业身份连接修复与生产验收计划](./IDENTITY_CONNECTIONS_REMEDIATION_PLAN.md)
 
 ## 0. 同类产品调研与设计结论
 
@@ -133,9 +134,9 @@ type AuthenticationAdapter interface {
 - `DELETE /api/user/external-identities/:id`
 - `POST /external-auth/:identifier/miniprogram/login`
 - `POST /external-auth/:identifier/miniprogram/qrcode`
-- `GET /external-auth/:identifier/miniprogram/qrcode/:ticket`
+- `GET /external-auth/:identifier/miniprogram/qrcode/:scanHandle`（请求头携带 `X-QR-Poll-Token`）
 - `POST /external-auth/:identifier/miniprogram/qrcode/scan`
-- `POST /external-auth/:identifier/miniprogram/qrcode/confirm`
+- `POST /external-auth/:identifier/miniprogram/qrcode/confirm`（必须提交扫码设备取得的 `confirmToken`）
 
 旧 `/social/*`、`/identity/*`、`/api/admin/social-providers`、`/api/admin/identity-providers`、`/api/user/social-accounts`、`/api/user/identity-accounts` 全部删除。
 
@@ -202,3 +203,16 @@ type AuthenticationAdapter interface {
 ## 11. 阶段依赖
 
 02–04 只能依赖本阶段的统一连接、凭据、principal 和 identifier，不得重新引入 social/identity 双模型。
+
+## 12. 2026-07-20 修复复验
+
+- [x] OIDC session 使用动态 HttpOnly 浏览器绑定 Cookie；`init-session` 返回一次性 login ticket，后续 flow/auth/consent/外部登录均验证浏览器绑定。
+- [x] OAuth state 使用 Redis 原子消费并绑定 connection、session、模式、用户、可信 opener origin 与浏览器摘要；回调严格校验 identifier。
+- [x] 回调页使用安全模板、随机 CSP nonce 与精确 `targetOrigin`；待绑定资料改为 HttpOnly continuation Cookie + CSRF，客户端不再传 `bindToken`。
+- [x] 二维码拆分 `scanHandle`、`pollToken`、`confirmToken`，轮询接口不返回 JWT/绑定票据。
+- [x] 登录、绑定和小程序签发会话前统一执行 `CanLogin()`，并复用验证码、失败计数和限速。
+- [x] 认证/目录共用完整标识 principal resolver；歧义进入 `external_principal_conflicts` 管理审批，blocked principal 拒绝认证。
+- [x] 连接字段级合并、provider-specific schema、capability 健康、后端 callback URL、凭据 keyring 与启动全量解密验证已实现。
+- [x] 旧 social/identity controller/service/DAO/model 和管理端页面/API 已删除；个人中心改用统一外部身份 API。
+- [x] SQLite 空库/存量硬切/冲突/坏密钥/唯一约束测试通过；MySQL 8.4/PostgreSQL 16 testcontainers 用例已加入并编译通过。
+- [ ] 真实 Redis + 浏览器对抗 E2E、MySQL 8.4/PostgreSQL 16 实际容器演练与备份恢复。当前本机无 Docker provider，不得据此标记阶段完成。

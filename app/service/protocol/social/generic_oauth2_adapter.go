@@ -7,17 +7,16 @@ import (
 	"io"
 	"net/http"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"golang.org/x/oauth2"
 )
 
 // GenericOAuth2Adapter 标准 OAuth2.0 流程的通用实现，作为其他浏览器流适配器的内嵌基类。
 type GenericOAuth2Adapter struct {
-	Provider *model.SocialProvider
+	Provider *Provider
 	Config   *oauth2.Config
 }
 
-func NewGenericOAuth2Adapter(provider *model.SocialProvider) *GenericOAuth2Adapter {
+func NewGenericOAuth2Adapter(provider *Provider) *GenericOAuth2Adapter {
 	return &GenericOAuth2Adapter{
 		Provider: provider,
 		Config: &oauth2.Config{
@@ -33,7 +32,7 @@ func NewGenericOAuth2Adapter(provider *model.SocialProvider) *GenericOAuth2Adapt
 	}
 }
 
-func (a *GenericOAuth2Adapter) GetProviderType() model.ProviderType {
+func (a *GenericOAuth2Adapter) GetProviderType() ProviderType {
 	return a.Provider.Type
 }
 

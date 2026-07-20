@@ -1,7 +1,8 @@
 # 身份连接 04：企业微信与钉钉目录扩展
 
-> 状态：已实现，待真实测试企业联调
+> 状态：统一契约与代码整改完成，三家真实测试企业联调阻塞
 > 前置：[03 自动化与治理](./IDENTITY_CONNECTIONS_03_AUTOMATION_GOVERNANCE.md)
+> 修复计划：[企业身份连接修复与生产验收计划](./IDENTITY_CONNECTIONS_REMEDIATION_PLAN.md)
 
 ## 1. 目标
 
@@ -111,3 +112,12 @@
 ## 11. 后续路线
 
 SCIM、LDAP/AD、HRIS、企业应用出站供给、角色/应用范围自动映射和双向同步另行立项，不扩张本阶段范围。
+
+## 12. 2026-07-20 修复复验
+
+- [x] 飞书、企业微信、钉钉均输出分页完整性、遍历 scope、字段权限、稳定 `directory_user_id` 与 `login_subject`，并保留平台 open/union 别名。
+- [x] 无用户范围时字段权限保持 `unknown` 并给出 warning；有用户但字段整体缺失时标记 `not_granted`。
+- [x] 三平台统一 fixture 的部门、用户状态、多部门、主部门、负责人、职位语义一致，契约测试通过。
+- [x] 新增 `-tags=sandbox` 真实企业硬门槛；缺失任何凭据会失败而不是 skip，且测试日志不输出凭据或通讯录内容。
+- [ ] 真实联调尚未执行。需要注入 `FEISHU_SANDBOX_*`、`WECOM_SANDBOX_*`、`DINGTALK_SANDBOX_*`，完成目录、事件、定时、乱序/重复、离职、死信和重放，并把平台 request ID 记入受控验收记录。
+- [ ] 在上述门槛通过前，三家连接的 `directory_sync` / `events` capability 必须保持关闭，阶段 04 不得标记完成。

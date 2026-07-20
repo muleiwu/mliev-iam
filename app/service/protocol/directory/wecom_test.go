@@ -62,7 +62,7 @@ func TestWeComAdapterNormalizesOrganizationAndUsers(t *testing.T) {
 		t.Fatalf("企业微信用户数错误: %#v", users.Items)
 	}
 	ada := users.Items[0]
-	if ada.StableID != "corp-a:ada" || len(ada.Identifiers) != 3 || len(ada.Memberships) != 2 || !ada.Memberships[0].Primary || !ada.Memberships[0].Leader {
+	if ada.StableID != "corp-a:ada" || len(ada.Identifiers) != 4 || ada.Identifiers[1].Namespace != "login_subject" || len(ada.Memberships) != 2 || !ada.Memberships[0].Primary || !ada.Memberships[0].Leader {
 		t.Fatalf("企业微信用户标准化错误: %#v", ada)
 	}
 	if users.Items[1].Status != "inactive" {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol/identity"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol/social"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/oauth2"
 )
@@ -65,7 +67,7 @@ func NewAuthenticationAdapter(connection *model.IdentityConnection, credentials 
 		if err != nil {
 			return nil, err
 		}
-		return &enterpriseAuthenticationAdapter{adapter: adapter}, nil
+		return &enterpriseAuthenticationAdapter{adapter: adapter, providerType: connection.ProviderType}, nil
 	default:
 		return nil, fmt.Errorf("不支持的连接类别 %q", connection.Category)
 	}
@@ -116,7 +118,10 @@ func (a *socialCodeAuthenticationAdapter) LoginWithCode(ctx context.Context, cod
 	return externalProfileFromSocialUser(user), nil
 }
 
-type enterpriseAuthenticationAdapter struct{ adapter IdentityProviderAdapter }
+type enterpriseAuthenticationAdapter struct {
+	adapter      IdentityProviderAdapter
+	providerType string
+}
 
 func (a *enterpriseAuthenticationAdapter) ValidateConfig() error { return a.adapter.ValidateConfig() }
 func (a *enterpriseAuthenticationAdapter) AuthorizationURL(state string) string {
@@ -139,6 +144,23 @@ func (a *enterpriseAuthenticationAdapter) FetchProfile(ctx context.Context, toke
 		return nil, err
 	}
 	identifiers := []ExternalProfileIdentifier{{Namespace: model.IdentifierNamespaceLoginSubject, Value: user.ExternalUserID, Primary: true}}
+	appendIdentifier := func(namespace model.IdentifierNamespace, value string) {
+		if value == "" {
+			return
+		}
+		identifiers = append(identifiers, ExternalProfileIdentifier{Namespace: namespace, Value: value})
+	}
+	switch a.providerType {
+	case "feishu", "lark":
+		appendIdentifier(model.IdentifierNamespaceOpenID, nestedRawString(user.RawUserInfo, "open_id"))
+		appendIdentifier(model.IdentifierNamespaceLoginSubject, nestedRawString(user.RawUserInfo, "user_id"))
+	case "wecom", "wechat_work":
+		appendIdentifier(model.IdentifierNamespaceOpenUserID, nestedRawString(user.RawUserInfo, "open_userid", "OpenId"))
+		appendIdentifier(model.IdentifierNamespaceLoginSubject, nestedRawString(user.RawUserInfo, "userid", "UserId"))
+	case "dingtalk":
+		appendIdentifier(model.IdentifierNamespaceOpenID, nestedRawString(user.RawUserInfo, "openId", "openid"))
+		appendIdentifier(model.IdentifierNamespaceLoginSubject, nestedRawString(user.RawUserInfo, "userid", "userId"))
+	}
 	if user.UnionID != "" {
 		identifiers = append(identifiers, ExternalProfileIdentifier{Namespace: model.IdentifierNamespaceUnionID, Value: user.UnionID})
 	}
@@ -146,6 +168,25 @@ func (a *enterpriseAuthenticationAdapter) FetchProfile(ctx context.Context, toke
 		DisplayName: user.Nickname, Avatar: user.Avatar, Email: user.Email, Phone: user.Phone,
 		Identifiers: identifiers, Raw: user.RawUserInfo,
 	}, nil
+}
+
+func nestedRawString(raw map[string]any, keys ...string) string {
+	for _, source := range []map[string]any{raw, nestedRawMap(raw, "data"), nestedRawMap(raw, "result")} {
+		for _, key := range keys {
+			if value, ok := source[key].(string); ok && value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func nestedRawMap(raw map[string]any, key string) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	value, _ := raw[key].(map[string]any)
+	return value
 }
 
 func tokenValue[T any](token *AuthToken) (T, bool) {
@@ -171,30 +212,30 @@ func externalProfileFromSocialUser(user *SocialUser) *ExternalProfile {
 	}
 }
 
-func socialProviderFromConnection(connection *model.IdentityConnection, credentials map[string]any) *model.SocialProvider {
+func socialProviderFromConnection(connection *model.IdentityConnection, credentials map[string]any) *social.Provider {
 	config := connection.Config
-	return &model.SocialProvider{
+	return &social.Provider{
 		ID: connection.ID, Name: connection.Name, Identifier: connection.Identifier,
-		Type: model.ProviderType(connection.ProviderType), Description: connection.Description,
+		Type: social.ProviderType(connection.ProviderType), Description: connection.Description,
 		ClientID: valueString(credentials, config, "clientId"), ClientSecret: valueString(credentials, config, "clientSecret"),
 		AuthURL: valueString(nil, config, "authUrl"), TokenURL: valueString(nil, config, "tokenUrl"),
 		UserInfoURL: valueString(nil, config, "userInfoUrl"), RedirectURL: valueString(nil, config, "redirectUrl"),
 		Scopes: valueString(nil, config, "scopes"), Icon: connection.Icon, SortOrder: connection.SortOrder,
-		Status: model.ProviderStatusEnabled, IsDefault: connection.IsDefault, Attributes: cloneConfig(config),
+		IsDefault: connection.IsDefault, Attributes: cloneConfig(config),
 		Remark: connection.Remark,
 	}
 }
 
-func identityProviderFromConnection(connection *model.IdentityConnection, credentials map[string]any) *model.IdentityProvider {
+func identityProviderFromConnection(connection *model.IdentityConnection, credentials map[string]any) *identity.Provider {
 	config := connection.Config
-	return &model.IdentityProvider{
+	return &identity.Provider{
 		ID: connection.ID, Name: connection.Name, Identifier: connection.Identifier,
-		Type: model.IdentityProviderType(connection.ProviderType), Description: connection.Description,
+		Type: identity.ProviderType(connection.ProviderType), Description: connection.Description,
 		ClientID: valueString(credentials, config, "clientId"), ClientSecret: valueString(credentials, config, "clientSecret"),
 		AuthURL: valueString(nil, config, "authUrl"), TokenURL: valueString(nil, config, "tokenUrl"),
 		UserInfoURL: valueString(nil, config, "userInfoUrl"), RedirectURL: valueString(nil, config, "redirectUrl"),
 		Scopes: valueString(nil, config, "scopes"), Icon: connection.Icon, SortOrder: connection.SortOrder,
-		Status: model.IdentityProviderStatusEnabled, IsDefault: connection.IsDefault, Attributes: cloneConfig(config),
+		IsDefault: connection.IsDefault, Attributes: cloneConfig(config),
 		Remark: connection.Remark,
 	}
 }

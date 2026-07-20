@@ -66,12 +66,49 @@ func TestSyncJobRetryDeadLetterAndReplay(t *testing.T) {
 	require.LessOrEqual(t, SyncJobBackoff(30), MaxSyncJobBackoff)
 }
 
+func TestSyncJobExpiredFinalLeaseBecomesDeadLetterAndRetryResetsState(t *testing.T) {
+	db := openSyncAutomationTestDB(t)
+	connection := seedAutomationConnection(t, db)
+	expired := time.Now().Add(-time.Minute)
+	job := &model.SyncJob{
+		ConnectionID: connection.ID, JobType: model.SyncJobFullSync,
+		Status: model.SyncJobLeased, AvailableAt: expired, LeaseOwner: "crashed-worker",
+		LeaseExpiresAt: &expired, Attempts: 8, MaxAttempts: 8,
+	}
+	require.NoError(t, db.Create(job).Error)
+
+	claimed, err := NewSyncJobService(db).Claim(context.Background(), "replacement", time.Minute, time.Now())
+	require.NoError(t, err)
+	require.Nil(t, claimed, "达到上限的过期租约不得被第九次领取")
+	require.NoError(t, db.First(job, job.ID).Error)
+	require.Equal(t, model.SyncJobDeadLetter, job.Status)
+	require.Empty(t, job.LeaseOwner)
+	require.Contains(t, job.LastError, "最大尝试次数")
+
+	require.NoError(t, NewSyncJobService(db).Retry(job.ID))
+	var retried model.SyncJob
+	require.NoError(t, db.First(&retried, job.ID).Error)
+	require.Equal(t, model.SyncJobPending, retried.Status)
+	require.Zero(t, retried.Attempts)
+	require.Nil(t, retried.LeaseExpiresAt)
+}
+
+func TestSyncJobDisabledConnectionCancelsPendingAndRejectsNewWork(t *testing.T) {
+	db := openSyncAutomationTestDB(t)
+	connection := seedAutomationConnection(t, db)
+	job, err := NewSyncJobService(db).Enqueue(connection.ID, model.SyncJobFullSync, nil, time.Now(), nil)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(connection).Update("status", model.ConnectionStatusDisabled).Error)
+	require.NoError(t, NewSyncJobService(db).CancelConnectionPending(connection.ID, "连接已禁用"))
+	require.NoError(t, db.First(job, job.ID).Error)
+	require.Equal(t, model.SyncJobCancelled, job.Status)
+	_, err = NewSyncJobService(db).Enqueue(connection.ID, model.SyncJobFullSync, nil, time.Now(), nil)
+	require.ErrorIs(t, err, ErrSyncNotRunnable)
+}
+
 func TestSyncScheduleEnqueuesDueExactlyOnce(t *testing.T) {
 	db := openSyncAutomationTestDB(t)
 	connection := seedAutomationConnection(t, db)
-	root := model.Department{Name: "自动同步根", Code: "auto-root", Status: model.DepartmentStatusEnabled}
-	require.NoError(t, db.Create(&root).Error)
-	require.NoError(t, db.Create(&model.DirectorySyncPolicy{ConnectionID: connection.ID, RootDepartmentID: root.ID, MatchPolicy: model.DirectoryMatchManual, DeprovisionPolicy: model.DirectoryDeprovisionBlockIdentityRequireApproval, Enabled: true}).Error)
 	schedules, err := NewSyncScheduleService(db).Replace(connection.ID, []SyncScheduleInput{{ScheduleType: model.SyncScheduleDailyReconcile, CronExpression: "0 2 * * *", Timezone: "UTC", Enabled: true}})
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
@@ -107,5 +144,8 @@ func seedAutomationConnection(t *testing.T, db *gorm.DB) *model.IdentityConnecti
 	t.Helper()
 	connection := &model.IdentityConnection{Name: "自动同步", Identifier: "auto-" + t.Name(), Category: model.ConnectionCategoryEnterprise, ProviderType: "feishu", Capabilities: model.StringList{"directory_sync", "events"}, Status: model.ConnectionStatusEnabled}
 	require.NoError(t, db.Create(connection).Error)
+	root := model.Department{Name: "自动同步根", Code: "auto-root-" + t.Name(), Status: model.DepartmentStatusEnabled}
+	require.NoError(t, db.Create(&root).Error)
+	require.NoError(t, db.Create(&model.DirectorySyncPolicy{ConnectionID: connection.ID, RootDepartmentID: root.ID, MatchPolicy: model.DirectoryMatchManual, DeprovisionPolicy: model.DirectoryDeprovisionBlockIdentityRequireApproval, Enabled: true}).Error)
 	return connection
 }

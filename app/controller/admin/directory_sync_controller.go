@@ -2,6 +2,7 @@ package admin
 
 import (
 	"strconv"
+	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
@@ -72,9 +73,17 @@ func (dc DirectorySyncController) CreateRun(c httpInterfaces.RouterContextInterf
 	if ok {
 		actor = &actorID
 	}
-	response, err := service.NewDirectorySyncService(helper.GetDatabase()).CreateManualRun(c.Request().Context(), connectionID, actor)
+	var request struct {
+		Supersede bool `json:"supersede"`
+	}
+	_ = c.ShouldBindJSON(&request)
+	response, err := service.NewDirectorySyncService(helper.GetDatabase()).CreateManualRunWithSupersede(c.Request().Context(), connectionID, actor, request.Supersede)
 	if err != nil {
-		dc.Error(c, constants.ErrCodeBadRequest, err.Error())
+		code := constants.ErrCodeBadRequest
+		if strings.Contains(err.Error(), "supersede=true") {
+			code = constants.ErrCodeConflict
+		}
+		dc.Error(c, code, err.Error())
 		return
 	}
 	dc.SuccessWithMessage(c, "同步预览已生成", response)
@@ -169,6 +178,24 @@ func (dc DirectorySyncController) ApproveChange(c httpInterfaces.RouterContextIn
 
 func (dc DirectorySyncController) RejectChange(c httpInterfaces.RouterContextInterface) {
 	dc.decideChange(c, false)
+}
+
+func (dc DirectorySyncController) RetryChange(c httpInterfaces.RouterContextInterface) {
+	changeID, err := parseUintParam(c, "changeId")
+	if err != nil {
+		dc.Error(c, constants.ErrCodeBadRequest, "无效的变更 ID")
+		return
+	}
+	actorID, ok := middleware.GetCurrentUserID(c)
+	if !ok {
+		dc.Error(c, constants.ErrCodeUnauthorized, "未获取到管理员身份")
+		return
+	}
+	if err := service.NewDirectorySyncService(helper.GetDatabase()).RetryFailedChange(changeID, actorID); err != nil {
+		dc.Error(c, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	dc.SuccessWithMessage(c, "失败变更已重新批准，可再次应用", nil)
 }
 
 func (dc DirectorySyncController) decideChange(c httpInterfaces.RouterContextInterface, approve bool) {

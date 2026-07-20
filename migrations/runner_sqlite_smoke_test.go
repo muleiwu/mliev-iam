@@ -92,9 +92,31 @@ func TestSqliteSmoke(t *testing.T) {
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const syncAutomationSchemaVersion int64 = 20260720150000
-	if maxV != syncAutomationSchemaVersion {
-		t.Fatalf("期望最大版本 %d，实际 %d", syncAutomationSchemaVersion, maxV)
+	const remediationSchemaVersion int64 = 20260720161000
+	if maxV != remediationSchemaVersion {
+		t.Fatalf("期望最大版本 %d，实际 %d", remediationSchemaVersion, maxV)
+	}
+	for _, table := range []string{"external_principal_conflicts", "identity_connection_health_checks", "directory_sync_snapshot_objects", "directory_operation_leases"} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("修复表 %s 未创建", table)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO users (uuid, username, email, phone, status, is_activated) VALUES ('active-1', 'active-user', 'active@example.test', '10001', 1, 1)`); err != nil {
+		t.Fatalf("写入首个活跃用户失败: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (uuid, username, email, phone, status, is_activated) VALUES ('active-2', 'active-user', 'active@example.test', '10001', 1, 1)`); err == nil {
+		t.Fatal("活跃 username/email/phone 重复本应由数据库唯一约束拒绝")
+	}
+	if _, err := db.Exec(`UPDATE users SET deleted_at=CURRENT_TIMESTAMP WHERE uuid='active-1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (uuid, username, email, phone, status, is_activated) VALUES ('active-3', 'active-user', 'active@example.test', '10001', 1, 1)`); err != nil {
+		t.Fatalf("软删除后应允许复用活跃唯一字段: %v", err)
 	}
 }
 

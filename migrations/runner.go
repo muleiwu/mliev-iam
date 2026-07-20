@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -149,6 +150,17 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 	if err := goose.Up(db, dir); err != nil {
 		return fmt.Errorf("goose 迁移失败: %w", err)
 	}
+	validationDB := gormDB
+	if validationDB == nil {
+		openedDB, openErr := openGormOnSQLDB(db, driver)
+		if openErr != nil {
+			return fmt.Errorf("初始化凭据验证数据库失败: %w", openErr)
+		}
+		validationDB = openedDB
+	}
+	if err := validateAllIdentityCredentials(validationDB); err != nil {
+		return fmt.Errorf("启动前身份连接凭据解密验证失败: %w", err)
+	}
 	newVersion, _ := goose.GetDBVersion(db)
 	if newVersion != currentVersion {
 		logger.Info(fmt.Sprintf("[db migration] goose 迁移完成: %d -> %d (driver=%s)", currentVersion, newVersion, driver))
@@ -156,6 +168,46 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 		logger.Info(fmt.Sprintf("[db migration] goose 已是最新版本 (driver=%s)", driver))
 	}
 
+	return nil
+}
+
+type encryptedIdentityCredential struct {
+	ID           uint   `gorm:"column:id"`
+	ConnectionID uint   `gorm:"column:connection_id"`
+	Purpose      string `gorm:"column:purpose"`
+	Ciphertext   string `gorm:"column:ciphertext"`
+	Nonce        string `gorm:"column:nonce"`
+	Algorithm    string `gorm:"column:algorithm"`
+	KeyVersion   int    `gorm:"column:key_version"`
+}
+
+func validateAllIdentityCredentials(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable("identity_connection_credentials") {
+		return nil
+	}
+	cipher, err := credentialcrypto.FromEnvironment()
+	if err != nil {
+		return err
+	}
+	var credentials []encryptedIdentityCredential
+	if err := db.Table("identity_connection_credentials").Find(&credentials).Error; err != nil {
+		return err
+	}
+	for _, credential := range credentials {
+		plain, err := cipher.Decrypt(credentialcrypto.Envelope{
+			Ciphertext: credential.Ciphertext,
+			Nonce:      credential.Nonce,
+			Algorithm:  credential.Algorithm,
+			KeyVersion: credential.KeyVersion,
+		}, credentialcrypto.AAD(credential.ConnectionID, credential.Purpose, credential.KeyVersion))
+		if err != nil {
+			return fmt.Errorf("credential id=%d connection=%d purpose=%s: %w", credential.ID, credential.ConnectionID, credential.Purpose, err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(plain, &payload); err != nil {
+			return fmt.Errorf("credential id=%d JSON 无效: %w", credential.ID, err)
+		}
+	}
 	return nil
 }
 

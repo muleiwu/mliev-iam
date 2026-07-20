@@ -1,8 +1,9 @@
 # 身份连接 02：飞书手动与半自动目录同步
 
-> 状态：已实施并通过手动同步闭环验收（2026-07-20）
+> 状态：代码整改完成，真实飞书测试企业验收中
 > 前置：[01 统一连接](./IDENTITY_CONNECTIONS_01_UNIFICATION.md)
 > 后继：[03 自动化与治理](./IDENTITY_CONNECTIONS_03_AUTOMATION_GOVERNANCE.md)
+> 修复计划：[企业身份连接修复与生产验收计划](./IDENTITY_CONNECTIONS_REMEDIATION_PLAN.md)
 
 ## 1. 目标
 
@@ -57,7 +58,7 @@ type DirectoryAdapter interface {
 
 ### 4.4 `directory_sync_runs` 与 `directory_sync_changes`
 
-Run 状态：`pending`、`fetching`、`preview_ready`、`applying`、`succeeded`、`failed`、`cancelled`。
+Run 状态：`pending`、`fetching`、`preview_ready`、`applying`、`succeeded`、`failed`、`cancelled`、`superseded`。
 
 Change 类型：`create`、`update`、`move`、`link`、`disable`、`delete`、`conflict`；对象类型为 `user`、`org_unit`、`membership`。Change 状态为 `pending`、`approved`、`rejected`、`applied`、`failed`。
 
@@ -133,3 +134,14 @@ Change 类型：`create`、`update`、`move`、`link`、`disable`、`delete`、`
 ## 11. 阶段依赖
 
 03 的任务和事件只能调用本阶段公开的“生成预览”和“应用已批准变更”服务，不得复制同步逻辑。
+
+## 12. 2026-07-20 修复复验
+
+- [x] 飞书 Contact v3 从配置根读取根详情、遍历子部门并逐部门分页读取直属用户，按 `tenant_key:user_id` 去重合并多部门关系。
+- [x] 快照记录遍历范围、分页完整性、字段权限和 scope hash；不完整 run 失败且不生成删除类差异。
+- [x] `directory_sync_snapshot_objects` 保存不可变标准 JSON/hash；审批应用只读取 change 引用的快照，不读取后续 run 覆盖的映射表。
+- [x] 同连接单一可审批 run、显式 supersede、`directory_operation_leases` 续租/过期接管/owner 校验均有回归测试。
+- [x] 部门父子拓扑、move、来源所有权删除保护，membership 撤销、主部门/负责人重算和幂等应用已实现。
+- [x] scope、fieldMapping、fieldOwnership 实际参与诊断和差异；本地拥有的邮箱/手机号不会触发上游权限阻断或无意义更新。
+- [x] 重叠组织根、重复联系方式、活跃用户唯一约束、failed change retry 与服务端分页已实现。
+- [ ] 真实飞书测试企业尚未注入 `FEISHU_SANDBOX_*` 凭据，诊断、完整预览、审批、二次幂等、权限缩小与离职链路未取得真实验收结论。

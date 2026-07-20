@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,12 +17,13 @@ const defaultWeComBaseURL = "https://qyapi.weixin.qq.com"
 // WeComAdapter implements the read-only contract for an enterprise-owned
 // application. Login and directory secrets deliberately remain separate.
 type WeComAdapter struct {
-	corpID           string
-	directorySecret  string
-	rootDepartmentID string
-	baseURL          string
-	httpClient       *http.Client
-	accessToken      string
+	corpID             string
+	directorySecret    string
+	rootDepartmentID   string
+	baseURL            string
+	httpClient         *http.Client
+	accessToken        string
+	includeDescendants bool
 }
 
 func NewWeComAdapter(credentials map[string]any, client *http.Client) (*WeComAdapter, error) {
@@ -29,7 +31,8 @@ func NewWeComAdapter(credentials map[string]any, client *http.Client) (*WeComAda
 	adapter := &WeComAdapter{
 		corpID: value("corpId"), directorySecret: value("directorySecret"),
 		rootDepartmentID: value("rootDepartmentId"), baseURL: strings.TrimRight(value("baseUrl"), "/"),
-		httpClient: client,
+		httpClient:         client,
+		includeDescendants: true,
 	}
 	if adapter.rootDepartmentID == "" {
 		adapter.rootDepartmentID = "1"
@@ -46,26 +49,91 @@ func NewWeComAdapter(credentials map[string]any, client *http.Client) (*WeComAda
 	return adapter, nil
 }
 
+func (a *WeComAdapter) ReadSnapshot(ctx context.Context, scope SyncScope) (*Snapshot, error) {
+	scope, scopeHash := effectiveScope(scope, []string{a.scopedDepartmentText(a.rootDepartmentID)})
+	result := &Snapshot{Completeness: SnapshotCompleteness{PaginationComplete: true, ScopeHash: scopeHash, FieldPermissions: map[string]string{"email": "unknown", "phone": "unknown"}}}
+	orgByID := map[string]OrgUnit{}
+	userByID := map[string]User{}
+	observedUsers := 0
+	for _, configuredRoot := range scope.RootExternalOrgUnitIDs {
+		root := strings.TrimPrefix(configuredRoot, a.corpID+":")
+		if _, err := strconv.ParseInt(root, 10, 64); err != nil {
+			result.Completeness.PaginationComplete = false
+			return result, fmt.Errorf("企业微信根部门 %q 必须是数字部门 ID", configuredRoot)
+		}
+		clone := *a
+		clone.rootDepartmentID = root
+		clone.includeDescendants = scope.IncludeDescendants
+		orgPage, err := clone.ListOrgUnits(ctx, "")
+		if err != nil {
+			result.Completeness.PaginationComplete = false
+			return result, err
+		}
+		for _, org := range orgPage.Items {
+			orgByID[org.ExternalID] = org
+			result.Completeness.TraversedOrgUnitIDs = append(result.Completeness.TraversedOrgUnitIDs, org.ExternalID)
+		}
+		userPage, err := clone.ListUsers(ctx, "")
+		if err != nil {
+			result.Completeness.PaginationComplete = false
+			return result, err
+		}
+		for _, user := range userPage.Items {
+			observedUsers++
+			if present, _ := user.Raw["__email_field_present"].(bool); present {
+				result.Completeness.FieldPermissions["email"] = "granted"
+			}
+			if present, _ := user.Raw["__mobile_field_present"].(bool); present {
+				result.Completeness.FieldPermissions["phone"] = "granted"
+			}
+			if !scope.IncludeInactive && user.Status == "inactive" {
+				continue
+			}
+			if existing, ok := userByID[user.StableID]; ok {
+				user.Memberships = mergeMemberships(existing.Memberships, user.Memberships)
+			}
+			userByID[user.StableID] = user
+		}
+	}
+	for _, permission := range []string{"email", "phone"} {
+		if observedUsers > 0 && result.Completeness.FieldPermissions[permission] == "unknown" {
+			result.Completeness.FieldPermissions[permission] = "not_granted"
+		}
+	}
+	if observedUsers == 0 {
+		result.Completeness.Warnings = append(result.Completeness.Warnings, "配置范围内没有可用于判断字段权限的用户；字段权限保持 unknown")
+	}
+	result.Completeness.TraversedOrgUnitIDs = uniqueSortedStrings(result.Completeness.TraversedOrgUnitIDs)
+	for _, org := range orgByID {
+		result.OrgUnits = append(result.OrgUnits, org)
+	}
+	for _, user := range userByID {
+		result.Users = append(result.Users, user)
+	}
+	sort.Slice(result.OrgUnits, func(i, j int) bool { return result.OrgUnits[i].ExternalID < result.OrgUnits[j].ExternalID })
+	sort.Slice(result.Users, func(i, j int) bool { return result.Users[i].StableID < result.Users[j].StableID })
+	return result, nil
+}
+
 func (a *WeComAdapter) ValidateDirectoryConfig(ctx context.Context) (*Diagnostic, error) {
 	if _, err := a.token(ctx); err != nil {
 		return &Diagnostic{Healthy: false, Warnings: []string{err.Error()}}, err
 	}
 	diagnostic := &Diagnostic{TokenValid: true, TenantID: a.corpID, Warnings: []string{}}
-	orgs, err := a.ListOrgUnits(ctx, "")
+	snapshot, err := a.ReadSnapshot(ctx, SyncScope{IncludeDescendants: true, IncludeInactive: true})
 	if err != nil {
-		diagnostic.Warnings = append(diagnostic.Warnings, "无法读取企业微信部门，请检查通讯录 Secret、应用可见范围和可信 IP")
+		diagnostic.Warnings = append(diagnostic.Warnings, "无法完整读取企业微信通讯录，请检查 Secret、可信 IP、权限和可见范围")
 		return diagnostic, err
 	}
-	users, err := a.ListUsers(ctx, "")
-	if err != nil {
-		diagnostic.Warnings = append(diagnostic.Warnings, "无法读取企业微信成员，请检查通讯录读取权限、应用可见范围和敏感字段授权")
-		return diagnostic, err
-	}
-	diagnostic.Healthy = true
+	diagnostic.Healthy = snapshot.Completeness.PaginationComplete
 	diagnostic.DirectoryReadable = true
-	diagnostic.VisibleOrgUnits = len(orgs.Items)
-	diagnostic.VisibleUsers = len(users.Items)
-	if len(orgs.Items) == 0 || len(users.Items) == 0 {
+	diagnostic.VisibleOrgUnits = len(snapshot.OrgUnits)
+	diagnostic.VisibleUsers = len(snapshot.Users)
+	diagnostic.TraversedOrgUnitIDs = snapshot.Completeness.TraversedOrgUnitIDs
+	diagnostic.PaginationComplete = snapshot.Completeness.PaginationComplete
+	diagnostic.FieldPermissions = snapshot.Completeness.FieldPermissions
+	diagnostic.ScopeHash = snapshot.Completeness.ScopeHash
+	if len(snapshot.OrgUnits) == 0 || len(snapshot.Users) == 0 {
 		diagnostic.Warnings = append(diagnostic.Warnings, "当前通讯录可见范围为空；请确认上游根部门与应用可见范围")
 	}
 	return diagnostic, nil
@@ -92,6 +160,9 @@ func (a *WeComAdapter) ListOrgUnits(ctx context.Context, cursor string) (*OrgUni
 	}
 	items := make([]OrgUnit, 0, len(response.Department))
 	for _, department := range response.Department {
+		if !a.includeDescendants && strconv.FormatInt(department.ID, 10) != a.rootDepartmentID {
+			continue
+		}
 		parentID := ""
 		if department.ParentID > 0 {
 			parentID = a.scopedDepartmentID(department.ParentID)
@@ -118,7 +189,11 @@ func (a *WeComAdapter) ListUsers(ctx context.Context, cursor string) (*UserPage,
 		ErrMsg   string      `json:"errmsg"`
 		UserList []weComUser `json:"userlist"`
 	}
-	query := url.Values{"department_id": []string{a.rootDepartmentID}, "fetch_child": []string{"1"}}
+	fetchChild := "0"
+	if a.includeDescendants {
+		fetchChild = "1"
+	}
+	query := url.Values{"department_id": []string{a.rootDepartmentID}, "fetch_child": []string{fetchChild}}
 	if err := a.get(ctx, "/cgi-bin/user/list", query, &response); err != nil {
 		return nil, err
 	}
@@ -128,7 +203,7 @@ func (a *WeComAdapter) ListUsers(ctx context.Context, cursor string) (*UserPage,
 			continue
 		}
 		stableID := a.scopedUserID(source.UserID)
-		identifiers := []Identifier{{Namespace: "directory_user_id", Value: stableID, Primary: true}}
+		identifiers := []Identifier{{Namespace: "directory_user_id", Value: stableID, Primary: true}, {Namespace: "login_subject", Value: source.UserID}}
 		if source.OpenUserID != "" {
 			identifiers = append(identifiers, Identifier{Namespace: "open_userid", Value: source.OpenUserID})
 		}
@@ -158,19 +233,37 @@ func (a *WeComAdapter) ListUsers(ctx context.Context, cursor string) (*UserPage,
 }
 
 type weComUser struct {
-	UserID         string  `json:"userid"`
-	OpenUserID     string  `json:"open_userid"`
-	UnionID        string  `json:"unionid"`
-	Name           string  `json:"name"`
-	Alias          string  `json:"alias"`
-	Mobile         string  `json:"mobile"`
-	Email          string  `json:"email"`
-	Position       string  `json:"position"`
-	Avatar         string  `json:"avatar"`
-	Status         int     `json:"status"`
-	Departments    []int64 `json:"department"`
-	Order          []int   `json:"order"`
-	IsLeaderInDept []int   `json:"is_leader_in_dept"`
+	UserID             string  `json:"userid"`
+	OpenUserID         string  `json:"open_userid"`
+	UnionID            string  `json:"unionid"`
+	Name               string  `json:"name"`
+	Alias              string  `json:"alias"`
+	Mobile             string  `json:"mobile"`
+	Email              string  `json:"email"`
+	Position           string  `json:"position"`
+	Avatar             string  `json:"avatar"`
+	Status             int     `json:"status"`
+	Departments        []int64 `json:"department"`
+	Order              []int   `json:"order"`
+	IsLeaderInDept     []int   `json:"is_leader_in_dept"`
+	EmailFieldPresent  bool    `json:"-"`
+	MobileFieldPresent bool    `json:"-"`
+}
+
+func (u *weComUser) UnmarshalJSON(data []byte) error {
+	type alias weComUser
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*u = weComUser(decoded)
+	_, u.EmailFieldPresent = raw["email"]
+	_, u.MobileFieldPresent = raw["mobile"]
+	return nil
 }
 
 func (u weComUser) raw() map[string]any {
@@ -179,6 +272,7 @@ func (u weComUser) raw() map[string]any {
 		"alias": u.Alias, "mobile": u.Mobile, "email": u.Email, "position": u.Position,
 		"avatar": u.Avatar, "status": u.Status, "department": u.Departments,
 		"order": u.Order, "is_leader_in_dept": u.IsLeaderInDept,
+		"__email_field_present": u.EmailFieldPresent, "__mobile_field_present": u.MobileFieldPresent,
 	}
 }
 
@@ -237,6 +331,23 @@ func (a *WeComAdapter) scopedUserID(userID string) string {
 
 func (a *WeComAdapter) scopedDepartmentID(departmentID int64) string {
 	return a.corpID + ":" + strconv.FormatInt(departmentID, 10)
+}
+
+func (a *WeComAdapter) scopedDepartmentText(departmentID string) string {
+	return a.corpID + ":" + departmentID
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func parallelInt(values []int, index int) int {

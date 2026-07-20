@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 const (
@@ -20,7 +18,7 @@ type DingTalkAdapter struct {
 	baseAdapter
 }
 
-func NewDingTalkAdapter(provider *model.IdentityProvider) *DingTalkAdapter {
+func NewDingTalkAdapter(provider *Provider) *DingTalkAdapter {
 	return &DingTalkAdapter{baseAdapter: newBaseAdapter(provider)}
 }
 

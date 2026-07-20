@@ -63,12 +63,13 @@ func validateUserSession(claims *jwt.Claims) error {
 	}
 	var state struct {
 		Status           int
+		IsActivated      bool
 		SessionRevokedAt *time.Time
 	}
-	if err := helper.GetDatabase().Table("users").Select("status", "session_revoked_at").Where("id = ? AND deleted_at IS NULL", claims.UserID).Take(&state).Error; err != nil {
+	if err := helper.GetDatabase().Table("users").Select("status", "is_activated", "session_revoked_at").Where("id = ? AND deleted_at IS NULL", claims.UserID).Take(&state).Error; err != nil {
 		return fmt.Errorf("用户不存在或不可用")
 	}
-	if state.Status != int(model.UserStatusActive) {
+	if state.Status != int(model.UserStatusActive) || !state.IsActivated {
 		return fmt.Errorf("用户已停用")
 	}
 	if state.SessionRevokedAt != nil && !claims.IssuedAt.Time.After(*state.SessionRevokedAt) {

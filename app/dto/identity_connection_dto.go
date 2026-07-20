@@ -48,25 +48,28 @@ type IdentityConnectionCredentialSummary struct {
 }
 
 type IdentityConnectionResponse struct {
-	ID              uint                                  `json:"id"`
-	Name            string                                `json:"name"`
-	Identifier      string                                `json:"identifier"`
-	Category        model.ConnectionCategory              `json:"category"`
-	ProviderType    string                                `json:"providerType"`
-	Description     string                                `json:"description"`
-	Capabilities    model.StringList                      `json:"capabilities"`
-	Config          map[string]any                        `json:"config"`
-	CredentialState []IdentityConnectionCredentialSummary `json:"credentialState"`
-	Icon            string                                `json:"icon"`
-	SortOrder       int                                   `json:"sortOrder"`
-	Status          model.ConnectionStatus                `json:"status"`
-	IsDefault       bool                                  `json:"isDefault"`
-	LastCheckedAt   *time.Time                            `json:"lastCheckedAt,omitempty"`
-	LastCheckStatus string                                `json:"lastCheckStatus,omitempty"`
-	LastCheckError  string                                `json:"lastCheckError,omitempty"`
-	Remark          string                                `json:"remark"`
-	CreatedAt       time.Time                             `json:"createdAt"`
-	UpdatedAt       time.Time                             `json:"updatedAt"`
+	ID                        uint                                  `json:"id"`
+	Name                      string                                `json:"name"`
+	Identifier                string                                `json:"identifier"`
+	Category                  model.ConnectionCategory              `json:"category"`
+	ProviderType              string                                `json:"providerType"`
+	Description               string                                `json:"description"`
+	Capabilities              model.StringList                      `json:"capabilities"`
+	Config                    map[string]any                        `json:"config"`
+	CredentialState           []IdentityConnectionCredentialSummary `json:"credentialState"`
+	Icon                      string                                `json:"icon"`
+	SortOrder                 int                                   `json:"sortOrder"`
+	Status                    model.ConnectionStatus                `json:"status"`
+	IsDefault                 bool                                  `json:"isDefault"`
+	LastCheckedAt             *time.Time                            `json:"lastCheckedAt,omitempty"`
+	LastCheckStatus           string                                `json:"lastCheckStatus,omitempty"`
+	LastCheckError            string                                `json:"lastCheckError,omitempty"`
+	Remark                    string                                `json:"remark"`
+	CreatedAt                 time.Time                             `json:"createdAt"`
+	UpdatedAt                 time.Time                             `json:"updatedAt"`
+	AuthenticationCallbackURL string                                `json:"authenticationCallbackUrl,omitempty"`
+	EventsCallbackURL         string                                `json:"eventsCallbackUrl,omitempty"`
+	Health                    []model.IdentityConnectionHealthCheck `json:"health"`
 }
 
 type PublicIdentityConnectionInfo struct {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,12 +28,16 @@ func NewSyncWorker(db *gorm.DB, owner string) *SyncWorker {
 }
 
 func (w *SyncWorker) ProcessOne(ctx context.Context) (bool, error) {
+	return w.processOne(ctx, ctx)
+}
+
+func (w *SyncWorker) processOne(claimCtx, workCtx context.Context) (bool, error) {
 	jobService := NewSyncJobService(w.db)
-	job, err := jobService.Claim(ctx, w.owner, w.leaseDuration, time.Now())
+	job, err := jobService.Claim(claimCtx, w.owner, w.leaseDuration, time.Now())
 	if err != nil || job == nil {
 		return false, err
 	}
-	jobCtx, cancel := context.WithCancel(ctx)
+	jobCtx, cancel := context.WithCancel(workCtx)
 	defer cancel()
 	renewDone := make(chan struct{})
 	go func() {
@@ -55,8 +60,10 @@ func (w *SyncWorker) ProcessOne(ctx context.Context) (bool, error) {
 	runID, executeErr := w.execute(jobCtx, job)
 	cancel()
 	<-renewDone
+	finalCtx, finalCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer finalCancel()
 	if executeErr == nil {
-		if err := jobService.Complete(ctx, job.ID, w.owner, runID); err != nil {
+		if err := jobService.Complete(finalCtx, job.ID, w.owner, runID); err != nil {
 			return true, err
 		}
 		if job.InboxEventID != nil {
@@ -64,7 +71,17 @@ func (w *SyncWorker) ProcessOne(ctx context.Context) (bool, error) {
 		}
 		return true, nil
 	}
-	if err := jobService.Fail(ctx, job, w.owner, executeErr); err != nil {
+	if errors.Is(executeErr, ErrSyncNotRunnable) {
+		if err := jobService.cancelLeased(finalCtx, job.ID, w.owner, executeErr); err != nil {
+			return true, err
+		}
+		return true, executeErr
+	}
+	fail := jobService.Fail
+	if isPermanentSyncError(executeErr) {
+		fail = jobService.FailPermanent
+	}
+	if err := fail(finalCtx, job, w.owner, executeErr); err != nil {
 		return true, err
 	}
 	if job.InboxEventID != nil {
@@ -76,6 +93,16 @@ func (w *SyncWorker) ProcessOne(ctx context.Context) (bool, error) {
 }
 
 func (w *SyncWorker) execute(ctx context.Context, job *model.SyncJob) (*uint, error) {
+	jobService := NewSyncJobService(w.db)
+	if err := jobService.ValidateRunnable(job.ConnectionID, job.JobType); err != nil {
+		return nil, err
+	}
+	guard := func(guardCtx context.Context) error {
+		if err := jobService.ValidateLease(guardCtx, job.ID, w.owner); err != nil {
+			return err
+		}
+		return jobService.ValidateRunnable(job.ConnectionID, job.JobType)
+	}
 	syncService := NewDirectorySyncService(w.db)
 	switch job.JobType {
 	case model.SyncJobFullSync, model.SyncJobIncrementalSync, model.SyncJobReconcile, model.SyncJobEventRefresh:
@@ -83,10 +110,15 @@ func (w *SyncWorker) execute(ctx context.Context, job *model.SyncJob) (*uint, er
 		if err != nil {
 			return nil, err
 		}
+		if run.TriggerType != string(job.JobType) {
+			// Another trigger already owns the single approvable snapshot. This
+			// task is coalesced into it and must not auto-approve a manual run.
+			return &run.ID, nil
+		}
 		if err := syncService.ApproveAutomationSafeChanges(run.ID); err != nil {
 			return &run.ID, err
 		}
-		if _, err := syncService.ApplyRun(run.ID, 0); err != nil {
+		if _, err := syncService.ApplyRunWithGuard(ctx, run.ID, 0, guard); err != nil {
 			return &run.ID, err
 		}
 		return &run.ID, nil
@@ -95,7 +127,7 @@ func (w *SyncWorker) execute(ctx context.Context, job *model.SyncJob) (*uint, er
 		if runID == 0 {
 			return nil, fmt.Errorf("apply_changes 任务缺少 runId")
 		}
-		if _, err := syncService.ApplyRun(runID, 0); err != nil {
+		if _, err := syncService.ApplyRunWithGuard(ctx, runID, 0, guard); err != nil {
 			return &runID, err
 		}
 		return &runID, nil
@@ -104,11 +136,28 @@ func (w *SyncWorker) execute(ctx context.Context, job *model.SyncJob) (*uint, er
 	}
 }
 
+func isPermanentSyncError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"credential", "permission", "unauthorized", "forbidden", "invalid secret", "invalid token", "凭据", "权限", "未授权", "密钥错误"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *SyncWorker) Run(ctx context.Context) {
+	w.RunWithContexts(ctx, ctx)
+}
+
+func (w *SyncWorker) RunWithContexts(claimCtx, workCtx context.Context) {
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 	for {
-		processed, err := w.ProcessOne(ctx)
+		processed, err := w.processOne(claimCtx, workCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			helper.GetLogger().Error(fmt.Sprintf("[sync worker] owner=%s: %v", w.owner, err))
 		}
@@ -116,7 +165,7 @@ func (w *SyncWorker) Run(ctx context.Context) {
 			continue
 		}
 		select {
-		case <-ctx.Done():
+		case <-claimCtx.Done():
 			return
 		case <-ticker.C:
 		}
@@ -124,8 +173,11 @@ func (w *SyncWorker) Run(ctx context.Context) {
 }
 
 type SyncWorkerServer struct {
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	schedulerCancel context.CancelFunc
+	claimCancel     context.CancelFunc
+	workCancel      context.CancelFunc
+	schedulerWG     sync.WaitGroup
+	workerWG        sync.WaitGroup
 }
 
 var _ interfaces.ServerInterface = (*SyncWorkerServer)(nil)
@@ -147,19 +199,21 @@ func (s *SyncWorkerServer) Run() error {
 		workerCount = 1
 	}
 	hostname, _ := os.Hostname()
-	ctx, cancel := context.WithCancel(context.Background())
-	s.cancel = cancel
+	claimCtx, claimCancel := context.WithCancel(context.Background())
+	workCtx, workCancel := context.WithCancel(context.Background())
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	s.claimCancel, s.workCancel, s.schedulerCancel = claimCancel, workCancel, schedulerCancel
 	for index := 0; index < workerCount; index++ {
 		worker := NewSyncWorker(db, fmt.Sprintf("%s:%d:%d", hostname, os.Getpid(), index))
-		s.wg.Add(1)
+		s.workerWG.Add(1)
 		go func() {
-			defer s.wg.Done()
-			worker.Run(ctx)
+			defer s.workerWG.Done()
+			worker.RunWithContexts(claimCtx, workCtx)
 		}()
 	}
-	s.wg.Add(1)
+	s.schedulerWG.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer s.schedulerWG.Done()
 		scheduleService := NewSyncScheduleService(db)
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -167,7 +221,7 @@ func (s *SyncWorkerServer) Run() error {
 			_ = scheduleService.EnsureDailyReconciliation(time.Now())
 			_, _ = scheduleService.EnqueueDue(time.Now())
 			select {
-			case <-ctx.Done():
+			case <-schedulerCtx.Done():
 				return
 			case <-ticker.C:
 			}
@@ -177,9 +231,28 @@ func (s *SyncWorkerServer) Run() error {
 }
 
 func (s *SyncWorkerServer) Stop() error {
-	if s.cancel != nil {
-		s.cancel()
+	// Stop producers first, then stop new claims while allowing already leased
+	// work up to 30 seconds to persist a terminal state.
+	if s.schedulerCancel != nil {
+		s.schedulerCancel()
+		s.schedulerWG.Wait()
 	}
-	s.wg.Wait()
+	if s.claimCancel != nil {
+		s.claimCancel()
+	}
+	drained := make(chan struct{})
+	go func() {
+		s.workerWG.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+		return nil
+	case <-time.After(30 * time.Second):
+		if s.workCancel != nil {
+			s.workCancel()
+		}
+		<-drained
+	}
 	return nil
 }

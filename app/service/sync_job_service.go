@@ -17,6 +17,8 @@ const (
 	MaxSyncJobBackoff         = 6 * time.Hour
 )
 
+var ErrSyncNotRunnable = errors.New("同步连接当前不可执行")
+
 type SyncJobListFilter struct {
 	ConnectionID uint
 	JobType      model.SyncJobType
@@ -35,6 +37,9 @@ func (s *SyncJobService) Enqueue(connectionID uint, jobType model.SyncJobType, p
 	}
 	if availableAt.IsZero() {
 		availableAt = time.Now()
+	}
+	if err := s.ValidateRunnable(connectionID, jobType); err != nil {
+		return nil, err
 	}
 	job := &model.SyncJob{
 		ConnectionID: connectionID, InboxEventID: inboxEventID, JobType: jobType,
@@ -66,9 +71,14 @@ func (s *SyncJobService) Claim(ctx context.Context, owner string, leaseDuration 
 	for candidateAttempt := 0; candidateAttempt < 20; candidateAttempt++ {
 		var candidate model.SyncJob
 		err := s.db.WithContext(ctx).
-			Where("available_at <= ? AND ((status IN ?) OR (status = ? AND lease_expires_at <= ?))", now, []model.SyncJobStatus{model.SyncJobPending, model.SyncJobRetryWait}, model.SyncJobLeased, now).
+			Where("attempts < max_attempts AND available_at <= ? AND ((status IN ?) OR (status = ? AND lease_expires_at <= ?))", now, []model.SyncJobStatus{model.SyncJobPending, model.SyncJobRetryWait}, model.SyncJobLeased, now).
 			Order("available_at ASC, id ASC").First(&candidate).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// A worker may die after consuming its last allowed attempt. Expired
+			// leases at the limit are terminal and must never be claimed forever.
+			if deadErr := s.deadLetterExhaustedLeases(ctx, now); deadErr != nil {
+				return nil, deadErr
+			}
 			return nil, nil
 		}
 		if err != nil {
@@ -76,7 +86,7 @@ func (s *SyncJobService) Claim(ctx context.Context, owner string, leaseDuration 
 		}
 		expires := now.Add(leaseDuration)
 		result := s.db.WithContext(ctx).Model(&model.SyncJob{}).
-			Where("id = ? AND available_at <= ? AND ((status IN ?) OR (status = ? AND lease_expires_at <= ?))", candidate.ID, now, []model.SyncJobStatus{model.SyncJobPending, model.SyncJobRetryWait}, model.SyncJobLeased, now).
+			Where("id = ? AND attempts < max_attempts AND available_at <= ? AND ((status IN ?) OR (status = ? AND lease_expires_at <= ?))", candidate.ID, now, []model.SyncJobStatus{model.SyncJobPending, model.SyncJobRetryWait}, model.SyncJobLeased, now).
 			Updates(map[string]any{
 				"status": model.SyncJobLeased, "lease_owner": owner, "lease_expires_at": expires,
 				"attempts": gorm.Expr("attempts + 1"), "finished_at": nil,
@@ -87,12 +97,61 @@ func (s *SyncJobService) Claim(ctx context.Context, owner string, leaseDuration 
 		if result.RowsAffected == 0 {
 			continue
 		}
-		if err := s.db.WithContext(ctx).First(&candidate, candidate.ID).Error; err != nil {
-			return nil, err
+		// Avoid a second SELECT here: on SQLite it can lose to concurrent claim
+		// readers after this worker already won the atomic conditional UPDATE.
+		candidate.Status = model.SyncJobLeased
+		candidate.LeaseOwner = owner
+		candidate.LeaseExpiresAt = &expires
+		candidate.Attempts++
+		candidate.FinishedAt = nil
+		if runnableErr := s.ValidateRunnable(candidate.ConnectionID, candidate.JobType); runnableErr != nil {
+			_ = s.cancelLeased(ctx, candidate.ID, owner, runnableErr)
+			continue
 		}
 		return &candidate, nil
 	}
 	return nil, nil
+}
+
+func (s *SyncJobService) ValidateRunnable(connectionID uint, jobType model.SyncJobType) error {
+	var connection model.IdentityConnection
+	if err := s.db.First(&connection, connectionID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: 同步连接不存在", ErrSyncNotRunnable)
+		}
+		return err
+	}
+	if !connection.IsEnabled() || !connection.HasCapability(model.ConnectionCapabilityDirectorySync) {
+		return fmt.Errorf("%w: 连接已禁用或未启用 directory_sync 能力", ErrSyncNotRunnable)
+	}
+	if jobType == model.SyncJobEventRefresh && !connection.HasCapability(model.ConnectionCapabilityEvents) {
+		return fmt.Errorf("%w: 连接未启用 events 能力", ErrSyncNotRunnable)
+	}
+	var policy model.DirectorySyncPolicy
+	if err := s.db.Where("connection_id = ? AND enabled = ?", connectionID, true).First(&policy).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: 目录同步策略未启用", ErrSyncNotRunnable)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *SyncJobService) cancelLeased(ctx context.Context, jobID uint, owner string, cause error) error {
+	now := time.Now()
+	return s.db.WithContext(ctx).Model(&model.SyncJob{}).
+		Where("id = ? AND status = ? AND lease_owner = ?", jobID, model.SyncJobLeased, owner).
+		Updates(map[string]any{"status": model.SyncJobCancelled, "finished_at": now, "lease_owner": "", "lease_expires_at": nil, "last_error": cause.Error()}).Error
+}
+
+func (s *SyncJobService) deadLetterExhaustedLeases(ctx context.Context, now time.Time) error {
+	return s.db.WithContext(ctx).Model(&model.SyncJob{}).
+		Where("status = ? AND lease_expires_at <= ? AND attempts >= max_attempts", model.SyncJobLeased, now).
+		Updates(map[string]any{
+			"status": model.SyncJobDeadLetter, "finished_at": now,
+			"lease_owner": "", "lease_expires_at": nil,
+			"last_error": "任务租约过期且已达到最大尝试次数",
+		}).Error
 }
 
 func (s *SyncJobService) RenewLease(ctx context.Context, jobID uint, owner string, leaseDuration time.Duration) (bool, error) {
@@ -100,6 +159,19 @@ func (s *SyncJobService) RenewLease(ctx context.Context, jobID uint, owner strin
 		Where("id = ? AND status = ? AND lease_owner = ?", jobID, model.SyncJobLeased, owner).
 		Update("lease_expires_at", time.Now().Add(leaseDuration))
 	return result.RowsAffected == 1, result.Error
+}
+
+func (s *SyncJobService) ValidateLease(ctx context.Context, jobID uint, owner string) error {
+	var count int64
+	err := s.db.WithContext(ctx).Model(&model.SyncJob{}).
+		Where("id = ? AND status = ? AND lease_owner = ? AND lease_expires_at > ?", jobID, model.SyncJobLeased, owner, time.Now()).Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return fmt.Errorf("任务 %d 租约已丢失", jobID)
+	}
+	return nil
 }
 
 func (s *SyncJobService) Complete(ctx context.Context, jobID uint, owner string, runID *uint) error {
@@ -148,6 +220,23 @@ func (s *SyncJobService) Fail(ctx context.Context, job *model.SyncJob, owner str
 	return nil
 }
 
+func (s *SyncJobService) FailPermanent(ctx context.Context, job *model.SyncJob, owner string, cause error) error {
+	if job == nil {
+		return fmt.Errorf("任务不能为空")
+	}
+	now := time.Now()
+	result := s.db.WithContext(ctx).Model(&model.SyncJob{}).
+		Where("id = ? AND status = ? AND lease_owner = ?", job.ID, model.SyncJobLeased, owner).
+		Updates(map[string]any{"status": model.SyncJobDeadLetter, "finished_at": now, "lease_owner": "", "lease_expires_at": nil, "last_error": "需要管理员处理: " + cause.Error()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("任务 %d 租约已丢失，不能记录永久失败", job.ID)
+	}
+	return nil
+}
+
 func SyncJobBackoff(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
@@ -168,7 +257,7 @@ func SyncJobBackoff(attempt int) time.Duration {
 func (s *SyncJobService) Retry(jobID uint) error {
 	result := s.db.Model(&model.SyncJob{}).
 		Where("id = ? AND status IN ?", jobID, []model.SyncJobStatus{model.SyncJobDeadLetter, model.SyncJobRetryWait, model.SyncJobCancelled}).
-		Updates(map[string]any{"status": model.SyncJobPending, "available_at": time.Now(), "lease_owner": "", "lease_expires_at": nil, "finished_at": nil, "last_error": ""})
+		Updates(map[string]any{"status": model.SyncJobPending, "available_at": time.Now(), "attempts": 0, "lease_owner": "", "lease_expires_at": nil, "finished_at": nil, "last_error": ""})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -203,6 +292,16 @@ func (s *SyncJobService) Cancel(jobID uint) error {
 		return fmt.Errorf("任务不存在或已在执行/结束")
 	}
 	return nil
+}
+
+func (s *SyncJobService) CancelConnectionPending(connectionID uint, reason string) error {
+	if !s.db.Migrator().HasTable(&model.SyncJob{}) {
+		return nil
+	}
+	now := time.Now()
+	return s.db.Model(&model.SyncJob{}).
+		Where("connection_id = ? AND status IN ?", connectionID, []model.SyncJobStatus{model.SyncJobPending, model.SyncJobRetryWait}).
+		Updates(map[string]any{"status": model.SyncJobCancelled, "finished_at": now, "lease_owner": "", "lease_expires_at": nil, "last_error": reason}).Error
 }
 
 func (s *SyncJobService) List(filter SyncJobListFilter) ([]model.SyncJob, int64, error) {

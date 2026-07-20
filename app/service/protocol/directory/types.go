@@ -1,17 +1,64 @@
 package directory
 
-import "context"
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+)
 
 // Diagnostic separates connectivity, token and directory-scope checks so the
 // administration UI can explain a partial permission setup precisely.
 type Diagnostic struct {
-	Healthy           bool     `json:"healthy"`
-	TokenValid        bool     `json:"tokenValid"`
-	DirectoryReadable bool     `json:"directoryReadable"`
-	TenantID          string   `json:"tenantId,omitempty"`
-	VisibleOrgUnits   int      `json:"visibleOrgUnits"`
-	VisibleUsers      int      `json:"visibleUsers"`
-	Warnings          []string `json:"warnings"`
+	Healthy             bool              `json:"healthy"`
+	TokenValid          bool              `json:"tokenValid"`
+	DirectoryReadable   bool              `json:"directoryReadable"`
+	TenantID            string            `json:"tenantId,omitempty"`
+	VisibleOrgUnits     int               `json:"visibleOrgUnits"`
+	VisibleUsers        int               `json:"visibleUsers"`
+	Warnings            []string          `json:"warnings"`
+	TraversedOrgUnitIDs []string          `json:"traversedOrgUnitIds"`
+	PaginationComplete  bool              `json:"paginationComplete"`
+	FieldPermissions    map[string]string `json:"fieldPermissions"`
+	ScopeHash           string            `json:"scopeHash"`
+}
+
+type SyncScope struct {
+	RootExternalOrgUnitIDs []string `json:"rootExternalOrgUnitIds"`
+	IncludeDescendants     bool     `json:"includeDescendants"`
+	IncludeInactive        bool     `json:"includeInactive"`
+}
+
+type SnapshotCompleteness struct {
+	TraversedOrgUnitIDs []string          `json:"traversedOrgUnitIds"`
+	PaginationComplete  bool              `json:"paginationComplete"`
+	FieldPermissions    map[string]string `json:"fieldPermissions"`
+	ScopeHash           string            `json:"scopeHash"`
+	Warnings            []string          `json:"warnings"`
+}
+
+type Snapshot struct {
+	OrgUnits     []OrgUnit            `json:"orgUnits"`
+	Users        []User               `json:"users"`
+	Completeness SnapshotCompleteness `json:"completeness"`
+}
+
+// SnapshotReader is implemented by adapters that can traverse an explicit
+// configured scope atomically. Older adapters retain cursor methods until
+// their phase-04 upgrade, while the service still enforces completeness.
+type SnapshotReader interface {
+	ReadSnapshot(ctx context.Context, scope SyncScope) (*Snapshot, error)
+}
+
+func effectiveScope(scope SyncScope, fallbackRoots []string) (SyncScope, string) {
+	if len(scope.RootExternalOrgUnitIDs) == 0 {
+		scope.RootExternalOrgUnitIDs = append([]string(nil), fallbackRoots...)
+	}
+	sort.Strings(scope.RootExternalOrgUnitIDs)
+	encoded, _ := json.Marshal(scope)
+	digest := sha256.Sum256(encoded)
+	return scope, hex.EncodeToString(digest[:])
 }
 
 type Identifier struct {

@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 const jscode2sessionURL = "https://api.weixin.qq.com/sns/jscode2session"
@@ -17,15 +15,15 @@ const jscode2sessionURL = "https://api.weixin.qq.com/sns/jscode2session"
 // 与浏览器 OAuth 不同：前端 wx.login 拿到 js_code 后，由后端直接调用 jscode2session 换取 openid/session_key。
 // 仅实现 CodeFlowAdapter。
 type WeChatMiniProgramAdapter struct {
-	provider *model.SocialProvider
+	provider *Provider
 	client   *http.Client
 }
 
-func NewWeChatMiniProgramAdapter(provider *model.SocialProvider) *WeChatMiniProgramAdapter {
+func NewWeChatMiniProgramAdapter(provider *Provider) *WeChatMiniProgramAdapter {
 	return &WeChatMiniProgramAdapter{provider: provider, client: http.DefaultClient}
 }
 
-func (a *WeChatMiniProgramAdapter) GetProviderType() model.ProviderType {
+func (a *WeChatMiniProgramAdapter) GetProviderType() ProviderType {
 	return a.provider.Type
 }
 

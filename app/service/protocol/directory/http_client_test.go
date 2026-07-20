@@ -7,12 +7,24 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type directoryRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn directoryRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return fn(request)
+}
+
+func TestParseRetryAfterSupportsSecondsAndHTTPDate(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	if got := parseRetryAfter("3", time.Millisecond, now); got != 3*time.Second {
+		t.Fatalf("秒数 Retry-After 解析错误: %s", got)
+	}
+	date := now.Add(4 * time.Second).Format(http.TimeFormat)
+	if got := parseRetryAfter(date, time.Millisecond, now); got != 4*time.Second {
+		t.Fatalf("HTTP-date Retry-After 解析错误: %s", got)
+	}
 }
 
 func TestDirectoryJSONRequestRetriesRateLimitsButNotPermissionErrors(t *testing.T) {

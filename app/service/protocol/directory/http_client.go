@@ -33,7 +33,15 @@ func directoryJSONRequest(ctx context.Context, client *http.Client, method, endp
 		}
 		response, err := client.Do(request)
 		if err != nil {
-			return fmt.Errorf("%s API 网络请求失败: %w", provider, err)
+			if attempt == 2 {
+				return fmt.Errorf("%s API 网络请求失败: %w", provider, err)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+			}
+			continue
 		}
 		body, readErr := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 		_ = response.Body.Close()
@@ -44,14 +52,11 @@ func directoryJSONRequest(ctx context.Context, client *http.Client, method, endp
 			if attempt == 2 {
 				return fmt.Errorf("%s API 暂时不可用: HTTP %d", provider, response.StatusCode)
 			}
-			delay, _ := strconv.Atoi(response.Header.Get("Retry-After"))
-			if delay < 1 || delay > 2 {
-				delay = attempt + 1
-			}
+			delay := parseRetryAfter(response.Header.Get("Retry-After"), time.Duration(attempt+1)*100*time.Millisecond, time.Now())
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(delay) * 100 * time.Millisecond):
+			case <-time.After(delay):
 			}
 			continue
 		}
@@ -64,4 +69,18 @@ func directoryJSONRequest(ctx context.Context, client *http.Client, method, endp
 		return nil
 	}
 	return fmt.Errorf("%s API 请求重试耗尽", provider)
+}
+
+func parseRetryAfter(value string, fallback time.Duration, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if date, err := http.ParseTime(value); err == nil {
+		if delay := date.Sub(now); delay > 0 {
+			return delay
+		}
+		return 0
+	}
+	return fallback
 }

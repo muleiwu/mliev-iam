@@ -24,9 +24,12 @@ func TestExternalEventInboxIsEncryptedAndIdempotent(t *testing.T) {
 	t.Setenv(credentialcrypto.EnvironmentKey, base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
 	db, err := gorm.Open(sqlite.Open("file:event-inbox?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.IdentityConnection{}, &model.IdentityConnectionCredential{}, &model.DirectorySyncRun{}, &model.ExternalEventInbox{}, &model.SyncJob{}))
+	require.NoError(t, db.AutoMigrate(&model.IdentityConnection{}, &model.IdentityConnectionCredential{}, &model.Department{}, &model.DirectorySyncPolicy{}, &model.DirectorySyncRun{}, &model.ExternalEventInbox{}, &model.SyncJob{}))
 	connection := &model.IdentityConnection{Name: "飞书事件", Identifier: "feishu-events", Category: model.ConnectionCategoryEnterprise, ProviderType: "feishu", Capabilities: model.StringList{"directory_sync", "events"}, Status: model.ConnectionStatusEnabled}
 	require.NoError(t, db.Create(connection).Error)
+	root := &model.Department{Name: "事件同步根", Code: "event-root", Status: model.DepartmentStatusEnabled}
+	require.NoError(t, db.Create(root).Error)
+	require.NoError(t, db.Create(&model.DirectorySyncPolicy{ConnectionID: connection.ID, RootDepartmentID: root.ID, MatchPolicy: model.DirectoryMatchManual, DeprovisionPolicy: model.DirectoryDeprovisionBlockIdentityRequireApproval, Enabled: true}).Error)
 	require.NoError(t, NewIdentityConnectionService(db).SaveCredentials(connection.ID, model.CredentialPurposeEvents, map[string]any{"verificationToken": "token"}))
 	factory := func(*model.IdentityConnection, map[string]any) (eventprotocol.Adapter, error) {
 		return fixedEventAdapter{event: &eventprotocol.DirectoryEvent{ProviderEventID: "evt-idempotent", EventType: "contact.user.updated_v3", ObjectType: "user", ExternalObjectID: "u-1", Payload: map[string]any{"email": "secret@example.com"}}}, nil

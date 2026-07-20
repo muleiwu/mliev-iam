@@ -1,18 +1,71 @@
 package controller
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"html/template"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 type ExternalAuthController struct{ BaseResponse }
+
+const externalContinuationCookiePrefix = "external_continuation_"
+
+func continuationCookieName(csrf string) string {
+	digest := sha256.Sum256([]byte(csrf))
+	return externalContinuationCookiePrefix + hex.EncodeToString(digest[:8])
+}
+
+func setContinuationCookie(c httpInterfaces.RouterContextInterface, csrf, continuationID string) {
+	isSecure := c.Request().TLS != nil
+	if isSecure {
+		c.SetSameSite(http.SameSiteNoneMode)
+	} else {
+		c.SetSameSite(http.SameSiteLaxMode)
+	}
+	c.SetCookie(continuationCookieName(csrf), continuationID, 15*60, "/external-auth", "", isSecure, true)
+}
+
+func clearContinuationCookie(c httpInterfaces.RouterContextInterface, csrf string) {
+	c.SetCookie(continuationCookieName(csrf), "", -1, "/external-auth", "", c.Request().TLS != nil, true)
+}
+
+func trustedOpenerOrigin(c httpInterfaces.RouterContextInterface) (string, error) {
+	scheme := "http"
+	if c.Request().TLS != nil || strings.EqualFold(c.Request().Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	defaultOrigin := scheme + "://" + c.Request().Host
+	requested := strings.TrimSpace(c.Query("opener_origin"))
+	if requested == "" {
+		return defaultOrigin, nil
+	}
+	parsed, err := url.Parse(requested)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("opener origin 无效")
+	}
+	originHeader := strings.TrimSpace(c.Request().Header.Get("Origin"))
+	if originHeader != "" && originHeader != requested {
+		return "", fmt.Errorf("opener origin 与请求来源不匹配")
+	}
+	return requested, nil
+}
 
 func (ec ExternalAuthController) GetConnections(c httpInterfaces.RouterContextInterface) {
 	connections, err := service.NewIdentityConnectionService(helper.GetDatabase()).PublicList()
@@ -25,7 +78,22 @@ func (ec ExternalAuthController) GetConnections(c httpInterfaces.RouterContextIn
 
 func (ec ExternalAuthController) Authorize(c httpInterfaces.RouterContextInterface) {
 	identifier := c.Param("identifier")
-	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).GetAuthURL(identifier, c.Query("session_id"))
+	sessionID := c.Query("session_id")
+	if sessionID == "" {
+		ec.Error(c, constants.ErrCodeBadRequest, "缺少 OIDC session_id")
+		return
+	}
+	session, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), sessionID)
+	if err != nil {
+		ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
+		return
+	}
+	openerOrigin, err := trustedOpenerOrigin(c)
+	if err != nil {
+		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).GetAuthURL(identifier, sessionID, openerOrigin, session.BrowserBindingHash)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
@@ -39,7 +107,12 @@ func (ec ExternalAuthController) Bind(c httpInterfaces.RouterContextInterface) {
 		ec.Error(c, constants.ErrCodeUnauthorized, "未登录")
 		return
 	}
-	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).GetBindAuthURL(c.Param("identifier"), userID)
+	openerOrigin, err := trustedOpenerOrigin(c)
+	if err != nil {
+		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).GetBindAuthURL(c.Param("identifier"), userID, openerOrigin)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
@@ -54,13 +127,23 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 		return
 	}
 	authService := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis())
-	stateData, valid := authService.ConsumeState(state)
+	stateData, valid := authService.ConsumeState(c.Request().Context(), state)
 	if !valid {
 		ec.Error(c, constants.ErrCodeBadRequest, "无效或已使用的 state")
 		return
 	}
+	if stateData.ConnectionIdentifier != identifier {
+		ec.Error(c, constants.ErrCodeBadRequest, "OAuth state 与回调连接不匹配")
+		return
+	}
 	if stateData.IsBind() {
-		redirectBindResult(c, authService.BindWithCode(stateData.BindUserID, identifier, code))
+		err := authService.BindWithCode(stateData.BindUserID, identifier, code)
+		ec.popup(c, map[string]any{"type": "external-bind-callback", "success": err == nil, "error": errorText(err)}, stateData.OpenerOrigin, "账号绑定")
+		return
+	}
+	boundSession, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), stateData.SessionID)
+	if err != nil || boundSession.BrowserBindingHash != stateData.BrowserBindingHash {
+		ec.Error(c, constants.ErrCodeUnauthorized, "OAuth 回调浏览器事务校验失败")
 		return
 	}
 	response, err := authService.HandleCallback(identifier, code, stateData.SessionID)
@@ -69,14 +152,13 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 		return
 	}
 	if response.NeedsBind {
-		temp, _ := authService.GetTempProfile(response.BindToken)
-		profilePayload := ""
+		temp, _ := authService.GetTempProfile(response.ContinuationID)
+		externalInfo := map[string]any{}
 		if temp != nil && temp.Profile != nil {
-			profilePayload = fmt.Sprintf(`externalInfo: { nickname: '%s', avatar: '%s', email: '%s', category: '%s' },`,
-				escapeJS(temp.Profile.DisplayName), escapeJS(temp.Profile.Avatar), escapeJS(temp.Profile.Email), escapeJS(string(temp.Category)))
+			externalInfo = map[string]any{"nickname": temp.Profile.DisplayName, "avatar": temp.Profile.Avatar, "email": temp.Profile.Email, "category": temp.Category}
 		}
-		ec.popup(c, fmt.Sprintf(`type: 'oidc-external-callback', needsBind: true, bindToken: '%s', sessionId: '%s', %s`,
-			escapeJS(response.BindToken), escapeJS(response.SessionID), profilePayload), "账号绑定")
+		setContinuationCookie(c, response.ContinuationCSRF, response.ContinuationID)
+		ec.popup(c, map[string]any{"type": "oidc-external-callback", "needsBind": true, "continuationCsrf": response.ContinuationCSRF, "sessionId": response.SessionID, "externalInfo": externalInfo}, stateData.OpenerOrigin, "账号绑定")
 		return
 	}
 	issueUserSessionCookie(c, response.User, false)
@@ -85,7 +167,7 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 			ec.Error(c, constants.ErrCodeInternal, err.Error())
 			return
 		}
-		ec.popup(c, fmt.Sprintf(`type: 'oidc-external-callback', needsBind: false, sessionId: '%s'`, escapeJS(response.SessionID)), "登录成功")
+		ec.popup(c, map[string]any{"type": "oidc-external-callback", "needsBind": false, "sessionId": response.SessionID}, stateData.OpenerOrigin, "登录成功")
 		return
 	}
 	ec.SuccessWithMessage(c, "登录成功", response)
@@ -97,12 +179,27 @@ func (ec ExternalAuthController) BindWithLogin(c httpInterfaces.RouterContextInt
 		ec.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
-	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).BindWithExistingUser(req.BindToken, req.Username, req.Password)
+	continuationID, cookieErr := c.Cookie(continuationCookieName(req.ContinuationCSRF))
+	if cookieErr != nil || continuationID == "" {
+		ec.Error(c, constants.ErrCodeUnauthorized, "continuation Cookie 不存在或已过期")
+		return
+	}
+	authService := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis())
+	if err := authService.CheckContinuationRateLimit(c.Request().Context(), continuationID, c.ClientIP(), req.Username); err != nil {
+		ec.Error(c, constants.ErrCodeTooManyRequests, err.Error())
+		return
+	}
+	if err := captcha.NewManager(helper.GetDatabase()).ValidateForScene("login", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err != nil {
+		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	response, err := authService.BindWithExistingUser(c.Request().Context(), continuationID, req.ContinuationCSRF, req.Username, req.Password)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
-	ec.completeLoginResponse(c, response, req.SessionID, "绑定成功")
+	clearContinuationCookie(c, req.ContinuationCSRF)
+	ec.completeLoginResponse(c, response, response.SessionID, "绑定成功")
 }
 
 func (ec ExternalAuthController) Register(c httpInterfaces.RouterContextInterface) {
@@ -111,12 +208,27 @@ func (ec ExternalAuthController) Register(c httpInterfaces.RouterContextInterfac
 		ec.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
-	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).Register(&req)
+	continuationID, cookieErr := c.Cookie(continuationCookieName(req.ContinuationCSRF))
+	if cookieErr != nil || continuationID == "" {
+		ec.Error(c, constants.ErrCodeUnauthorized, "continuation Cookie 不存在或已过期")
+		return
+	}
+	authService := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis())
+	if err := authService.CheckContinuationRateLimit(c.Request().Context(), continuationID, c.ClientIP(), req.Username); err != nil {
+		ec.Error(c, constants.ErrCodeTooManyRequests, err.Error())
+		return
+	}
+	if err := captcha.NewManager(helper.GetDatabase()).ValidateForScene("register", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err != nil {
+		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	response, err := authService.Register(c.Request().Context(), continuationID, &req)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
-	ec.completeLoginResponse(c, response, req.SessionID, "注册成功")
+	clearContinuationCookie(c, req.ContinuationCSRF)
+	ec.completeLoginResponse(c, response, response.SessionID, "注册成功")
 }
 
 func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContextInterface) {
@@ -124,6 +236,12 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 	if err := c.ShouldBindJSON(&req); err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
+	}
+	if req.SessionID != "" {
+		if _, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), req.SessionID); err != nil {
+			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
+			return
+		}
 	}
 	response, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).HandleMiniProgramLogin(c.Param("identifier"), req.JsCode, req.SessionID)
 	if err != nil {
@@ -139,6 +257,12 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 func (ec ExternalAuthController) CreateMiniProgramQRCode(c httpInterfaces.RouterContextInterface) {
 	var req dto.MPQRCodeCreateRequest
 	_ = c.ShouldBindJSON(&req)
+	if req.SessionID != "" {
+		if _, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), req.SessionID); err != nil {
+			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
+			return
+		}
+	}
 	response, err := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis()).CreateSession(c.Request().Context(), c.Param("identifier"), &req)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
@@ -148,18 +272,24 @@ func (ec ExternalAuthController) CreateMiniProgramQRCode(c httpInterfaces.Router
 }
 
 func (ec ExternalAuthController) GetMiniProgramQRCodeStatus(c httpInterfaces.RouterContextInterface) {
-	response, err := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis()).GetStatusForConnection(c.Request().Context(), c.Param("identifier"), c.Param("ticket"))
+	pollToken := c.Request().Header.Get("X-QR-Poll-Token")
+	response, err := service.NewSocialQRCodeService(helper.GetDatabase(), helper.GetRedis()).GetStatusForConnection(c.Request().Context(), c.Param("identifier"), c.Param("scanHandle"), pollToken)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
 	if response.State == service.QRStateConfirmed && response.SessionID != "" && response.User != nil {
-		if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID); err == nil {
-			response.Token = ""
+		if _, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), response.SessionID); err != nil {
+			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
+			return
 		}
+		_ = service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID)
 	}
 	if response.State == service.QRStateConfirmed && response.User != nil {
 		issueUserSessionCookie(c, response.User, false)
+	}
+	if response.State == service.QRStateNeedsBind && response.ContinuationID != "" {
+		setContinuationCookie(c, response.ContinuationCSRF, response.ContinuationID)
 	}
 	ec.Success(c, response)
 }
@@ -237,7 +367,36 @@ func (ec ExternalAuthController) completeLoginResponse(c httpInterfaces.RouterCo
 	ec.SuccessWithMessage(c, message, response)
 }
 
-func (ec ExternalAuthController) popup(c httpInterfaces.RouterContextInterface, payload, title string) {
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func (ec ExternalAuthController) popup(c httpInterfaces.RouterContextInterface, payload map[string]any, targetOrigin, title string) {
+	payloadJSON, _ := json.Marshal(payload)
+	targetJSON, _ := json.Marshal(targetOrigin)
+	titleJSON, _ := json.Marshal(title)
+	nonceBytes := make([]byte, 18)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		ec.Error(c, constants.ErrCodeInternal, "生成回调页面安全随机数失败")
+		return
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	const document = `<!doctype html><html><head><meta charset="utf-8"><title></title></head><body><script nonce="{{.Nonce}}">document.title={{.Title}};if(window.opener){window.opener.postMessage({{.Payload}},{{.TargetOrigin}})}window.close()</script><p>正在跳转…</p></body></html>`
+	view := struct {
+		Nonce        string
+		Title        template.JS
+		Payload      template.JS
+		TargetOrigin template.JS
+	}{Nonce: nonce, Title: template.JS(titleJSON), Payload: template.JS(payloadJSON), TargetOrigin: template.JS(targetJSON)}
+	var output bytes.Buffer
+	if err := template.Must(template.New("external-auth-callback").Parse(document)).Execute(&output, view); err != nil {
+		ec.Error(c, constants.ErrCodeInternal, "生成回调页面失败")
+		return
+	}
 	c.SetHeader("Content-Type", "text/html; charset=utf-8")
-	c.String(200, fmt.Sprintf(`<!doctype html><html><head><meta charset="utf-8"><title>%s</title></head><body><script>window.opener.postMessage({%s}, '*');window.close();</script><p>正在跳转…</p></body></html>`, escapeJS(title), payload))
+	c.SetHeader("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; base-uri 'none'; frame-ancestors 'none'")
+	c.String(200, "%s", output.String())
 }

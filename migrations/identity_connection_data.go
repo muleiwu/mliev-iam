@@ -46,6 +46,60 @@ type migratedConnectionKey struct {
 	ID       uint
 }
 
+// Legacy row types live only in the versioned migration. Runtime packages do
+// not retain models or DAOs capable of reading the retired tables.
+type legacySocialProvider struct {
+	ID                                                                          uint
+	Name, Identifier, Type, Description                                         string
+	ClientID, ClientSecret, AuthURL, TokenURL, UserInfoURL, RedirectURL, Scopes string
+	Icon                                                                        string
+	SortOrder                                                                   int
+	Status                                                                      int
+	IsDefault                                                                   bool
+	Attributes                                                                  model.JSONObject
+	CreatedAt, UpdatedAt                                                        time.Time
+	Remark                                                                      string
+}
+
+func (legacySocialProvider) TableName() string { return "social_providers" }
+
+type legacyIdentityProvider struct {
+	ID                                                                          uint
+	Name, Identifier, Type, Description                                         string
+	ClientID, ClientSecret, AuthURL, TokenURL, UserInfoURL, RedirectURL, Scopes string
+	Icon                                                                        string
+	SortOrder                                                                   int
+	Status                                                                      int
+	IsDefault                                                                   bool
+	Attributes                                                                  model.JSONObject
+	CreatedAt, UpdatedAt                                                        time.Time
+	Remark                                                                      string
+}
+
+func (legacyIdentityProvider) TableName() string { return "identity_providers" }
+
+type legacySocialAccount struct {
+	ID, UserID, ProviderID uint
+	OpenID, UnionID        string
+	UserInfo               model.JSONObject
+	LastUsedAt             *time.Time
+	LoginCount             int64
+	CreatedAt, UpdatedAt   time.Time
+}
+
+func (legacySocialAccount) TableName() string { return "user_social_accounts" }
+
+type legacyIdentityAccount struct {
+	ID, UserID, ProviderID  uint
+	ExternalUserID, UnionID string
+	UserInfo                model.JSONObject
+	LastUsedAt              *time.Time
+	LoginCount              int64
+	CreatedAt, UpdatedAt    time.Time
+}
+
+func (legacyIdentityAccount) TableName() string { return "user_identity_accounts" }
+
 func migrateLegacyIdentityData(db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("数据库未初始化")
@@ -83,11 +137,11 @@ func migrateLegacyIdentityData(db *gorm.DB) error {
 }
 
 func loadAndValidateLegacyConnections(db *gorm.DB) ([]legacyConnectionSource, error) {
-	var socialProviders []model.SocialProvider
+	var socialProviders []legacySocialProvider
 	if err := db.Where("deleted_at IS NULL").Find(&socialProviders).Error; err != nil {
 		return nil, fmt.Errorf("读取旧社交登录提供商失败: %w", err)
 	}
-	var identityProviders []model.IdentityProvider
+	var identityProviders []legacyIdentityProvider
 	if err := db.Where("deleted_at IS NULL").Find(&identityProviders).Error; err != nil {
 		return nil, fmt.Errorf("读取旧企业身份源失败: %w", err)
 	}
@@ -112,11 +166,11 @@ func loadAndValidateLegacyConnections(db *gorm.DB) ([]legacyConnectionSource, er
 	for _, provider := range socialProviders {
 		source := legacyConnectionSource{
 			Category: model.ConnectionCategorySocial, ID: provider.ID, Name: provider.Name,
-			Identifier: provider.Identifier, ProviderType: provider.Type.String(), Description: provider.Description,
+			Identifier: provider.Identifier, ProviderType: provider.Type, Description: provider.Description,
 			ClientID: provider.ClientID, ClientSecret: provider.ClientSecret, AuthURL: provider.AuthURL,
 			TokenURL: provider.TokenURL, UserInfoURL: provider.UserInfoURL, RedirectURL: provider.RedirectURL,
 			Scopes: provider.Scopes, Icon: provider.Icon, SortOrder: provider.SortOrder,
-			Enabled: provider.Status == model.ProviderStatusEnabled, IsDefault: provider.IsDefault,
+			Enabled: provider.Status == 1, IsDefault: provider.IsDefault,
 			Attributes: provider.Attributes, CreatedAt: provider.CreatedAt, UpdatedAt: provider.UpdatedAt,
 			Remark: provider.Remark,
 		}
@@ -128,11 +182,11 @@ func loadAndValidateLegacyConnections(db *gorm.DB) ([]legacyConnectionSource, er
 	for _, provider := range identityProviders {
 		source := legacyConnectionSource{
 			Category: model.ConnectionCategoryEnterprise, ID: provider.ID, Name: provider.Name,
-			Identifier: provider.Identifier, ProviderType: provider.Type.String(), Description: provider.Description,
+			Identifier: provider.Identifier, ProviderType: provider.Type, Description: provider.Description,
 			ClientID: provider.ClientID, ClientSecret: provider.ClientSecret, AuthURL: provider.AuthURL,
 			TokenURL: provider.TokenURL, UserInfoURL: provider.UserInfoURL, RedirectURL: provider.RedirectURL,
 			Scopes: provider.Scopes, Icon: provider.Icon, SortOrder: provider.SortOrder,
-			Enabled: provider.Status == model.IdentityProviderStatusEnabled, IsDefault: provider.IsDefault,
+			Enabled: provider.Status == 1, IsDefault: provider.IsDefault,
 			Attributes: provider.Attributes, CreatedAt: provider.CreatedAt, UpdatedAt: provider.UpdatedAt,
 			Remark: provider.Remark,
 		}
@@ -148,7 +202,7 @@ func loadAndValidateLegacyConnections(db *gorm.DB) ([]legacyConnectionSource, er
 	return sources, nil
 }
 
-func validateLegacyBindings(db *gorm.DB, social []model.SocialProvider, enterprise []model.IdentityProvider) error {
+func validateLegacyBindings(db *gorm.DB, social []legacySocialProvider, enterprise []legacyIdentityProvider) error {
 	for _, provider := range social {
 		var duplicates int64
 		query := db.Table("user_social_accounts").
@@ -160,6 +214,17 @@ func validateLegacyBindings(db *gorm.DB, social []model.SocialProvider, enterpri
 		}
 		if duplicates > 0 {
 			return fmt.Errorf("旧社交连接 %q 存在同一用户的重复绑定", provider.Identifier)
+		}
+		for _, column := range []string{"open_id", "union_id"} {
+			query := db.Table("user_social_accounts").Select(column).
+				Where("provider_id = ? AND deleted_at IS NULL AND "+column+" IS NOT NULL AND "+column+" <> ''", provider.ID).
+				Group(column).Having("COUNT(*) > 1")
+			if err := db.Table("(?) AS duplicate_identifiers", query).Count(&duplicates).Error; err != nil {
+				return fmt.Errorf("检查旧社交标识 %s 唯一性失败: %w", column, err)
+			}
+			if duplicates > 0 {
+				return fmt.Errorf("旧社交连接 %q 存在重复 %s，无法完整迁移别名", provider.Identifier, column)
+			}
 		}
 	}
 	for _, provider := range enterprise {
@@ -173,6 +238,17 @@ func validateLegacyBindings(db *gorm.DB, social []model.SocialProvider, enterpri
 		}
 		if duplicates > 0 {
 			return fmt.Errorf("旧企业连接 %q 存在同一用户的重复绑定", provider.Identifier)
+		}
+		for _, column := range []string{"external_user_id", "union_id"} {
+			query := db.Table("user_identity_accounts").Select(column).
+				Where("provider_id = ? AND deleted_at IS NULL AND "+column+" IS NOT NULL AND "+column+" <> ''", provider.ID).
+				Group(column).Having("COUNT(*) > 1")
+			if err := db.Table("(?) AS duplicate_identifiers", query).Count(&duplicates).Error; err != nil {
+				return fmt.Errorf("检查旧企业标识 %s 唯一性失败: %w", column, err)
+			}
+			if duplicates > 0 {
+				return fmt.Errorf("旧企业连接 %q 存在重复 %s，无法完整迁移别名", provider.Identifier, column)
+			}
 		}
 	}
 	return nil
@@ -225,7 +301,7 @@ func migrateLegacyConnection(db *gorm.DB, cipher *credentialcrypto.Cipher, sourc
 		if err != nil {
 			return 0, fmt.Errorf("序列化连接 %q 凭据失败: %w", source.Identifier, err)
 		}
-		envelope, err := cipher.Encrypt(plaintext, credentialcrypto.AAD(connection.ID, string(model.CredentialPurposeAuthentication), credentialcrypto.KeyVersion))
+		envelope, err := cipher.Encrypt(plaintext, credentialcrypto.AAD(connection.ID, string(model.CredentialPurposeAuthentication), cipher.ActiveKeyVersion()))
 		if err != nil {
 			return 0, fmt.Errorf("加密连接 %q 凭据失败: %w", source.Identifier, err)
 		}
@@ -246,7 +322,7 @@ func migrateLegacyConnection(db *gorm.DB, cipher *credentialcrypto.Cipher, sourc
 }
 
 func migrateSocialAccounts(db *gorm.DB, connectionIDs map[migratedConnectionKey]uint) (int, error) {
-	var accounts []model.UserSocialAccount
+	var accounts []legacySocialAccount
 	if err := db.Where("deleted_at IS NULL").Find(&accounts).Error; err != nil {
 		return 0, fmt.Errorf("读取旧社交账号绑定失败: %w", err)
 	}
@@ -263,7 +339,7 @@ func migrateSocialAccounts(db *gorm.DB, connectionIDs map[migratedConnectionKey]
 }
 
 func migrateEnterpriseAccounts(db *gorm.DB, connectionIDs map[migratedConnectionKey]uint) (int, error) {
-	var accounts []model.UserIdentityAccount
+	var accounts []legacyIdentityAccount
 	if err := db.Where("deleted_at IS NULL").Find(&accounts).Error; err != nil {
 		return 0, fmt.Errorf("读取旧企业账号绑定失败: %w", err)
 	}

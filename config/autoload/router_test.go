@@ -43,7 +43,7 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "POST", "/external-auth/register")
 	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/login")
 	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/qrcode")
-	router.assertRoute(t, "GET", "/external-auth/:identifier/miniprogram/qrcode/:ticket")
+	router.assertRoute(t, "GET", "/external-auth/:identifier/miniprogram/qrcode/:scanHandle")
 	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/qrcode/scan")
 	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/qrcode/confirm")
 	router.assertRoute(t, "GET", "/api/admin/identity-connections")

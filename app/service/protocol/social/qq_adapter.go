@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"golang.org/x/oauth2"
 )
 
@@ -25,7 +24,7 @@ type QQAdapter struct {
 	*GenericOAuth2Adapter
 }
 
-func NewQQAdapter(provider *model.SocialProvider) *QQAdapter {
+func NewQQAdapter(provider *Provider) *QQAdapter {
 	provider.AuthURL = qqAuthURL
 	provider.TokenURL = qqTokenURL
 	// UserInfoURL 在这里仅作占位；真正的 userinfo 流程由 GetUserInfo 覆写。

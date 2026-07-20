@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 func TestFeishuAdapterMapsUserInfo(t *testing.T) {
@@ -46,8 +44,8 @@ func TestFeishuAdapterMapsUserInfo(t *testing.T) {
 	})
 	client := identityTestClient(handler)
 
-	adapter := NewFeishuAdapter(&model.IdentityProvider{
-		Type:         model.IdentityProviderTypeFeishu,
+	adapter := NewFeishuAdapter(&Provider{
+		Type:         ProviderTypeFeishu,
 		ClientID:     "app_id",
 		ClientSecret: "secret",
 		RedirectURL:  "https://iam.example/identity/callback/feishu",
@@ -101,14 +99,14 @@ func TestWeComAdapterUsesCorpAndAgentConfig(t *testing.T) {
 	})
 	client := identityTestClient(handler)
 
-	adapter := NewWeComAdapter(&model.IdentityProvider{
-		Type:         model.IdentityProviderTypeWeCom,
+	adapter := NewWeComAdapter(&Provider{
+		Type:         ProviderTypeWeCom,
 		ClientID:     "corp_id",
 		ClientSecret: "secret",
 		RedirectURL:  "https://iam.example/identity/callback/wecom",
 		TokenURL:     "https://wecom.test/token",
 		UserInfoURL:  "https://wecom.test/userinfo",
-		Attributes:   model.JSONObject{"agentId": "1000001"},
+		Attributes:   map[string]any{"agentId": "1000001"},
 	})
 	adapter.Client = client
 
@@ -158,8 +156,8 @@ func TestDingTalkAdapterMapsUserInfo(t *testing.T) {
 	})
 	client := identityTestClient(handler)
 
-	adapter := NewDingTalkAdapter(&model.IdentityProvider{
-		Type:         model.IdentityProviderTypeDingTalk,
+	adapter := NewDingTalkAdapter(&Provider{
+		Type:         ProviderTypeDingTalk,
 		ClientID:     "app_key",
 		ClientSecret: "secret",
 		RedirectURL:  "https://iam.example/identity/callback/dingtalk",
