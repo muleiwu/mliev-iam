@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
@@ -33,57 +32,50 @@ const (
 
 const (
 	qrSessionTTL     = 5 * time.Minute
-	qrSessionKey     = "social:mp_qrcode:"
+	qrSessionKey     = "external-auth:miniprogram:qrcode:"
 	qrDefaultPage    = "pages/login-confirm/login-confirm"
 	qrDefaultEnvVer  = "release"
 	weChatWXACodeAPI = "https://api.weixin.qq.com/wxa/getwxacodeunlimit"
 )
 
 // SocialQRCodeService 扫码登录编排。
-// 与 SocialAuthService 共用 redis/DB；票据状态完全落在 Redis。
+// 与 ExternalAuthService 共用 redis/DB；票据状态完全落在 Redis。
 type SocialQRCodeService struct {
-	db              *gorm.DB
-	redis           *redis.Client
-	providerService *SocialProviderService
-	authService     *SocialAuthService
-	accountDAO      *dao.UserSocialAccountDAO
-	userService     *UserService
-	jwtAuthService  *JWTAuthService
-	tokenCache      *WeChatAccessTokenCache
-	httpClient      *http.Client
+	db                *gorm.DB
+	redis             *redis.Client
+	connectionService *IdentityConnectionService
+	authService       *ExternalAuthService
+	userService       *UserService
+	jwtAuthService    *JWTAuthService
+	tokenCache        *WeChatAccessTokenCache
+	httpClient        *http.Client
 }
 
 // NewSocialQRCodeService 创建实例。
 // 依赖复用 SocialAuthService 里已有的工具，避免 JWT/用户服务重复初始化。
 func NewSocialQRCodeService(db *gorm.DB, rdb *redis.Client) *SocialQRCodeService {
-	auth := NewSocialAuthService(db, rdb)
 	return &SocialQRCodeService{
-		db:              db,
-		redis:           rdb,
-		providerService: NewSocialProviderService(db, rdb),
-		authService:     auth,
-		accountDAO:      dao.NewUserSocialAccountDAO(db),
-		userService:     NewUserService(db),
-		jwtAuthService:  newOptionalJWTAuthService(),
-		tokenCache:      NewWeChatAccessTokenCache(rdb),
-		httpClient:      &http.Client{Timeout: 10 * time.Second},
+		db: db, redis: rdb, connectionService: NewIdentityConnectionService(db),
+		authService: NewExternalAuthService(db, rdb), userService: NewUserService(db),
+		jwtAuthService: newOptionalJWTAuthService(), tokenCache: NewWeChatAccessTokenCache(rdb),
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 // qrSession Redis 里存的会话状态
 type qrSession struct {
-	Ticket             string `json:"ticket"`
-	ProviderID         uint   `json:"providerId"`
-	ProviderIdentifier string `json:"providerIdentifier"`
-	State              string `json:"state"`
-	OpenID             string `json:"openId,omitempty"`
-	UnionID            string `json:"unionId,omitempty"`
-	Nickname           string `json:"nickname,omitempty"`
-	Avatar             string `json:"avatar,omitempty"`
-	UserID             uint   `json:"userId,omitempty"`
-	BindToken          string `json:"bindToken,omitempty"`
-	SessionID          string `json:"sessionId,omitempty"`
-	CreatedAt          int64  `json:"createdAt"`
+	Ticket               string `json:"ticket"`
+	ConnectionID         uint   `json:"connectionId"`
+	ConnectionIdentifier string `json:"connectionIdentifier"`
+	State                string `json:"state"`
+	OpenID               string `json:"openId,omitempty"`
+	UnionID              string `json:"unionId,omitempty"`
+	Nickname             string `json:"nickname,omitempty"`
+	Avatar               string `json:"avatar,omitempty"`
+	UserID               uint   `json:"userId,omitempty"`
+	BindToken            string `json:"bindToken,omitempty"`
+	SessionID            string `json:"sessionId,omitempty"`
+	CreatedAt            int64  `json:"createdAt"`
 }
 
 // CreateSession 创建扫码登录票据。
@@ -92,26 +84,29 @@ func (s *SocialQRCodeService) CreateSession(
 	providerIdentifier string,
 	req *dto.MPQRCodeCreateRequest,
 ) (*dto.MPQRCodeCreateResponse, error) {
-	provider, err := s.providerService.GetProviderByIdentifier(providerIdentifier)
+	connection, err := s.connectionService.GetByIdentifier(providerIdentifier)
 	if err != nil {
 		return nil, err
 	}
-	if !provider.IsEnabled() {
+	if !connection.IsEnabled() {
 		return nil, fmt.Errorf("提供商未启用")
 	}
-	if provider.Type != model.ProviderTypeWeChatMiniProgram {
+	if connection.Category != model.ConnectionCategorySocial || connection.ProviderType != string(model.ProviderTypeWeChatMiniProgram) {
 		return nil, fmt.Errorf("提供商 %s 不是微信小程序类型", providerIdentifier)
+	}
+	if _, err := BuildAuthenticationAdapter(s.db, connection, s.redis); err != nil {
+		return nil, err
 	}
 
 	ticket := shortTicket()
 
 	session := qrSession{
-		Ticket:             ticket,
-		ProviderID:         provider.ID,
-		ProviderIdentifier: provider.Identifier,
-		State:              QRStatePending,
-		SessionID:          req.SessionID,
-		CreatedAt:          time.Now().Unix(),
+		Ticket:               ticket,
+		ConnectionID:         connection.ID,
+		ConnectionIdentifier: connection.Identifier,
+		State:                QRStatePending,
+		SessionID:            req.SessionID,
+		CreatedAt:            time.Now().Unix(),
 	}
 	if err := s.saveSession(ctx, &session); err != nil {
 		return nil, err
@@ -132,10 +127,17 @@ func (s *SocialQRCodeService) CreateSession(
 	if envVersion == "" {
 		envVersion = qrDefaultEnvVer
 	}
-	if pngB64, err := s.fetchWxacode(ctx, provider, resp.Scene, page, envVersion); err == nil {
-		resp.QRCode = "data:image/png;base64," + pngB64
+	credentials, credentialErr := s.connectionService.CredentialValues(connection.ID, model.CredentialPurposeAuthentication)
+	clientID, _ := credentials["clientId"].(string)
+	clientSecret, _ := credentials["clientSecret"].(string)
+	if credentialErr == nil {
+		if pngB64, err := s.fetchWxacode(ctx, clientID, clientSecret, resp.Scene, page, envVersion); err == nil {
+			resp.QRCode = "data:image/png;base64," + pngB64
+		} else {
+			fmt.Printf("[qrcode] 拉取小程序码失败: %v\n", err)
+		}
 	} else {
-		fmt.Printf("[qrcode] 拉取小程序码失败: %v\n", err)
+		fmt.Printf("[qrcode] 读取小程序凭据失败: %v\n", credentialErr)
 	}
 
 	return resp, nil
@@ -186,13 +188,48 @@ func (s *SocialQRCodeService) GetStatus(
 			Nickname: session.Nickname,
 			Avatar:   session.Avatar,
 		}
-		// 票据转交给 PC 后续调用 /social/bind-with-login 或 /register-with-social
+		// 票据转交给 PC 后续调用 /external-auth/bind-with-login 或 /external-auth/register
 		// 不在这里删除，避免 PC 页面刷新后丢失引导信息；到期由 Redis TTL 回收
 	case QRStateCanceled:
 		_ = s.deleteSession(ctx, ticket)
 	}
 
 	return resp, nil
+}
+
+func (s *SocialQRCodeService) GetStatusForConnection(ctx context.Context, identifier, ticket string) (*dto.MPQRCodeStatusResponse, error) {
+	if err := s.ensureSessionConnection(ctx, identifier, ticket); err != nil {
+		return nil, err
+	}
+	return s.GetStatus(ctx, ticket)
+}
+
+func (s *SocialQRCodeService) ScanForConnection(ctx context.Context, identifier string, req *dto.MPQRCodeScanRequest) (*dto.MPQRCodeScanResponse, error) {
+	if err := s.ensureSessionConnection(ctx, identifier, req.Ticket); err != nil {
+		return nil, err
+	}
+	return s.Scan(ctx, req)
+}
+
+func (s *SocialQRCodeService) ConfirmForConnection(ctx context.Context, identifier string, req *dto.MPQRCodeConfirmRequest) error {
+	if err := s.ensureSessionConnection(ctx, identifier, req.Ticket); err != nil {
+		return err
+	}
+	return s.Confirm(ctx, req)
+}
+
+func (s *SocialQRCodeService) ensureSessionConnection(ctx context.Context, identifier, ticket string) error {
+	session, err := s.loadSession(ctx, ticket)
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return fmt.Errorf("扫码会话已过期")
+		}
+		return err
+	}
+	if session.ConnectionIdentifier != identifier {
+		return fmt.Errorf("扫码票据不属于连接 %s", identifier)
+	}
+	return nil
 }
 
 // Scan 小程序端扫码上报：用 jsCode 换 openid 并写入会话。
@@ -211,28 +248,30 @@ func (s *SocialQRCodeService) Scan(
 		return nil, fmt.Errorf("扫码会话状态无效: %s", session.State)
 	}
 
-	provider, err := s.providerService.GetProviderByIdentifier(session.ProviderIdentifier)
+	connection, err := s.connectionService.GetByIdentifier(session.ConnectionIdentifier)
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := BuildAuthenticationAdapter(s.db, connection, s.redis)
+	if err != nil {
+		return nil, fmt.Errorf("创建适配器失败: %w", err)
+	}
+	codeFlow, ok := adapter.(protocol.CodeAuthenticationAdapter)
+	if !ok {
+		return nil, fmt.Errorf("提供商 %s 不支持 code 登录流程", connection.Identifier)
+	}
+	profile, err := codeFlow.LoginWithCode(ctx, req.JsCode)
+	if err != nil {
+		return nil, fmt.Errorf("code 登录失败: %w", err)
+	}
+	primary, err := primaryLoginSubject(profile)
 	if err != nil {
 		return nil, err
 	}
 
-	adapter, err := protocol.NewSocialProviderAdapter(provider, s.redis)
-	if err != nil {
-		return nil, fmt.Errorf("创建适配器失败: %w", err)
-	}
-	codeFlow, ok := adapter.(protocol.CodeFlowAdapter)
-	if !ok {
-		return nil, fmt.Errorf("提供商 %s 不支持 code 登录流程", provider.Identifier)
-	}
-
-	socialUser, err := codeFlow.LoginWithCode(ctx, req.JsCode)
-	if err != nil {
-		return nil, fmt.Errorf("code 登录失败: %w", err)
-	}
-
 	// 优先使用小程序上报的 userInfo（来自 wx.getUserProfile）
-	nickname := socialUser.Nickname
-	avatar := socialUser.Avatar
+	nickname := profile.DisplayName
+	avatar := profile.Avatar
 	if req.UserInfo != nil {
 		if req.UserInfo.Nickname != "" {
 			nickname = req.UserInfo.Nickname
@@ -243,22 +282,29 @@ func (s *SocialQRCodeService) Scan(
 	}
 
 	session.State = QRStateScanned
-	session.OpenID = socialUser.OpenID
-	session.UnionID = socialUser.UnionID
+	session.OpenID = primary.Value
+	for _, identifier := range profile.Identifiers {
+		if identifier.Namespace == model.IdentifierNamespaceUnionID {
+			session.UnionID = identifier.Value
+		}
+	}
 	session.Nickname = nickname
 	session.Avatar = avatar
 
 	resp := &dto.MPQRCodeScanResponse{State: QRStateScanned, Nickname: nickname, Avatar: avatar}
 
 	// 查已绑定账号
-	account, err := s.accountDAO.GetByProviderAndOpenID(provider.ID, socialUser.OpenID)
+	var principal model.ExternalPrincipal
+	err = s.db.Joins("JOIN external_identifiers ei ON ei.principal_id = external_principals.id").
+		Where("ei.connection_id = ? AND ei.namespace = ? AND ei.value = ?", connection.ID, model.IdentifierNamespaceLoginSubject, primary.Value).
+		First(&principal).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("查询绑定账号失败: %w", err)
 	}
-	if account != nil {
-		session.UserID = account.UserID
+	if err == nil && principal.UserID != nil && principal.Status == model.PrincipalStatusActive {
+		session.UserID = *principal.UserID
 		resp.PendingAction = "login"
-		if userResp, err := s.userService.GetUserByID(account.UserID); err == nil && userResp != nil {
+		if userResp, err := s.userService.GetUserByID(*principal.UserID); err == nil && userResp != nil {
 			if userResp.Nickname != "" {
 				resp.Nickname = userResp.Nickname
 			}
@@ -269,15 +315,13 @@ func (s *SocialQRCodeService) Scan(
 	} else {
 		// 预先生成 bindToken + 存临时社交信息，手机端确认后 PC 端可以直接拿去走绑定/注册
 		bindToken := uuid.New().String()
-		temp := &TempSocialUserInfo{
-			ProviderID:  provider.ID,
-			OpenID:      socialUser.OpenID,
-			UnionID:     socialUser.UnionID,
-			Nickname:    nickname,
-			Avatar:      avatar,
-			RawUserInfo: socialUser.RawUserInfo,
+		profile.DisplayName = nickname
+		profile.Avatar = avatar
+		temp := ExternalTempProfile{
+			ConnectionID: connection.ID, Profile: profile, Category: connection.Category,
+			Connection: connection.Name, Identifier: connection.Identifier,
 		}
-		if err := s.authService.storeSocialUserTemp(bindToken, temp); err != nil {
+		if err := s.authService.storeJSON(externalTempKeyPrefix+bindToken, temp, 15*time.Minute); err != nil {
 			return nil, fmt.Errorf("存储临时用户信息失败: %w", err)
 		}
 		session.BindToken = bindToken
@@ -361,10 +405,10 @@ type wxacodeErrResp struct {
 
 func (s *SocialQRCodeService) fetchWxacode(
 	ctx context.Context,
-	provider *model.SocialProvider,
+	clientID, clientSecret string,
 	scene, page, envVersion string,
 ) (string, error) {
-	accessToken, err := s.tokenCache.Resolve(ctx, provider.ClientID, provider.ClientSecret)
+	accessToken, err := s.tokenCache.Resolve(ctx, clientID, clientSecret)
 	if err != nil {
 		return "", err
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 func TestFeishuAdapterMapsUserInfo(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			writeJSON(t, w, map[string]any{
 				"code": 0,
@@ -43,17 +43,18 @@ func TestFeishuAdapterMapsUserInfo(t *testing.T) {
 			return
 		}
 		http.NotFound(w, r)
-	}))
-	defer server.Close()
+	})
+	client := identityTestClient(handler)
 
 	adapter := NewFeishuAdapter(&model.IdentityProvider{
 		Type:         model.IdentityProviderTypeFeishu,
 		ClientID:     "app_id",
 		ClientSecret: "secret",
 		RedirectURL:  "https://iam.example/identity/callback/feishu",
-		TokenURL:     server.URL + "/token",
-		UserInfoURL:  server.URL + "/userinfo",
+		TokenURL:     "https://feishu.test/token",
+		UserInfoURL:  "https://feishu.test/userinfo",
 	})
+	adapter.Client = client
 
 	token, err := adapter.ExchangeToken(context.Background(), "code")
 	if err != nil {
@@ -72,7 +73,7 @@ func TestFeishuAdapterMapsUserInfo(t *testing.T) {
 }
 
 func TestWeComAdapterUsesCorpAndAgentConfig(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
 			if r.URL.Query().Get("corpid") != "corp_id" || r.URL.Query().Get("corpsecret") != "secret" {
@@ -97,18 +98,19 @@ func TestWeComAdapterUsesCorpAndAgentConfig(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
+	client := identityTestClient(handler)
 
 	adapter := NewWeComAdapter(&model.IdentityProvider{
 		Type:         model.IdentityProviderTypeWeCom,
 		ClientID:     "corp_id",
 		ClientSecret: "secret",
 		RedirectURL:  "https://iam.example/identity/callback/wecom",
-		TokenURL:     server.URL + "/token",
-		UserInfoURL:  server.URL + "/userinfo",
+		TokenURL:     "https://wecom.test/token",
+		UserInfoURL:  "https://wecom.test/userinfo",
 		Attributes:   model.JSONObject{"agentId": "1000001"},
 	})
+	adapter.Client = client
 
 	authURL := adapter.GetAuthURL("state")
 	if !strings.Contains(authURL, "agentid=1000001") {
@@ -129,7 +131,7 @@ func TestWeComAdapterUsesCorpAndAgentConfig(t *testing.T) {
 }
 
 func TestDingTalkAdapterMapsUserInfo(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/token":
 			writeJSON(t, w, map[string]any{
@@ -153,17 +155,18 @@ func TestDingTalkAdapterMapsUserInfo(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
+	})
+	client := identityTestClient(handler)
 
 	adapter := NewDingTalkAdapter(&model.IdentityProvider{
 		Type:         model.IdentityProviderTypeDingTalk,
 		ClientID:     "app_key",
 		ClientSecret: "secret",
 		RedirectURL:  "https://iam.example/identity/callback/dingtalk",
-		TokenURL:     server.URL + "/token",
-		UserInfoURL:  server.URL + "/userinfo",
+		TokenURL:     "https://dingtalk.test/token",
+		UserInfoURL:  "https://dingtalk.test/userinfo",
 	})
+	adapter.Client = client
 
 	token, err := adapter.ExchangeToken(context.Background(), "auth-code")
 	if err != nil {
@@ -184,4 +187,18 @@ func writeJSON(t *testing.T, w http.ResponseWriter, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type identityRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn identityRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func identityTestClient(handler http.Handler) *http.Client {
+	return &http.Client{Transport: identityRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder.Result(), nil
+	})}
 }

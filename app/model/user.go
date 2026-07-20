@@ -53,6 +53,9 @@ type User struct {
 	PhoneVerifiedAt *time.Time `json:"phoneVerifiedAt"`
 	LoginCount      int64      `gorm:"default:0" json:"loginCount"`
 	FailureCount    int64      `gorm:"default:0" json:"failureCount"`
+	// SessionRevokedAt invalidates stateless IAM JWTs issued at or before this
+	// instant. Directory deprovisioning uses it together with OIDC token revoke.
+	SessionRevokedAt *time.Time `json:"sessionRevokedAt,omitempty"`
 
 	// 时间信息
 	LastLoginAt    *time.Time     `json:"lastLoginAt"`

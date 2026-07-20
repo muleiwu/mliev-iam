@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
+	glebarezsqlite "github.com/glebarez/sqlite"
 	"github.com/pressly/goose/v3"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // dialectMap 归一化驱动名到 goose 方言名。
@@ -38,6 +43,8 @@ const (
 	userFailureCountMigrationVersion         int64 = 20260529000001
 	userFailureCountPreviousMigrationVersion int64 = 20260524000001
 	userFailureCountColumn                         = "failure_count"
+	identityConnectionCreateVersion          int64 = 20260720130000
+	identityConnectionCutoverVersion         int64 = 20260720131000
 )
 
 // gooseVersionRecord 用于通过 GORM 写入 goose 的版本表，避免手工拼接表名和 SQL。
@@ -84,6 +91,12 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 	if logger == nil {
 		logger = stdoutLogger{}
 	}
+	// The unified connection schema always stores encrypted credentials. Check
+	// the deployment key before goose can change any schema, including on an
+	// already-migrated database, so a bad rotation cannot surface at login time.
+	if _, err := credentialcrypto.FromEnvironment(); err != nil {
+		return fmt.Errorf("凭据主密钥检查失败: %w", err)
+	}
 
 	dialect, ok := dialectMap[driver]
 	if !ok {
@@ -109,6 +122,30 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 	}
 
 	currentVersion, _ := goose.GetDBVersion(db)
+	if currentVersion < identityConnectionCreateVersion {
+		if err := goose.UpTo(db, dir, identityConnectionCreateVersion); err != nil {
+			return fmt.Errorf("创建统一身份连接表失败: %w", err)
+		}
+		currentVersion, _ = goose.GetDBVersion(db)
+	}
+
+	if currentVersion >= identityConnectionCreateVersion && currentVersion < identityConnectionCutoverVersion {
+		migrationDB := gormDB
+		if migrationDB == nil {
+			var err error
+			migrationDB, err = openGormOnSQLDB(db, driver)
+			if err != nil {
+				return fmt.Errorf("初始化身份连接数据迁移器失败: %w", err)
+			}
+		}
+		if err := migrateLegacyIdentityData(migrationDB); err != nil {
+			return fmt.Errorf("统一身份连接数据迁移失败（旧表已保留）: %w", err)
+		}
+		if err := goose.UpTo(db, dir, identityConnectionCutoverVersion); err != nil {
+			return fmt.Errorf("删除旧身份连接表失败: %w", err)
+		}
+	}
+
 	if err := goose.Up(db, dir); err != nil {
 		return fmt.Errorf("goose 迁移失败: %w", err)
 	}
@@ -120,6 +157,20 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 	}
 
 	return nil
+}
+
+func openGormOnSQLDB(db *sql.DB, driver string) (*gorm.DB, error) {
+	config := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
+	switch driver {
+	case "mysql", "mariadb":
+		return gorm.Open(mysql.New(mysql.Config{Conn: db}), config)
+	case "postgres", "postgresql":
+		return gorm.Open(postgres.New(postgres.Config{Conn: db}), config)
+	case "sqlite", "sqlite3":
+		return gorm.Open(&glebarezsqlite.Dialector{Conn: db}, config)
+	default:
+		return nil, fmt.Errorf("不支持的数据库驱动: %s", driver)
+	}
 }
 
 // reconcileKnownMySQLSchemaDrift 修复"字段已存在但 goose 版本未记录"的历史漂移。

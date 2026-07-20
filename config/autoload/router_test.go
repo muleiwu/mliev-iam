@@ -33,8 +33,43 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "GET", "/api/user/profile")
 	router.assertRoute(t, "PUT", "/api/user/profile")
 	router.assertRoute(t, "PUT", "/api/user/password")
-	router.assertRoute(t, "GET", "/social/bind-auth/:provider")
-	router.assertRoute(t, "GET", "/identity/bind-auth/:provider")
+	router.assertRoute(t, "GET", "/api/identity-connections")
+	router.assertRoute(t, "GET", "/api/user/external-identities")
+	router.assertRoute(t, "DELETE", "/api/user/external-identities/:id")
+	router.assertRoute(t, "GET", "/external-auth/:identifier/authorize")
+	router.assertRoute(t, "GET", "/external-auth/:identifier/callback")
+	router.assertRoute(t, "GET", "/external-auth/:identifier/bind")
+	router.assertRoute(t, "POST", "/external-auth/bind-with-login")
+	router.assertRoute(t, "POST", "/external-auth/register")
+	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/login")
+	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/qrcode")
+	router.assertRoute(t, "GET", "/external-auth/:identifier/miniprogram/qrcode/:ticket")
+	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/qrcode/scan")
+	router.assertRoute(t, "POST", "/external-auth/:identifier/miniprogram/qrcode/confirm")
+	router.assertRoute(t, "GET", "/api/admin/identity-connections")
+	router.assertRoute(t, "POST", "/api/admin/identity-connections/:id/test")
+	router.assertRoute(t, "GET", "/api/admin/identity-connections/:id/directory-policy")
+	router.assertRoute(t, "POST", "/api/admin/identity-connections/:id/sync-runs")
+	router.assertRoute(t, "GET", "/api/admin/directory-sync-runs/:runId/changes")
+	router.assertRoute(t, "POST", "/api/admin/directory-sync-runs/:runId/apply")
+	router.assertRoute(t, "POST", "/api/admin/directory-sync-changes/:changeId/approve")
+	router.assertRoute(t, "GET", "/api/admin/sync-jobs")
+	router.assertRoute(t, "POST", "/api/admin/sync-jobs/:id/retry")
+	router.assertRoute(t, "GET", "/api/admin/identity-connections/:id/sync-schedules")
+	router.assertRoute(t, "GET", "/api/admin/external-events")
+	router.assertRoute(t, "POST", "/api/admin/external-events/:id/replay")
+	router.assertRoute(t, "GET", "/api/admin/sync-center/summary")
+	router.assertRoute(t, "POST", "/external-events/:identifier")
+	router.assertRoute(t, "GET", "/external-events/:identifier")
+
+	for _, route := range []string{
+		"/social/providers", "/social/auth/:provider", "/social/callback/:provider",
+		"/identity/providers", "/identity/auth/:provider", "/identity/callback/:provider",
+		"/api/admin/social-providers", "/api/admin/identity-providers",
+		"/api/user/social-accounts", "/api/user/identity-accounts",
+	} {
+		router.assertNoRoute(t, "GET", route)
+	}
 
 	if router.middlewarePrefixes["/api/auth"] == 0 {
 		t.Fatal("/api/auth must keep AuthMiddleware protection")

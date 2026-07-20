@@ -158,7 +158,7 @@ type ClientAppearanceConfig struct {
 type ClientFeaturesConfig struct {
 	Registration     bool `json:"registration"`
 	SocialLogin      bool `json:"socialLogin"`
-	IdentityLogin    bool `json:"identityLogin"`
+	EnterpriseLogin  bool `json:"enterpriseLogin"`
 	RememberMe       bool `json:"rememberMe"`
 	ForgotPassword   bool `json:"forgotPassword"`
 	PasswordStrength bool `json:"passwordStrength"`
@@ -206,7 +206,7 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 		Features: ClientFeaturesConfig{
 			Registration:     true,
 			SocialLogin:      true,
-			IdentityLogin:    true,
+			EnterpriseLogin:  true,
 			RememberMe:       true,
 			ForgotPassword:   false,
 			PasswordStrength: true,
