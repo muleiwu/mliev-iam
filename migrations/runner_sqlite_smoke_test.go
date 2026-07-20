@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"database/sql"
-	"fmt"
 	"testing"
 	"time"
 
@@ -28,8 +27,7 @@ func TestSqliteSmoke(t *testing.T) {
 	// 新代码读写依赖的列都存在
 	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at", "failure_count"} {
 		var count int
-		q := fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = '%s'`, col)
-		if err := db.QueryRow(q).Scan(&count); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = ?`, col).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count == 0 {
@@ -129,10 +127,11 @@ func TestReconcileKnownSchemaDriftMarksExistingFailureCountMigration(t *testing.
 	if err := gormDB.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, failure_count INTEGER NOT NULL DEFAULT 0)`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := gormDB.Exec(
-		"INSERT INTO "+goose.TableName()+" (version_id, is_applied, tstamp) VALUES (?, ?, ?)",
-		userFailureCountPreviousMigrationVersion, true, time.Now(),
-	).Error; err != nil {
+	if err := gormDB.Table(goose.TableName()).Create(&gooseVersionRecord{
+		VersionID: userFailureCountPreviousMigrationVersion,
+		IsApplied: true,
+		Timestamp: time.Now(),
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -140,11 +139,10 @@ func TestReconcileKnownSchemaDriftMarksExistingFailureCountMigration(t *testing.
 		t.Fatal(err)
 	}
 
-	var count int
-	if err := gormDB.Raw(
-		"SELECT COUNT(*) FROM "+goose.TableName()+" WHERE version_id = ? AND is_applied = ?",
-		userFailureCountMigrationVersion, true,
-	).Scan(&count).Error; err != nil {
+	var count int64
+	if err := gormDB.Table(goose.TableName()).
+		Where("version_id = ? AND is_applied = ?", userFailureCountMigrationVersion, true).
+		Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
