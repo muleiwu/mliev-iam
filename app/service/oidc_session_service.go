@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -36,6 +38,17 @@ type OIDCSession struct {
 	// 通过 /api/oidc/auth-info 交给前端；前端在 POST /webhook/oidc/consent 时携带，
 	// 服务端使用 subtle.ConstantTimeCompare 校验后再执行授权动作。
 	CsrfToken string `json:"csrf_token"`
+
+	// BrowserBindingHash binds a public session_id to the browser that started
+	// the authorization transaction. The raw secret only exists transiently and
+	// is delivered through an HttpOnly cookie.
+	BrowserBindingHash  string `json:"browser_binding_hash"`
+	BrowserBindingToken string `json:"-"`
+}
+
+type OIDCLoginTicket struct {
+	SessionID    string `json:"session_id"`
+	BrowserToken string `json:"browser_token"`
 }
 
 // newCsrfToken 生成 32 字节随机值并 base64url 编码，用作 CSRF 令牌。
@@ -55,6 +68,8 @@ type OIDCSessionService struct {
 	keyPrefix     string
 	sessionExpiry time.Duration
 }
+
+const oidcLoginTicketPrefix = "oidc:login-ticket:"
 
 // NewOIDCSessionService 创建OIDC会话服务
 func NewOIDCSessionService(redisClient *redis.Client) *OIDCSessionService {
@@ -81,6 +96,11 @@ func (s *OIDCSessionService) CreateSession(
 	if err != nil {
 		return nil, fmt.Errorf("生成CSRF令牌失败: %w", err)
 	}
+	browserToken, err := newCsrfToken()
+	if err != nil {
+		return nil, fmt.Errorf("生成浏览器绑定密钥失败: %w", err)
+	}
+	browserDigest := sha256.Sum256([]byte(browserToken))
 
 	now := time.Now()
 	session := &OIDCSession{
@@ -99,6 +119,8 @@ func (s *OIDCSessionService) CreateSession(
 		CreatedAt:           now,
 		ExpiresAt:           now.Add(s.sessionExpiry),
 		CsrfToken:           csrfToken,
+		BrowserBindingHash:  base64.RawURLEncoding.EncodeToString(browserDigest[:]),
+		BrowserBindingToken: browserToken,
 	}
 
 	if err := s.saveSession(ctx, session); err != nil {
@@ -106,6 +128,63 @@ func (s *OIDCSessionService) CreateSession(
 	}
 
 	return session, nil
+}
+
+func (s *OIDCSessionService) ValidateBrowserBinding(session *OIDCSession, browserToken string) error {
+	if session == nil || session.BrowserBindingHash == "" || browserToken == "" {
+		return errors.New("OIDC 会话缺少浏览器绑定")
+	}
+	digest := sha256.Sum256([]byte(browserToken))
+	actual := base64.RawURLEncoding.EncodeToString(digest[:])
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(session.BrowserBindingHash)) != 1 {
+		return errors.New("OIDC 会话与当前浏览器不匹配")
+	}
+	return nil
+}
+
+func (s *OIDCSessionService) CreateLoginTicket(ctx context.Context, session *OIDCSession) (string, error) {
+	if session == nil || session.SessionID == "" || session.BrowserBindingToken == "" {
+		return "", errors.New("OIDC 会话缺少可兑换的浏览器绑定密钥")
+	}
+	ticket, err := newCsrfToken()
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(OIDCLoginTicket{SessionID: session.SessionID, BrowserToken: session.BrowserBindingToken})
+	if err != nil {
+		return "", err
+	}
+	if err := s.redis.Set(ctx, oidcLoginTicketPrefix+ticket, payload, 2*time.Minute).Err(); err != nil {
+		return "", err
+	}
+	return ticket, nil
+}
+
+// ConsumeLoginTicket is deliberately atomic. Concurrent browser loads cannot
+// redeem the same ticket into two browser-bound sessions.
+func (s *OIDCSessionService) ConsumeLoginTicket(ctx context.Context, ticket string) (*OIDCLoginTicket, error) {
+	if ticket == "" {
+		return nil, errors.New("login ticket 不能为空")
+	}
+	raw, err := s.redis.GetDel(ctx, oidcLoginTicketPrefix+ticket).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, errors.New("login ticket 已过期或已使用")
+	}
+	if err != nil {
+		return nil, err
+	}
+	var value OIDCLoginTicket
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil, errors.New("login ticket 数据无效")
+	}
+	session, err := s.GetSession(ctx, value.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ValidateBrowserBinding(session, value.BrowserToken); err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 // GetSession 获取会话

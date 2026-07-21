@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol/social"
 	"github.com/redis/go-redis/v9"
 )
@@ -45,29 +44,29 @@ type social_OIDCDoc = social.OIDCDoc //nolint:revive
 
 // NewSocialProviderAdapter 按 provider.Type 返回对应适配器。
 // redisClient 用于 OIDC discovery 缓存；传 nil 时 OIDC 依赖 provider 已手填的端点。
-func NewSocialProviderAdapter(provider *model.SocialProvider, redisClient *redis.Client) (SocialProviderAdapter, error) {
+func NewSocialProviderAdapter(provider *social.Provider, redisClient *redis.Client) (SocialProviderAdapter, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("provider 不能为空")
 	}
 
 	switch provider.Type {
-	case model.ProviderTypeGithub:
+	case social.ProviderTypeGithub:
 		return social.NewGitHubAdapter(provider), nil
-	case model.ProviderTypeGoogle:
+	case social.ProviderTypeGoogle:
 		return social.NewGoogleAdapter(provider), nil
-	case model.ProviderTypeQQ:
+	case social.ProviderTypeQQ:
 		return social.NewQQAdapter(provider), nil
-	case model.ProviderTypeWeChat:
+	case social.ProviderTypeWeChat:
 		return social.NewWeChatAdapter(provider), nil
-	case model.ProviderTypeWeChatMiniProgram:
+	case social.ProviderTypeWeChatMiniProgram:
 		return social.NewWeChatMiniProgramAdapter(provider), nil
-	case model.ProviderTypeOIDC:
+	case social.ProviderTypeOIDC:
 		var resolver social.OIDCResolver
 		if redisClient != nil {
 			resolver = &oidcResolverAdapter{cache: NewOIDCDiscoveryCache(redisClient)}
 		}
 		return social.NewOIDCAdapter(provider, resolver)
-	case model.ProviderTypeGeneric, model.ProviderTypeAlipay:
+	case social.ProviderTypeGeneric, social.ProviderTypeAlipay:
 		// 历史枚举：沿用通用 OAuth2 实现（Alipay 作为简单 OAuth2 占位）。
 		return social.NewGenericOAuth2Adapter(provider), nil
 	default:

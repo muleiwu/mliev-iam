@@ -31,9 +31,9 @@ func (s UserStatus) String() string {
 // 用户模型包含用户的基础信息、认证信息和状态管理
 type User struct {
 	// 基础信息
-	// uniqueIndex 与 DeletedAt 组成复合唯一索引，允许同一 UUID/Username/... 在软删后重建。
-	// 注意：MySQL 对 NULL 视为互不相等，所以"活跃（deleted_at IS NULL）状态下的重复值"
-	// 仍需 DAO 层显式检查。现有 userDao 的 CheckUsernameExists 等方法保留此职责。
+	// GORM tags describe the portable bootstrap shape. The versioned migration
+	// replaces these with dialect-specific active-row unique indexes: partial
+	// indexes on PostgreSQL/SQLite and generated active columns on MySQL.
 	ID       uint    `gorm:"primaryKey" json:"id"`
 	UUID     string  `gorm:"uniqueIndex:uk_users_uuid,priority:1;size:36;not null" json:"uuid"`
 	Username string  `gorm:"uniqueIndex:uk_users_username,priority:1;size:50;not null" json:"username" validate:"required,min=3,max=50"`
@@ -53,6 +53,9 @@ type User struct {
 	PhoneVerifiedAt *time.Time `json:"phoneVerifiedAt"`
 	LoginCount      int64      `gorm:"default:0" json:"loginCount"`
 	FailureCount    int64      `gorm:"default:0" json:"failureCount"`
+	// SessionRevokedAt invalidates stateless IAM JWTs issued at or before this
+	// instant. Directory deprovisioning uses it together with OIDC token revoke.
+	SessionRevokedAt *time.Time `json:"sessionRevokedAt,omitempty"`
 
 	// 时间信息
 	LastLoginAt    *time.Time     `json:"lastLoginAt"`

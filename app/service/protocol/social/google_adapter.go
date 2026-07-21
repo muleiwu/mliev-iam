@@ -2,8 +2,6 @@ package social
 
 import (
 	"fmt"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 const (
@@ -17,7 +15,7 @@ type GoogleAdapter struct {
 	*GenericOAuth2Adapter
 }
 
-func NewGoogleAdapter(provider *model.SocialProvider) *GoogleAdapter {
+func NewGoogleAdapter(provider *Provider) *GoogleAdapter {
 	provider.AuthURL = googleAuthURL
 	provider.TokenURL = googleTokenURL
 	provider.UserInfoURL = googleUserInfoURL

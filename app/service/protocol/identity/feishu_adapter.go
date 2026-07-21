@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"time"
-
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
 const (
@@ -20,7 +18,7 @@ type FeishuAdapter struct {
 	baseAdapter
 }
 
-func NewFeishuAdapter(provider *model.IdentityProvider) *FeishuAdapter {
+func NewFeishuAdapter(provider *Provider) *FeishuAdapter {
 	return &FeishuAdapter{baseAdapter: newBaseAdapter(provider)}
 }
 

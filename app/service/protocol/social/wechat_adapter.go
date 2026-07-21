@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"time"
 
-	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"golang.org/x/oauth2"
 )
 
@@ -29,7 +28,7 @@ type WeChatAdapter struct {
 	*GenericOAuth2Adapter
 }
 
-func NewWeChatAdapter(provider *model.SocialProvider) *WeChatAdapter {
+func NewWeChatAdapter(provider *Provider) *WeChatAdapter {
 	provider.AuthURL = wechatAuthURL
 	provider.TokenURL = wechatTokenURL
 	provider.UserInfoURL = wechatUserInfoURL

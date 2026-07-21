@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"github.com/glebarez/sqlite"
@@ -17,6 +19,7 @@ import (
 
 func newMigratedTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	t.Setenv(credentialcrypto.EnvironmentKey, base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

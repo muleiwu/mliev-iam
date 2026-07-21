@@ -1,14 +1,20 @@
 package middleware
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"gorm.io/gorm"
 )
 
 // AdminCookieName 管理员 Access Token 的 HttpOnly Cookie 名
@@ -44,11 +50,48 @@ func validateTokenCandidates(jwtAuthService *service.JWTAuthService, candidates 
 	for _, token := range candidates {
 		claims, err := jwtAuthService.ValidateToken(token)
 		if err == nil {
-			return claims, nil
+			if err = validateUserSession(claims); err == nil {
+				return claims, nil
+			}
 		}
 		lastErr = err
 	}
 	return nil, lastErr
+}
+
+func validateUserSession(claims *jwt.Claims) error {
+	return validateUserSessionWithDB(helper.GetDatabase(), claims)
+}
+
+func validateUserSessionWithDB(database *gorm.DB, claims *jwt.Claims) error {
+	if claims == nil || claims.IssuedAt == nil {
+		return fmt.Errorf("令牌缺少签发时间")
+	}
+	if database == nil {
+		return fmt.Errorf("用户状态校验失败")
+	}
+	var state struct {
+		Status           int
+		IsActivated      bool
+		SessionRevokedAt *time.Time
+	}
+	// 显式 SELECT * 让数据库只返回实际存在的列。旧部署在执行
+	// 20260720150000 迁移前没有 session_revoked_at；直接点名该列会让一个
+	// 已成功登录的有效用户被误判为“不存在”。迁移完成后 GORM 仍会正常把该列
+	// 扫描进 SessionRevokedAt，从而保留会话撤销检查。
+	if err := database.Table("users").Select("*").Where("id = ? AND deleted_at IS NULL", claims.UserID).Take(&state).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("用户不存在或不可用")
+		}
+		return fmt.Errorf("用户状态校验失败")
+	}
+	if state.Status != int(model.UserStatusActive) || !state.IsActivated {
+		return fmt.Errorf("用户已停用")
+	}
+	if state.SessionRevokedAt != nil && !claims.IssuedAt.Time.After(*state.SessionRevokedAt) {
+		return fmt.Errorf("会话已撤销")
+	}
+	return nil
 }
 
 // authenticate 校验请求凭据并写入用户上下文（不推进 handler 链）。

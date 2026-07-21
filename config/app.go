@@ -1,6 +1,7 @@
 package config
 
 import (
+	appService "cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	cacheAssembly "cnb.cool/mliev/open/go-web/pkg/server/cache/assembly"
@@ -35,6 +36,7 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 func (a App) Servers() []interfaces.ServerInterface {
 	return []interfaces.ServerInterface{
 		&migrations.Server{},
+		&appService.SyncWorkerServer{},
 		&service.HttpServer{},
 	}
 }
