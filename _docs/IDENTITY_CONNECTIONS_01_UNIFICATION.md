@@ -92,11 +92,11 @@ type AuthenticationAdapter interface {
 
 - `connection_id + purpose` 唯一。
 - `ciphertext`、`nonce` 均保存 Base64 文本。
-- `algorithm` 固定 `AES-256-GCM`，`key_version` 首期固定 `1`。
+- `algorithm` 固定 `AES-256-GCM`；`key_version` 记录实际加密版本，支持多版本密钥环和渐进轮换。
 - `rotated_at`、`created_at`、`updated_at`。
 - API 只返回 `configured`、`keyVersion`、`rotatedAt`，永不返回密文或明文。
 
-凭据 JSON 按提供商存储，认证用途至少保留旧 `client_id/client_secret`。加密使用环境变量 `IDENTITY_CREDENTIALS_KEY`，其值必须是 Base64 编码的 32 字节随机密钥；AAD 为 `connection_id:purpose:key_version`。
+凭据 JSON 按提供商存储，认证用途至少保留旧 `client_id/client_secret`。部署优先使用 `IDENTITY_CREDENTIALS_KEYS` 与 `IDENTITY_CREDENTIALS_ACTIVE_KEY_VERSION`；`IDENTITY_CREDENTIALS_KEY` 仅作为 version 1 兼容输入。每把密钥必须是 Base64 编码的 32 字节随机密钥，AAD 为 `connection_id:purpose:key_version`。完整配置、轮换和恢复流程见[身份凭据主密钥使用与轮换指南](./IDENTITY_CREDENTIALS_KEY_MANAGEMENT.md)。
 
 ### 4.3 `external_principals`
 
