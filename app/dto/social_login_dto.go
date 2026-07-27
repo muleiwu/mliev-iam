@@ -16,13 +16,14 @@ type SocialAuthCallbackRequest struct {
 
 // SocialAuthCallbackResponse OAuth回调响应（登录成功）
 type SocialAuthCallbackResponse struct {
-	Token            string        `json:"token"`     // JWT访问令牌
-	User             *UserResponse `json:"user"`      // 用户信息
-	IsNewUser        bool          `json:"isNewUser"` // 是否为新注册用户
-	NeedsBind        bool          `json:"needsBind"` // 是否需要绑定已有账号
-	ContinuationID   string        `json:"-"`         // 仅服务端用于设置 HttpOnly continuation Cookie
-	ContinuationCSRF string        `json:"continuationCsrf,omitempty"`
-	SessionID        string        `json:"sessionId,omitempty"` // OIDC会话ID（用于OIDC流程）
+	Token            string                `json:"token"`     // JWT访问令牌
+	User             *UserResponse         `json:"user"`      // 用户信息
+	IsNewUser        bool                  `json:"isNewUser"` // 是否为新注册用户
+	NeedsBind        bool                  `json:"needsBind"` // 是否需要绑定已有账号
+	Error            *AuthorizationFailure `json:"error,omitempty"`
+	ContinuationID   string                `json:"-"` // 仅服务端用于设置 HttpOnly continuation Cookie
+	ContinuationCSRF string                `json:"continuationCsrf,omitempty"`
+	SessionID        string                `json:"sessionId,omitempty"` // OIDC会话ID（用于OIDC流程）
 }
 
 // SocialBindWithLoginRequest 用社交账号绑定已有账户
@@ -81,14 +82,15 @@ type MPQRCodeCreateResponse struct {
 }
 
 // MPQRCodeStatusResponse 扫码状态查询响应
-// state 可取值：pending / scanned / confirmed / needs_bind / canceled / expired
+// state 可取值：pending / scanned / confirmed / needs_bind / access_denied / canceled / expired
 type MPQRCodeStatusResponse struct {
-	State            string         `json:"state"`
-	User             *UserResponse  `json:"-"` // 仅供 controller 签发 HttpOnly Cookie
-	ContinuationID   string         `json:"-"` // 仅供 controller 设置 continuation Cookie
-	ContinuationCSRF string         `json:"continuationCsrf,omitempty"`
-	SocialInfo       *MPSocialBrief `json:"socialInfo,omitempty"`
-	SessionID        string         `json:"sessionId,omitempty"`
+	State            string                `json:"state"`
+	User             *UserResponse         `json:"-"` // 仅供 controller 签发 HttpOnly Cookie
+	ContinuationID   string                `json:"-"` // 仅供 controller 设置 continuation Cookie
+	ContinuationCSRF string                `json:"continuationCsrf,omitempty"`
+	SocialInfo       *MPSocialBrief        `json:"socialInfo,omitempty"`
+	SessionID        string                `json:"sessionId,omitempty"`
+	Error            *AuthorizationFailure `json:"error,omitempty"`
 }
 
 // MPSocialBrief 供 PC 在"注册/绑定"抉择页展示的最小社交资料

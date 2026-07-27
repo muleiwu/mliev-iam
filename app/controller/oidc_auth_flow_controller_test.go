@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -109,6 +110,79 @@ func TestBuildFlowStatusClientIncludesApplicationIcon(t *testing.T) {
 	}
 	if client.Logo != app.Icon {
 		t.Fatalf("logo = %q, want %q", client.Logo, app.Icon)
+	}
+}
+
+func TestBuildOIDCErrorRedirectURLPreservesRegisteredQueryAndState(t *testing.T) {
+	redirectURL, err := buildOIDCErrorRedirectURL(
+		"https://client.example/callback?tenant=alpha",
+		"access_denied",
+		"您没有访问此应用的权限",
+		"state with + / 中文",
+	)
+	if err != nil {
+		t.Fatalf("build error redirect URL: %v", err)
+	}
+
+	parsed, err := url.Parse(redirectURL)
+	if err != nil {
+		t.Fatalf("parse redirect URL: %v", err)
+	}
+	query := parsed.Query()
+	if query.Get("tenant") != "alpha" {
+		t.Fatalf("registered query was lost: %q", parsed.RawQuery)
+	}
+	if query.Get("error") != oidcAccessDeniedCode {
+		t.Fatalf("error = %q, want %q", query.Get("error"), oidcAccessDeniedCode)
+	}
+	if query.Get("error_description") != oidcAccessDeniedDescription {
+		t.Fatalf("error_description = %q", query.Get("error_description"))
+	}
+	if query.Get("state") != "state with + / 中文" {
+		t.Fatalf("state = %q, want original value", query.Get("state"))
+	}
+}
+
+func TestCheckOIDCUserAccessReturnsTerminalFailure(t *testing.T) {
+	db := registerControllerTestDatabase(t)
+	app := &model.Application{
+		UUID:         "restricted-client",
+		Name:         "受限应用",
+		ProtocolType: string(model.ProtocolTypeOIDC),
+		ProtocolConfig: map[string]interface{}{
+			"clientId":     "restricted-client",
+			"redirectUris": []interface{}{"https://client.example/callback"},
+		},
+		AccessScope: &model.ApplicationAccessScope{UserIDs: []uint{42}},
+		IsActive:    true,
+	}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+	session := &service.OIDCSession{
+		ClientID:    app.UUID,
+		RedirectURI: "https://client.example/callback",
+		State:       "original-state",
+	}
+
+	if _, failure, err := checkOIDCUserAccess(session, 42); err != nil || failure != nil {
+		t.Fatalf("directly authorized user was rejected: failure=%+v err=%v", failure, err)
+	}
+
+	_, failure, err := checkOIDCUserAccess(session, 7)
+	if err != nil {
+		t.Fatalf("check denied user: %v", err)
+	}
+	if failure == nil || failure.Code != oidcAccessDeniedCode ||
+		failure.Description != oidcAccessDeniedDescription {
+		t.Fatalf("unexpected failure: %+v", failure)
+	}
+	parsed, err := url.Parse(failure.RedirectURL)
+	if err != nil {
+		t.Fatalf("parse failure redirect: %v", err)
+	}
+	if parsed.Query().Get("state") != session.State {
+		t.Fatalf("redirect state = %q, want %q", parsed.Query().Get("state"), session.State)
 	}
 }
 

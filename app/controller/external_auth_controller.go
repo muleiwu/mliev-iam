@@ -161,15 +161,30 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 		ec.popup(c, map[string]any{"type": "oidc-external-callback", "needsBind": true, "continuationCsrf": response.ContinuationCSRF, "sessionId": response.SessionID, "externalInfo": externalInfo}, stateData.OpenerOrigin, "账号绑定")
 		return
 	}
-	issueUserSessionCookie(c, response.User, false)
 	if response.SessionID != "" {
+		failure, err := terminalOIDCFailure(c, boundSession, response.User.ID)
+		if err != nil {
+			ec.Error(c, constants.ErrCodeInternal, err.Error())
+			return
+		}
+		if failure != nil {
+			ec.popup(c, map[string]any{
+				"type":      "oidc-external-callback",
+				"needsBind": false,
+				"sessionId": response.SessionID,
+				"error":     failure,
+			}, stateData.OpenerOrigin, "登录失败")
+			return
+		}
 		if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID); err != nil {
 			ec.Error(c, constants.ErrCodeInternal, err.Error())
 			return
 		}
+		issueUserSessionCookie(c, response.User, false)
 		ec.popup(c, map[string]any{"type": "oidc-external-callback", "needsBind": false, "sessionId": response.SessionID}, stateData.OpenerOrigin, "登录成功")
 		return
 	}
+	issueUserSessionCookie(c, response.User, false)
 	ec.SuccessWithMessage(c, "登录成功", response)
 }
 
@@ -237,8 +252,11 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 		ec.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
+	var boundSession *service.OIDCSession
 	if req.SessionID != "" {
-		if _, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), req.SessionID); err != nil {
+		var err error
+		boundSession, err = getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), req.SessionID)
+		if err != nil {
 			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
 			return
 		}
@@ -249,6 +267,23 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 		return
 	}
 	if response.User != nil {
+		if boundSession != nil {
+			failure, err := terminalOIDCFailure(c, boundSession, response.User.ID)
+			if err != nil {
+				ec.Error(c, constants.ErrCodeInternal, err.Error())
+				return
+			}
+			if failure != nil {
+				response.Token = ""
+				response.Error = failure
+				ec.Success(c, response)
+				return
+			}
+			if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), req.SessionID, response.User.ID); err != nil {
+				ec.Error(c, constants.ErrCodeInternal, err.Error())
+				return
+			}
+		}
 		issueUserSessionCookie(c, response.User, false)
 	}
 	ec.Success(c, response)
@@ -279,11 +314,27 @@ func (ec ExternalAuthController) GetMiniProgramQRCodeStatus(c httpInterfaces.Rou
 		return
 	}
 	if response.State == service.QRStateConfirmed && response.SessionID != "" && response.User != nil {
-		if _, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), response.SessionID); err != nil {
+		boundSession, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), response.SessionID)
+		if err != nil {
 			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
 			return
 		}
-		_ = service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID)
+		failure, err := terminalOIDCFailure(c, boundSession, response.User.ID)
+		if err != nil {
+			ec.Error(c, constants.ErrCodeInternal, err.Error())
+			return
+		}
+		if failure != nil {
+			response.State = oidcAccessDeniedCode
+			response.Error = failure
+			response.User = nil
+			ec.Success(c, response)
+			return
+		}
+		if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID); err != nil {
+			ec.Error(c, constants.ErrCodeInternal, err.Error())
+			return
+		}
 	}
 	if response.State == service.QRStateConfirmed && response.User != nil {
 		issueUserSessionCookie(c, response.User, false)
@@ -359,12 +410,57 @@ func (ec ExternalAuthController) completeLoginResponse(c httpInterfaces.RouterCo
 		return
 	}
 	if sessionID != "" {
-		if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), sessionID, response.User.ID); err == nil {
-			response.Token = ""
+		sessionService := service.NewOIDCSessionService(helper.GetRedis())
+		session, err := getBoundOIDCSession(c, sessionService, sessionID)
+		if err != nil {
+			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
+			return
+		}
+		failure, err := terminalOIDCFailure(c, session, response.User.ID)
+		if err != nil {
+			ec.Error(c, constants.ErrCodeInternal, err.Error())
+			return
+		}
+		response.Token = ""
+		if failure != nil {
+			response.Error = failure
+			if response.IsNewUser {
+				message = "注册成功，但" + failure.Description
+			} else {
+				message = failure.Description
+			}
+			ec.SuccessWithMessage(c, message, response)
+			return
+		}
+		if err := sessionService.MarkAsAuthenticated(c.Request().Context(), sessionID, response.User.ID); err != nil {
+			ec.Error(c, constants.ErrCodeInternal, err.Error())
+			return
 		}
 	}
 	issueUserSessionCookie(c, response.User, false)
 	ec.SuccessWithMessage(c, message, response)
+}
+
+func terminalOIDCFailure(
+	c httpInterfaces.RouterContextInterface,
+	session *service.OIDCSession,
+	userID uint,
+) (*dto.AuthorizationFailure, error) {
+	_, failure, err := checkOIDCUserAccess(session, userID)
+	if err != nil {
+		failure, err = newOIDCFailure(session, "server_error", "检查应用访问权限失败")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if failure == nil {
+		return nil, nil
+	}
+	sessionService := service.NewOIDCSessionService(helper.GetRedis())
+	if err := markOIDCSessionFailed(c.Request().Context(), sessionService, session.SessionID, failure); err != nil {
+		return nil, err
+	}
+	return failure, nil
 }
 
 func errorText(err error) string {
