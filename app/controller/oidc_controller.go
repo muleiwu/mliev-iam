@@ -26,19 +26,20 @@ type OIDCController struct {
 func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 	var req dto.AuthorizeRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		if req.RedirectURI == "" {
-			oc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
-			return
-		}
-		oc.redirectWithError(c, req.RedirectURI, "invalid_request", "请求参数错误", req.State)
+		// redirect_uri 尚未完成客户端精确匹配校验时绝不能用于重定向。
+		oc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
 
 	// 1. 验证客户端应用
 	appService := service.NewApplicationService(helper.GetDatabase())
-	_, err := appService.GetApplicationByClientID(req.ClientID)
+	app, err := appService.GetApplicationByClientID(req.ClientID)
 	if err != nil {
-		oc.redirectWithError(c, req.RedirectURI, "invalid_client", "无效的客户端", req.State)
+		oc.Error(c, constants.ErrCodeBadRequest, "无效的客户端")
+		return
+	}
+	if err := validateOIDCRedirectURI(app, req.RedirectURI); err != nil {
+		oc.Error(c, constants.ErrCodeBadRequest, "无效的重定向URI")
 		return
 	}
 
@@ -80,7 +81,9 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 
 	// 4. prompt=login 强制重新认证、prompt=create 直达注册，其余尝试 SSO 自动认证（不中断交互式流程，仅标记会话）
 	if !promptHas(req.Prompt, "login") && !promptHas(req.Prompt, "create") {
-		_ = oc.trySSO(c, sessionService, session, req, false)
+		if oc.trySSO(c, sessionService, session, req, false) {
+			return
+		}
 	}
 
 	loginTicket, err := sessionService.CreateLoginTicket(rctx, session)
@@ -449,6 +452,30 @@ func (oc OIDCController) trySSO(
 		return false
 	}
 
+	// 在旋转全局 SSO Cookie、认证事务或签发新 Token 前检查目标应用范围。
+	_, failure, accessErr := checkOIDCUserAccess(session, oldToken.UserID)
+	if accessErr != nil {
+		if silent {
+			sessionService.DeleteSession(rctx, session.SessionID)
+			oc.redirectWithError(c, req.RedirectURI, "server_error", "检查应用访问权限失败", req.State)
+			return true
+		}
+		failure, failureErr := newOIDCFailure(session, "server_error", "检查应用访问权限失败")
+		if failureErr == nil {
+			_ = markOIDCSessionFailed(rctx, sessionService, session.SessionID, failure)
+		}
+		return false
+	}
+	if failure != nil {
+		if silent {
+			sessionService.DeleteSession(rctx, session.SessionID)
+			oc.redirectWithError(c, req.RedirectURI, failure.Code, failure.Description, req.State)
+			return true
+		}
+		_ = markOIDCSessionFailed(rctx, sessionService, session.SessionID, failure)
+		return false
+	}
+
 	// 检查补充信息
 	authFlowCtrl := OIDCAuthFlowController{}
 	missingFields := authFlowCtrl.checkMissingUserInfo(req.Scope, user)
@@ -482,7 +509,7 @@ func (oc OIDCController) trySSO(
 		// 后续的 Consent 接口不会写 cookie，若不在这里续发，
 		// 浏览器将持有已撤销的凭证，下次访问被迫重新输入密码
 		oc.reissueSSOCookie(c, session, oldToken.UserID)
-		return true
+		return false
 	}
 
 	// silent 模式：直接完成授权码签发并重定向

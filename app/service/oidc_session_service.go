@@ -11,28 +11,30 @@ import (
 	"fmt"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
 // OIDCSession OIDC授权会话
 type OIDCSession struct {
-	SessionID           string    `json:"session_id"`
-	ClientID            string    `json:"client_id"`
-	RedirectURI         string    `json:"redirect_uri"`
-	Scope               string    `json:"scope"`
-	State               string    `json:"state"`
-	Nonce               string    `json:"nonce"`
-	ResponseType        string    `json:"response_type"`
-	CodeChallenge       string    `json:"code_challenge,omitempty"`
-	CodeChallengeMethod string    `json:"code_challenge_method,omitempty"`
-	Prompt              string    `json:"prompt,omitempty"`
-	UserID              *uint     `json:"user_id,omitempty"`
-	IsAuthenticated     bool      `json:"is_authenticated"`
-	IsConsentGranted    bool      `json:"is_consent_granted"`
-	AuthTime            time.Time `json:"auth_time,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	ExpiresAt           time.Time `json:"expires_at"`
+	SessionID           string                    `json:"session_id"`
+	ClientID            string                    `json:"client_id"`
+	RedirectURI         string                    `json:"redirect_uri"`
+	Scope               string                    `json:"scope"`
+	State               string                    `json:"state"`
+	Nonce               string                    `json:"nonce"`
+	ResponseType        string                    `json:"response_type"`
+	CodeChallenge       string                    `json:"code_challenge,omitempty"`
+	CodeChallengeMethod string                    `json:"code_challenge_method,omitempty"`
+	Prompt              string                    `json:"prompt,omitempty"`
+	UserID              *uint                     `json:"user_id,omitempty"`
+	IsAuthenticated     bool                      `json:"is_authenticated"`
+	IsConsentGranted    bool                      `json:"is_consent_granted"`
+	AuthTime            time.Time                 `json:"auth_time,omitempty"`
+	Error               *dto.AuthorizationFailure `json:"error,omitempty"`
+	CreatedAt           time.Time                 `json:"created_at"`
+	ExpiresAt           time.Time                 `json:"expires_at"`
 
 	// CsrfToken 绑定到会话的一次性 CSRF 令牌。由服务端在 CreateSession 时生成，
 	// 通过 /api/oidc/auth-info 交给前端；前端在 POST /webhook/oidc/consent 时携带，
@@ -227,7 +229,26 @@ func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID 
 	session.UserID = &userID
 	session.IsAuthenticated = true
 	session.AuthTime = time.Now()
+	session.Error = nil
 	session.ExpiresAt = time.Now().Add(30 * time.Minute)
+
+	return s.UpdateSession(ctx, session)
+}
+
+// MarkAsFailed records a terminal authorization failure without authenticating
+// the OIDC transaction. The original request is preserved so the frontend can
+// display the outcome and safely return to the validated client redirect URI.
+func (s *OIDCSessionService) MarkAsFailed(ctx context.Context, sessionID string, failure *dto.AuthorizationFailure) error {
+	session, err := s.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	session.UserID = nil
+	session.IsAuthenticated = false
+	session.IsConsentGranted = false
+	session.AuthTime = time.Time{}
+	session.Error = failure
 
 	return s.UpdateSession(ctx, session)
 }
@@ -312,6 +333,7 @@ func resetAuthenticationState(session *OIDCSession) error {
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false
 	session.AuthTime = time.Time{}
+	session.Error = nil
 	session.CsrfToken = csrfToken
 
 	return nil

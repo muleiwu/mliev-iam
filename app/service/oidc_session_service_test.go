@@ -3,6 +3,8 @@ package service
 import (
 	"testing"
 	"time"
+
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 )
 
 func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
@@ -22,7 +24,12 @@ func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
 		IsAuthenticated:     true,
 		IsConsentGranted:    true,
 		AuthTime:            authTime,
-		CsrfToken:           "old-csrf-token",
+		Error: &dto.AuthorizationFailure{
+			Code:        "access_denied",
+			Description: "denied",
+			RedirectURL: "https://client.example/callback?error=access_denied",
+		},
+		CsrfToken: "old-csrf-token",
 	}
 
 	if err := resetAuthenticationState(session); err != nil {
@@ -34,6 +41,9 @@ func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
 	}
 	if !session.AuthTime.IsZero() {
 		t.Fatalf("auth time = %v, want zero", session.AuthTime)
+	}
+	if session.Error != nil {
+		t.Fatalf("terminal error was not cleared: %+v", session.Error)
 	}
 	if session.CsrfToken == "" || session.CsrfToken == "old-csrf-token" {
 		t.Fatalf("csrf token was not rotated: %q", session.CsrfToken)

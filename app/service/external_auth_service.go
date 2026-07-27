@@ -142,7 +142,7 @@ func (s *ExternalAuthService) completeAuthentication(connection *model.IdentityC
 			if err := s.refreshPrincipal(principal, profile, true); err != nil {
 				return nil, err
 			}
-			response, err := s.loginPrincipal(principal)
+			response, err := s.loginPrincipal(principal, sessionID == "")
 			if err != nil {
 				return nil, err
 			}
@@ -263,7 +263,7 @@ func (s *ExternalAuthService) BindWithExistingUser(ctx context.Context, continua
 	if err := s.attachProfile(s.db, temp.ConnectionID, user.ID, temp.Profile); err != nil {
 		return nil, err
 	}
-	response, err := s.loginUser(user.ID, false)
+	response, err := s.loginUser(user.ID, false, temp.SessionID == "")
 	if response != nil {
 		response.SessionID = temp.SessionID
 	}
@@ -333,7 +333,7 @@ func (s *ExternalAuthService) Register(ctx context.Context, continuationID strin
 	if err != nil {
 		return nil, fmt.Errorf("注册外部身份用户失败: %w", err)
 	}
-	response, err := s.loginUser(user.ID, true)
+	response, err := s.loginUser(user.ID, true, temp.SessionID == "")
 	if response != nil {
 		response.SessionID = temp.SessionID
 	}
@@ -514,14 +514,14 @@ func (s *ExternalAuthService) refreshPrincipal(principal *model.ExternalPrincipa
 	return s.db.Model(principal).Updates(updates).Error
 }
 
-func (s *ExternalAuthService) loginPrincipal(principal *model.ExternalPrincipal) (*dto.SocialAuthCallbackResponse, error) {
+func (s *ExternalAuthService) loginPrincipal(principal *model.ExternalPrincipal, issueToken bool) (*dto.SocialAuthCallbackResponse, error) {
 	if principal.UserID == nil {
 		return nil, fmt.Errorf("外部身份尚未绑定本地用户")
 	}
-	return s.loginUser(*principal.UserID, false)
+	return s.loginUser(*principal.UserID, false, issueToken)
 }
 
-func (s *ExternalAuthService) loginUser(userID uint, isNew bool) (*dto.SocialAuthCallbackResponse, error) {
+func (s *ExternalAuthService) loginUser(userID uint, isNew, issueToken bool) (*dto.SocialAuthCallbackResponse, error) {
 	userModel, err := s.userDAO.GetByID(userID)
 	if err != nil {
 		return nil, err
@@ -533,6 +533,10 @@ func (s *ExternalAuthService) loginUser(userID uint, isNew bool) (*dto.SocialAut
 	if err != nil {
 		return nil, err
 	}
+	response := &dto.SocialAuthCallbackResponse{User: userResponse, IsNewUser: isNew}
+	if !issueToken {
+		return response, nil
+	}
 	jwtService, err := ensureJWTAuthService(s.jwtAuthService)
 	if err != nil {
 		return nil, err
@@ -542,7 +546,8 @@ func (s *ExternalAuthService) loginUser(userID uint, isNew bool) (*dto.SocialAut
 	if err != nil {
 		return nil, err
 	}
-	return &dto.SocialAuthCallbackResponse{Token: token, User: userResponse, IsNewUser: isNew}, nil
+	response.Token = token
+	return response, nil
 }
 
 func primaryLoginSubject(profile *protocol.ExternalProfile) (*protocol.ExternalProfileIdentifier, error) {
