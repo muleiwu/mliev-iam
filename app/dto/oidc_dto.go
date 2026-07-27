@@ -2,6 +2,14 @@ package dto
 
 import "time"
 
+// AuthorizationFailure is a terminal OIDC authorization outcome that can be
+// rendered by the IAM frontend before the browser returns to the client.
+type AuthorizationFailure struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	RedirectURL string `json:"redirectUrl"`
+}
+
 // ============== OIDC Client DTOs ==============
 
 // CreateOIDCClientRequest 创建OIDC客户端请求
