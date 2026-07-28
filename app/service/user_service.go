@@ -559,6 +559,18 @@ func (s *UserService) verifyPassword(password, salt, hash string) bool {
 	return ok
 }
 
+// RecordSuccessfulLogin 原子记录一次成功登录，避免并发登录时覆盖累计次数。
+func (s *UserService) RecordSuccessfulLogin(userID uint, clientIP string) error {
+	if err := s.userDao.UpdateById(userID, map[string]interface{}{
+		"login_count":   gorm.Expr("login_count + ?", 1),
+		"last_login_at": time.Now(),
+		"last_login_ip": clientIP,
+	}); err != nil {
+		return fmt.Errorf("记录用户登录信息失败: %w", err)
+	}
+	return nil
+}
+
 // ValidateUserForLogin 验证用户登录。
 // account 可以是 用户名 / 手机号 / 邮箱，按输入自动判断类型查找用户。
 // 因用户账户(username) 禁止全数字、禁止含 "@"，三类标识符不会冲突。

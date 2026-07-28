@@ -102,7 +102,7 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 		return
 	}
 
-	issueUserSessionCookie(c, response, req.RememberMe)
+	completeUserLogin(c, response, req.RememberMe)
 
 	uc.SuccessWithMessage(c, "登录成功", sanitizeSelfProfile(response))
 }

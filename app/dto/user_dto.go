@@ -88,6 +88,7 @@ type ChangePhoneRequest struct {
 type UserQueryRequest struct {
 	Page      int    `form:"page" validate:"min=1" binding:"omitempty,min=1"`
 	PageSize  int    `form:"pageSize" validate:"min=1,max=100" binding:"omitempty,min=1,max=100"`
+	UUID      string `form:"uuid" binding:"omitempty"`
 	Username  string `form:"username" binding:"omitempty"`
 	Email     string `form:"email" binding:"omitempty"`
 	Phone     string `form:"phone" binding:"omitempty"`
