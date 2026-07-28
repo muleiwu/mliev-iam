@@ -420,7 +420,7 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 	}
 
 	// 签发个人中心会话 Cookie（先于 OIDC Token 生成，后者降级失败不影响该 Cookie）
-	issueUserSessionCookie(ctx, user, rememberMe)
+	completeUserLogin(ctx, user, rememberMe)
 
 	// 立即生成 OIDC Token
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())

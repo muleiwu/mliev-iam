@@ -84,11 +84,9 @@ func (ac AuthController) Login(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
-	// 更新用户登录IP
-	clientIP := c.ClientIP()
-	if clientIP != "" {
-		// 这里可以通过服务层更新用户的最后登录IP
-		// userService.UpdateLastLoginIP(userResponse.ID, clientIP)
+	// 登录统计写入失败不应阻断已经成功的管理员认证流程。
+	if err := userService.RecordSuccessfulLogin(userResponse.ID, c.ClientIP()); err != nil {
+		helper.GetLogger().Error("记录管理员登录信息失败: " + err.Error())
 	}
 
 	expiresIn := int64(jwtAuthService.GetConfig().GetAccessTokenHours() * 3600)

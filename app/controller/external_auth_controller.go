@@ -180,11 +180,11 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 			ec.Error(c, constants.ErrCodeInternal, err.Error())
 			return
 		}
-		issueUserSessionCookie(c, response.User, false)
+		completeUserLogin(c, response.User, false)
 		ec.popup(c, map[string]any{"type": "oidc-external-callback", "needsBind": false, "sessionId": response.SessionID}, stateData.OpenerOrigin, "登录成功")
 		return
 	}
-	issueUserSessionCookie(c, response.User, false)
+	completeUserLogin(c, response.User, false)
 	ec.SuccessWithMessage(c, "登录成功", response)
 }
 
@@ -284,7 +284,7 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 				return
 			}
 		}
-		issueUserSessionCookie(c, response.User, false)
+		completeUserLogin(c, response.User, false)
 	}
 	ec.Success(c, response)
 }
@@ -337,7 +337,7 @@ func (ec ExternalAuthController) GetMiniProgramQRCodeStatus(c httpInterfaces.Rou
 		}
 	}
 	if response.State == service.QRStateConfirmed && response.User != nil {
-		issueUserSessionCookie(c, response.User, false)
+		completeUserLogin(c, response.User, false)
 	}
 	if response.State == service.QRStateNeedsBind && response.ContinuationID != "" {
 		setContinuationCookie(c, response.ContinuationCSRF, response.ContinuationID)
@@ -437,7 +437,7 @@ func (ec ExternalAuthController) completeLoginResponse(c httpInterfaces.RouterCo
 			return
 		}
 	}
-	issueUserSessionCookie(c, response.User, false)
+	completeUserLogin(c, response.User, false)
 	ec.SuccessWithMessage(c, message, response)
 }
 
