@@ -133,6 +133,9 @@ func (dao *UserDao) List(req *dto.UserQueryRequest) ([]model.User, int64, error)
 	query := dao.database.Model(&model.User{})
 
 	// 添加查询条件
+	if req.UUID != "" {
+		query = query.Where("uuid = ?", req.UUID)
+	}
 	if req.Username != "" {
 		query = query.Where("username LIKE ?", "%"+req.Username+"%")
 	}
