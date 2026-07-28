@@ -271,6 +271,12 @@ func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest, issuer st
 		return nil, constants.ErrInvalidGrant
 	}
 
+	// 禁用或未激活用户不得继续用历史 Refresh Token 换取新令牌。
+	user, err := s.userService.GetUserModelByID(token.UserID)
+	if err != nil || !user.CanLogin() {
+		return nil, constants.ErrInvalidGrant
+	}
+
 	// 5. 撤销旧令牌
 	token.Revoke()
 	if err := s.tokenDAO.Update(token); err != nil {
@@ -314,6 +320,14 @@ func (s *OIDCAuthorizationService) IntrospectToken(req *dto.IntrospectionRequest
 		return &dto.IntrospectionResponse{Active: false}, nil
 	}
 
+	var tokenUser *model.User
+	if token.UserID > 0 {
+		tokenUser, err = s.userService.GetUserModelByID(token.UserID)
+		if err != nil || !tokenUser.CanLogin() {
+			return &dto.IntrospectionResponse{Active: false}, nil
+		}
+	}
+
 	// 令牌不属于请求客户端：返回最小信息，避免跨客户端泄漏
 	if token.ClientID != requesterClientID {
 		return &dto.IntrospectionResponse{Active: true}, nil
@@ -328,13 +342,9 @@ func (s *OIDCAuthorizationService) IntrospectToken(req *dto.IntrospectionRequest
 		Scope:     strings.Join(token.Scopes, " "),
 	}
 
-	if token.UserID > 0 {
-		user, err := s.userService.GetUserByID(token.UserID)
-		if err != nil {
-			return &dto.IntrospectionResponse{Active: false}, nil
-		}
-		response.Sub = user.UUID
-		response.Username = user.Username
+	if tokenUser != nil {
+		response.Sub = tokenUser.UUID
+		response.Username = tokenUser.Username
 	}
 
 	return response, nil
@@ -563,6 +573,11 @@ func (s *OIDCAuthorizationService) validateRefreshScopes(originalScopes, request
 // GenerateTokens 生成访问令牌和刷新令牌（导出以供登录接口使用）
 // ID Token 中包含 at_hash，使客户端可验证 access_token 与 id_token 的绑定关系
 func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
+	user, err := s.userService.GetUserModelByID(userID)
+	if err != nil || !user.CanLogin() {
+		return nil, constants.ErrInvalidGrant
+	}
+
 	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("生成访问令牌失败: %w", err)
@@ -585,11 +600,6 @@ func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID
 
 	// 生成 ID 令牌（若 scope 包含 openid），并写入 at_hash
 	if s.hasScope(scopes, "openid") {
-		user, err := s.userService.GetUserModelByID(userID)
-		if err != nil {
-			return nil, err
-		}
-
 		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "")
 		if err != nil {
 			return nil, err

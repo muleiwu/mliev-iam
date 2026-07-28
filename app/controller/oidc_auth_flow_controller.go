@@ -1426,6 +1426,14 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 		return
 	}
 
+	// 历史 Refresh Token 也必须服从当前用户状态；禁用后立即拒绝并清除 Cookie。
+	userModel, err := service.NewUserService(helper.GetDatabase()).GetUserModelByID(oldToken.UserID)
+	if err != nil || !userModel.CanLogin() {
+		ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
+		c.Error(ctx, constants.ErrCodeUnauthorized, "用户已停用")
+		return
+	}
+
 	// 3. 生成新 Token
 	appService := service.NewApplicationService(helper.GetDatabase())
 	app, err := appService.GetApplicationByClientID(oldToken.ClientID)

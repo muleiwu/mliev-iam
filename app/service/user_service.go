@@ -285,11 +285,17 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	if req.Attributes != nil {
 		user.Attributes = req.Attributes
 	}
+	revokeAccess := false
 	if req.IsActivated != nil {
 		user.IsActivated = *req.IsActivated
+		revokeAccess = !*req.IsActivated
 	}
 	if req.Status != nil {
 		user.Status = *req.Status
+		if *req.Status == model.UserStatusDisabled {
+			user.IsActivated = false
+			revokeAccess = true
+		}
 	}
 	if req.EmailVerified != nil {
 		if *req.EmailVerified {
@@ -312,8 +318,21 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 		}
 	}
 
-	// 保存更新
-	if err := s.userDao.Update(user); err != nil {
+	// 保存更新；停用账号时必须与会话、OIDC Token 撤销处于同一事务。
+	if revokeAccess {
+		if err := s.database.Transaction(func(tx *gorm.DB) error {
+			if err := dao.NewUserDao(tx).Update(user); err != nil {
+				return err
+			}
+			return revokeUserAccess(tx, []uint{id})
+		}); err != nil {
+			return nil, err
+		}
+		user, err = s.userDao.GetByID(id)
+		if err != nil {
+			return nil, err
+		}
+	} else if err := s.userDao.Update(user); err != nil {
 		return nil, err
 	}
 
@@ -391,28 +410,29 @@ func (s *UserService) GetUserList(req *dto.UserQueryRequest) (*dto.UserListRespo
 
 // UpdateUserStatus 更新用户状态
 func (s *UserService) UpdateUserStatus(id uint, req *dto.UserStatusUpdateRequest) error {
-	// 检查用户是否存在
-	_, err := s.userDao.GetByID(id)
-	if err != nil {
-		return err
-	}
-
-	// 更新状态
-	if err := s.userDao.UpdateStatus(id, req.Status); err != nil {
-		return err
-	}
-
-	// 如果有备注，更新备注
-	if req.Remark != "" {
-		updates := map[string]interface{}{
-			"remark": req.Remark,
+	return s.database.Transaction(func(tx *gorm.DB) error {
+		userDao := dao.NewUserDao(tx)
+		if _, err := userDao.GetByID(id); err != nil {
+			return err
 		}
-		if err := s.userDao.UpdateById(id, updates); err != nil {
-			return fmt.Errorf("更新备注失败: %w", err)
-		}
-	}
 
-	return nil
+		if err := userDao.UpdateStatus(id, req.Status); err != nil {
+			return err
+		}
+
+		if req.Status == model.UserStatusDisabled {
+			if err := revokeUserAccess(tx, []uint{id}); err != nil {
+				return err
+			}
+		}
+
+		if req.Remark != "" {
+			if err := userDao.UpdateById(id, map[string]interface{}{"remark": req.Remark}); err != nil {
+				return fmt.Errorf("更新备注失败: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // ChangePassword 修改密码
@@ -454,12 +474,36 @@ func (s *UserService) BatchOperation(req *dto.BatchUserRequest) error {
 	case "activate":
 		return s.userDao.BatchUpdateStatus(req.UserIDs, model.UserStatusActive)
 	case "deactivate", "disable":
-		return s.userDao.BatchUpdateStatus(req.UserIDs, model.UserStatusDisabled)
+		return s.database.Transaction(func(tx *gorm.DB) error {
+			if err := dao.NewUserDao(tx).BatchUpdateStatus(req.UserIDs, model.UserStatusDisabled); err != nil {
+				return err
+			}
+			return revokeUserAccess(tx, req.UserIDs)
+		})
 	case "delete":
 		return s.userDao.BatchDelete(req.UserIDs)
 	default:
 		return fmt.Errorf("不支持的操作类型: %s", req.Action)
 	}
+}
+
+// revokeUserAccess 让当前及历史内部会话失效，并撤销用户全部 OIDC Token。
+// 调用方负责在同一事务中先写入业务状态（如 status=disabled）。
+func revokeUserAccess(database *gorm.DB, userIDs []uint) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	now := time.Now()
+	if err := database.Model(&model.User{}).Where("id IN ?", userIDs).Updates(map[string]interface{}{
+		"is_activated":       false,
+		"session_revoked_at": now,
+	}).Error; err != nil {
+		return fmt.Errorf("撤销用户会话失败: %w", err)
+	}
+	if err := dao.NewOIDCTokenDAO(database).RevokeByUsers(userIDs); err != nil {
+		return fmt.Errorf("撤销用户OIDC令牌失败: %w", err)
+	}
+	return nil
 }
 
 // ResetPassword 重置密码（管理员操作）
