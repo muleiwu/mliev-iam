@@ -48,6 +48,9 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResp
 	if err != nil {
 		return nil, errors.New("user_not_found")
 	}
+	if !user.CanLogin() {
+		return nil, errors.New("invalid_token")
+	}
 
 	// 4. 构建用户信息响应
 	return s.BuildUserInfoResponse(user, token.Scopes), nil
