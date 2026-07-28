@@ -11,6 +11,20 @@ import (
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
+// completeUserLogin 完成普通用户登录：签发个人中心 Cookie，并记录登录统计。
+// 登录统计属于辅助信息，写入失败只记录日志，不阻断已经成功的认证流程。
+func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool) {
+	if user == nil {
+		return
+	}
+
+	issueUserSessionCookie(ctx, user, rememberMe)
+
+	if err := service.NewUserService(helper.GetDatabase()).RecordSuccessfulLogin(user.ID, ctx.ClientIP()); err != nil {
+		helper.GetLogger().Error(fmt.Sprintf("记录用户登录信息失败: %v", err))
+	}
+}
+
 // issueUserSessionCookie 登录成功后签发个人中心会话 Cookie（HttpOnly user_access_token）。
 // 签发失败仅记录日志，绝不阻断登录主流程。
 func issueUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool) {
