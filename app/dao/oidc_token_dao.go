@@ -102,6 +102,16 @@ func (dao *OIDCTokenDAO) RevokeByUser(userID uint) error {
 		Update("is_revoked", true).Error
 }
 
+// RevokeByUsers 批量撤销多个用户的所有令牌。
+func (dao *OIDCTokenDAO) RevokeByUsers(userIDs []uint) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	return dao.db.Model(&model.OIDCToken{}).
+		Where("user_id IN ?", userIDs).
+		Update("is_revoked", true).Error
+}
+
 // RevokeByClientAndUser 撤销特定客户端和用户的令牌
 func (dao *OIDCTokenDAO) RevokeByClientAndUser(clientID string, userID uint) error {
 	return dao.db.Model(&model.OIDCToken{}).
