@@ -396,7 +396,7 @@ func (s *ApplicationService) ResetClientSecret(appID uint) (string, error) {
 }
 
 // GetAccessScope 获取应用的授权范围
-func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessScopeResponse, error) {
+func (s *ApplicationService) GetAccessScope(appID uint, query *dto.ApplicationAccessScopeQuery) (*dto.ApplicationAccessScopeResponse, error) {
 	// 1. 获取应用
 	app, err := s.appDAO.GetByID(appID)
 	if err != nil {
@@ -413,8 +413,13 @@ func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessS
 		RoleIDs:               []uint{},
 		IncludeSubDepartments: false,
 		Users:                 []dto.AccessScopeUserInfo{},
-		Departments:           []dto.AccessScopeDeptInfo{},
-		Roles:                 []dto.AccessScopeRoleInfo{},
+		UserPagination: dto.AccessScopePagination{
+			Page:     1,
+			PageSize: 20,
+			Total:    0,
+		},
+		Departments: []dto.AccessScopeDeptInfo{},
+		Roles:       []dto.AccessScopeRoleInfo{},
 	}
 
 	// 3. 如果未设置授权范围，返回空配置
@@ -427,18 +432,28 @@ func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessS
 	response.DepartmentIDs = app.AccessScope.DepartmentIDs
 	response.RoleIDs = app.AccessScope.RoleIDs
 	response.IncludeSubDepartments = app.AccessScope.IncludeSubDepartments
+	userPage, userPageSize := normalizeAccessScopeUserPage(query)
+	response.UserPagination = dto.AccessScopePagination{
+		Page:     userPage,
+		PageSize: userPageSize,
+		Total:    len(app.AccessScope.UserIDs),
+	}
 
 	// 5. 获取用户详细信息
 	if len(app.AccessScope.UserIDs) > 0 {
+		userIDs := paginateAccessScopeIDs(app.AccessScope.UserIDs, userPage, userPageSize)
+		if len(userIDs) == 0 {
+			return response, nil
+		}
 		var users []model.User
-		if err := s.db.Where("id IN ?", app.AccessScope.UserIDs).Find(&users).Error; err != nil {
+		if err := s.db.Where("id IN ?", userIDs).Find(&users).Error; err != nil {
 			return nil, fmt.Errorf("获取授权用户信息失败: %w", err)
 		}
 		usersByID := make(map[uint]model.User, len(users))
 		for _, user := range users {
 			usersByID[user.ID] = user
 		}
-		for _, userID := range app.AccessScope.UserIDs {
+		for _, userID := range userIDs {
 			user, ok := usersByID[userID]
 			if !ok {
 				continue
@@ -505,6 +520,41 @@ func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessS
 	}
 
 	return response, nil
+}
+
+func normalizeAccessScopeUserPage(query *dto.ApplicationAccessScopeQuery) (int, int) {
+	page := 1
+	pageSize := 20
+	if query != nil {
+		if query.UserPage > 0 {
+			page = query.UserPage
+		}
+		if query.UserPageSize > 0 {
+			pageSize = query.UserPageSize
+		}
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+func paginateAccessScopeIDs(ids []uint, page, pageSize int) []uint {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	start := (page - 1) * pageSize
+	if start >= len(ids) {
+		return []uint{}
+	}
+	end := start + pageSize
+	if end > len(ids) {
+		end = len(ids)
+	}
+	return ids[start:end]
 }
 
 // UpdateAccessScope 更新应用的授权范围

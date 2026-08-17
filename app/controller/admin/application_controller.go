@@ -455,8 +455,20 @@ func (ac ApplicationController) GetApplicationAccessScope(c httpInterfaces.Route
 		return
 	}
 
+	var req dto.ApplicationAccessScopeQuery
+	if err := c.ShouldBindQuery(&req); err != nil {
+		ac.Error(c, constants.ErrCodeBadRequest, "查询参数错误: "+err.Error())
+		return
+	}
+	if req.UserPage < 1 {
+		req.UserPage = 1
+	}
+	if req.UserPageSize < 1 || req.UserPageSize > 100 {
+		req.UserPageSize = 20
+	}
+
 	appService := service.NewApplicationService(helper.GetDatabase())
-	response, err := appService.GetAccessScope(uint(id))
+	response, err := appService.GetAccessScope(uint(id), &req)
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		if errors.Is(err, service.ErrApplicationNotFound) {
