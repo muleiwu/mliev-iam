@@ -111,15 +111,29 @@ type ApplicationAccessScopeRequest struct {
 	IncludeSubDepartments bool   `json:"includeSubDepartments"`
 }
 
+// ApplicationAccessScopeQuery 应用授权范围查询参数
+type ApplicationAccessScopeQuery struct {
+	UserPage     int `form:"userPage" binding:"omitempty,min=1"`
+	UserPageSize int `form:"userPageSize" binding:"omitempty,min=1,max=100"`
+}
+
 // ApplicationAccessScopeResponse 应用授权范围响应
 type ApplicationAccessScopeResponse struct {
 	UserIDs               []uint                `json:"userIds"`
 	DepartmentIDs         []uint                `json:"departmentIds"`
 	RoleIDs               []uint                `json:"roleIds"`
 	IncludeSubDepartments bool                  `json:"includeSubDepartments"`
-	Users                 []AccessScopeUserInfo `json:"users"`       // 用户详细信息
+	Users                 []AccessScopeUserInfo `json:"users"` // 用户详细信息
+	UserPagination        AccessScopePagination `json:"userPagination"`
 	Departments           []AccessScopeDeptInfo `json:"departments"` // 部门详细信息
 	Roles                 []AccessScopeRoleInfo `json:"roles"`       // 角色详细信息
+}
+
+// AccessScopePagination 授权范围明细分页信息
+type AccessScopePagination struct {
+	Page     int `json:"page"`
+	PageSize int `json:"pageSize"`
+	Total    int `json:"total"`
 }
 
 // AccessScopeUserInfo 授权范围用户信息
