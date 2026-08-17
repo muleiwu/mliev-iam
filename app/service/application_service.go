@@ -430,11 +430,17 @@ func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessS
 
 	// 5. 获取用户详细信息
 	if len(app.AccessScope.UserIDs) > 0 {
-		userDAO := dao.NewUserDao(s.db)
+		var users []model.User
+		if err := s.db.Where("id IN ?", app.AccessScope.UserIDs).Find(&users).Error; err != nil {
+			return nil, fmt.Errorf("获取授权用户信息失败: %w", err)
+		}
+		usersByID := make(map[uint]model.User, len(users))
+		for _, user := range users {
+			usersByID[user.ID] = user
+		}
 		for _, userID := range app.AccessScope.UserIDs {
-			user, err := userDAO.GetByID(userID)
-			if err != nil {
-				// 如果用户不存在，跳过
+			user, ok := usersByID[userID]
+			if !ok {
 				continue
 			}
 			email := ""
@@ -452,11 +458,17 @@ func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessS
 
 	// 6. 获取部门详细信息
 	if len(app.AccessScope.DepartmentIDs) > 0 {
-		deptDAO := dao.NewDepartmentDao(s.db)
+		var departments []model.Department
+		if err := s.db.Where("id IN ?", app.AccessScope.DepartmentIDs).Find(&departments).Error; err != nil {
+			return nil, fmt.Errorf("获取授权部门信息失败: %w", err)
+		}
+		departmentsByID := make(map[uint]model.Department, len(departments))
+		for _, dept := range departments {
+			departmentsByID[dept.ID] = dept
+		}
 		for _, deptID := range app.AccessScope.DepartmentIDs {
-			dept, err := deptDAO.GetByID(deptID)
-			if err != nil {
-				// 如果部门不存在，跳过
+			dept, ok := departmentsByID[deptID]
+			if !ok {
 				continue
 			}
 			response.Departments = append(response.Departments, dto.AccessScopeDeptInfo{
@@ -471,10 +483,17 @@ func (s *ApplicationService) GetAccessScope(appID uint) (*dto.ApplicationAccessS
 	// 7. 获取角色详细信息
 	if len(app.AccessScope.RoleIDs) > 0 {
 		roleDAO := dao.NewRoleDao(s.db)
+		roles, err := roleDAO.GetByIDs(app.AccessScope.RoleIDs)
+		if err != nil {
+			return nil, fmt.Errorf("获取授权角色信息失败: %w", err)
+		}
+		rolesByID := make(map[uint]model.Role, len(roles))
+		for _, role := range roles {
+			rolesByID[role.ID] = role
+		}
 		for _, roleID := range app.AccessScope.RoleIDs {
-			role, err := roleDAO.GetByID(roleID)
-			if err != nil {
-				// 如果角色不存在，跳过
+			role, ok := rolesByID[roleID]
+			if !ok {
 				continue
 			}
 			response.Roles = append(response.Roles, dto.AccessScopeRoleInfo{
