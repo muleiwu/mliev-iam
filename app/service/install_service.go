@@ -185,6 +185,11 @@ func (s *InstallService) CreateInitialData(adminInfo dto.AdminAccountInfo) error
 			return fmt.Errorf("创建管理员账户失败: %w", err)
 		}
 
+		// 5. 创建系统内置管理后台 OIDC 应用；与初始账号数据同事务提交。
+		if _, err := EnsureAdminConsoleApplication(tx, superAdminRoleID); err != nil {
+			return fmt.Errorf("创建默认管理后台应用失败: %w", err)
+		}
+
 		return nil
 	})
 }

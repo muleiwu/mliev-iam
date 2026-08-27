@@ -95,3 +95,27 @@ func TestValidateRedirectURILocalhostStaysExact(t *testing.T) {
 		t.Fatalf("localhost must not get port relaxation")
 	}
 }
+
+func TestValidateRedirectURIAllowsOnlySameOriginBuiltinAdminCallback(t *testing.T) {
+	handler := NewOIDCProtocolHandler(nil)
+	app := &model.Application{
+		UUID:        model.BuiltinAdminConsoleApplicationUUID,
+		IsProtected: true,
+		ProtocolConfig: map[string]interface{}{
+			"redirectUris": []interface{}{model.BuiltinAdminConsoleCallbackPath},
+		},
+	}
+	issuer := "https://iam.example.com/oidc/" + model.BuiltinAdminConsoleApplicationUUID
+	if err := handler.ValidateRedirectURI(app, "https://iam.example.com/api/admin/auth/callback", issuer); err != nil {
+		t.Fatalf("same-origin callback should be valid: %v", err)
+	}
+	for _, redirectURI := range []string{
+		"https://evil.example/api/admin/auth/callback",
+		"https://iam.example.com/api/admin/auth/other",
+		"https://iam.example.com/api/admin/auth/callback?next=/evil",
+	} {
+		if err := handler.ValidateRedirectURI(app, redirectURI, issuer); err == nil {
+			t.Fatalf("redirect URI %q should be rejected", redirectURI)
+		}
+	}
+}

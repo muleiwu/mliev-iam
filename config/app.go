@@ -36,6 +36,7 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 func (a App) Servers() []interfaces.ServerInterface {
 	return []interfaces.ServerInterface{
 		&migrations.Server{},
+		&appService.SystemApplicationServer{},
 		&appService.SyncWorkerServer{},
 		&service.HttpServer{},
 	}

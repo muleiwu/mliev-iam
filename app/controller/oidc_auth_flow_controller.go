@@ -223,6 +223,10 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 		Locale:          "zh-CN",
 		Agreements:      agreements,
 	}
+	if service.IsAdminConsoleApplication(app) {
+		// 管理后台只允许已有超级管理员登录，不能从第一方入口注册新账号。
+		response.Features.Registration = false
+	}
 
 	for _, agreement := range agreements {
 		if agreement.Scope != string(model.AgreementScopeGlobal) {
@@ -1543,6 +1547,7 @@ type FlowStatusResponse struct {
 	// CsrfToken 仅在 status=needs_consent 时下发，供前端在 /oidc/consent approve/reject
 	// 时回传做常量时间校验；其它状态留空。
 	CsrfToken     string                    `json:"csrfToken,omitempty"`
+	AutoApprove   bool                      `json:"autoApprove,omitempty"`
 	Client        *FlowStatusClient         `json:"client,omitempty"`
 	User          *FlowStatusUser           `json:"user,omitempty"`
 	Scopes        []FlowStatusScope         `json:"scopes,omitempty"`
@@ -1712,13 +1717,14 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 	// 8. 信息完整，需要授权确认
 	scopes := c.parseScopesForFlow(session.Scope)
 	c.Success(ctx, FlowStatusResponse{
-		SessionID: sessionID,
-		Status:    "needs_consent",
-		Prompt:    session.Prompt,
-		CsrfToken: session.CsrfToken,
-		Client:    clientInfo,
-		User:      userInfo,
-		Scopes:    scopes,
+		SessionID:   sessionID,
+		Status:      "needs_consent",
+		Prompt:      session.Prompt,
+		CsrfToken:   session.CsrfToken,
+		AutoApprove: service.IsAdminConsoleApplication(app),
+		Client:      clientInfo,
+		User:        userInfo,
+		Scopes:      scopes,
 	})
 }
 

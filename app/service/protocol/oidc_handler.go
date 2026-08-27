@@ -253,7 +253,7 @@ func (h *OIDCProtocolHandler) ValidateClient(app *model.Application, clientSecre
 //   - 比较方式为规范化后精确匹配：scheme + host + path + query（query 允许客户端附加则在注册时预先声明）
 //   - RFC 8252 §7.3：http + loopback IP 字面量（127.0.0.1 / ::1）忽略端口比较，
 //     以支持 native app 监听随机本地端口；localhost 域名不放宽
-func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redirectURI string) error {
+func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redirectURI string, trustedIssuer ...string) error {
 	config := app.ProtocolConfig
 	redirectUris, ok := config["redirectUris"].([]interface{})
 	if !ok {
@@ -263,6 +263,21 @@ func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redire
 	incoming, err := parseAndValidateRedirectURI(redirectURI)
 	if err != nil {
 		return err
+	}
+	if app.UUID == model.BuiltinAdminConsoleApplicationUUID && app.IsProtected {
+		if incoming.Path != model.BuiltinAdminConsoleCallbackPath || incoming.RawQuery != "" {
+			return errors.New("内置管理后台重定向URI无效")
+		}
+		if len(trustedIssuer) > 0 && trustedIssuer[0] != "" {
+			issuer, err := url.Parse(trustedIssuer[0])
+			if err != nil || issuer.Scheme == "" || issuer.Host == "" {
+				return errors.New("可信颁发者地址无效")
+			}
+			if !strings.EqualFold(incoming.Scheme, issuer.Scheme) || !strings.EqualFold(incoming.Host, issuer.Host) {
+				return errors.New("内置管理后台重定向URI必须与认证服务同源")
+			}
+		}
+		return nil
 	}
 	incomingNorm := normalizeRedirectURI(incoming)
 
