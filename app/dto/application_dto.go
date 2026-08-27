@@ -31,6 +31,7 @@ type ApplicationResponse struct {
 	ProtocolConfig map[string]interface{} `json:"protocolConfig"`
 	IsActive       bool                   `json:"isActive"`
 	IsVerified     bool                   `json:"isVerified"`
+	IsProtected    bool                   `json:"isProtected"`
 	CreatedAt      string                 `json:"createdAt"`
 	UpdatedAt      string                 `json:"updatedAt"`
 }

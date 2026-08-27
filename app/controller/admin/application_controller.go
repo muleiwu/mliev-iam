@@ -154,6 +154,8 @@ func (ac ApplicationController) UpdateApplication(c httpInterfaces.RouterContext
 
 		if errors.Is(err, service.ErrApplicationNotFound) {
 			errCode = constants.ErrCodeNotFound
+		} else if errors.Is(err, service.ErrApplicationProtected) {
+			errCode = constants.ErrCodeForbidden
 		} else if errors.Is(err, service.ErrInvalidApplicationIcon) {
 			errCode = constants.ErrCodeBadRequest
 		} else if strings.Contains(err.Error(), "请求参数错误") || strings.Contains(err.Error(), "至少需要") || strings.Contains(err.Error(), "必须包含") {
@@ -183,6 +185,8 @@ func (ac ApplicationController) DeleteApplication(c httpInterfaces.RouterContext
 		errCode := constants.ErrCodeInternal
 		if errors.Is(err, service.ErrApplicationNotFound) {
 			errCode = constants.ErrCodeNotFound
+		} else if errors.Is(err, service.ErrApplicationProtected) {
+			errCode = constants.ErrCodeForbidden
 		}
 		ac.Error(c, errCode, err.Error())
 		return
@@ -218,6 +222,14 @@ func (ac ApplicationController) BatchOperation(c httpInterfaces.RouterContextInt
 	}
 
 	appService := service.NewApplicationService(helper.GetDatabase())
+	if err := appService.ValidateBatchOperation(req.Action, req.IDs); err != nil {
+		errCode := constants.ErrCodeInternal
+		if errors.Is(err, service.ErrApplicationProtected) {
+			errCode = constants.ErrCodeForbidden
+		}
+		ac.Error(c, errCode, err.Error())
+		return
+	}
 
 	switch req.Action {
 	case "enable":
@@ -503,6 +515,8 @@ func (ac ApplicationController) UpdateApplicationAccessScope(c httpInterfaces.Ro
 		errCode := constants.ErrCodeInternal
 		if errors.Is(err, service.ErrApplicationNotFound) {
 			errCode = constants.ErrCodeNotFound
+		} else if errors.Is(err, service.ErrApplicationProtected) {
+			errCode = constants.ErrCodeForbidden
 		}
 		ac.Error(c, errCode, err.Error())
 		return

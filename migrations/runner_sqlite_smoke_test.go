@@ -87,12 +87,19 @@ func TestSqliteSmoke(t *testing.T) {
 	if applicationIconColumnCount != 1 {
 		t.Fatal("applications 表缺少 icon 列")
 	}
+	var applicationProtectedColumnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('applications') WHERE name = 'is_protected'`).Scan(&applicationProtectedColumnCount); err != nil {
+		t.Fatal(err)
+	}
+	if applicationProtectedColumnCount != 1 {
+		t.Fatal("applications 表缺少 is_protected 列")
+	}
 
 	var maxV int64
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const remediationSchemaVersion int64 = 20260720161000
+	const remediationSchemaVersion int64 = 20260827000001
 	if maxV != remediationSchemaVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", remediationSchemaVersion, maxV)
 	}
