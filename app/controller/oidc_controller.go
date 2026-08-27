@@ -38,7 +38,8 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		oc.Error(c, constants.ErrCodeBadRequest, "无效的客户端")
 		return
 	}
-	if err := validateOIDCRedirectURI(app, req.RedirectURI); err != nil {
+	issuer := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", req.ClientID))
+	if err := validateOIDCRedirectURI(app, req.RedirectURI, issuer); err != nil {
 		oc.Error(c, constants.ErrCodeBadRequest, "无效的重定向URI")
 		return
 	}

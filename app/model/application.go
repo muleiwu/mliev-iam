@@ -16,6 +16,14 @@ const (
 	ProtocolTypeOAuth2 ProtocolType = "oauth2"
 )
 
+const (
+	// BuiltinAdminConsoleApplicationUUID is the stable client_id for the
+	// first-party management console. Built-in behavior must also require
+	// IsProtected so an arbitrary record cannot opt into it by UUID alone.
+	BuiltinAdminConsoleApplicationUUID = "a1b2cb3c-af00-5ed4-b3da-f85b79012927"
+	BuiltinAdminConsoleCallbackPath    = "/api/admin/auth/callback"
+)
+
 // Application 应用模型 - 协议无关的应用抽象
 type Application struct {
 	// 基础信息
@@ -31,8 +39,9 @@ type Application struct {
 	ProtocolConfig map[string]interface{} `gorm:"type:json;serializer:json;not null" json:"protocolConfig" validate:"required"`
 
 	// 状态管理
-	IsActive   bool `gorm:"default:true" json:"isActive"`
-	IsVerified bool `gorm:"default:false" json:"isVerified"`
+	IsActive    bool `gorm:"default:true" json:"isActive"`
+	IsVerified  bool `gorm:"default:false" json:"isVerified"`
+	IsProtected bool `gorm:"default:false;not null" json:"isProtected"`
 
 	// 授权范围配置
 	AccessScope *ApplicationAccessScope `gorm:"type:json;serializer:json" json:"accessScope"`

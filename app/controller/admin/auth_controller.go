@@ -2,14 +2,11 @@ package admin
 
 import (
 	"net/http"
-	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
-	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
@@ -19,150 +16,31 @@ type AuthController struct {
 	BaseController
 }
 
-// AdminLoginRequest 管理员登录请求
-type AdminLoginRequest struct {
-	Username      string             `json:"username" binding:"required"`
-	Password      string             `json:"password" binding:"required"`
-	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"`
-}
-
-// AdminLoginResponse 管理员登录响应
-type AdminLoginResponse struct {
-	User        dto.UserResponse `json:"user"`
-	AccessToken string           `json:"accessToken"`
-	TokenType   string           `json:"tokenType"`
-	ExpiresIn   int64            `json:"expiresIn"`
-}
-
-// Login 管理员登录
-// POST /api/admin/auth/login
-func (ac AuthController) Login(c httpInterfaces.RouterContextInterface) {
-	var req AdminLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
-		return
-	}
-
-	captchaManager := captcha.NewManager(helper.GetDatabase())
-	if err := captchaManager.ValidateForScene("login", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err != nil {
-		ac.Error(c, constants.ErrCodeBadRequest, err.Error())
-		return
-	}
-
-	userService := service.NewUserService(helper.GetDatabase())
-	userResponse, err := userService.ValidateUserForLogin(req.Username, req.Password)
-	if err != nil {
-		errCode := constants.ErrCodeInvalidPassword
-		errMsg := err.Error()
-
-		if strings.Contains(errMsg, "用户账户已禁用") {
-			errCode = constants.ErrCodeUserDisabled
-		} else if strings.Contains(errMsg, "用户账户未激活") {
-			errCode = constants.ErrCodeUserNotActivated
-		}
-
-		ac.Error(c, errCode, errMsg)
-		return
-	}
-
-	// 这里可以添加额外的管理员权限验证
-	// 例如检查用户是否有管理员角色或权限
-	if !ac.isAdminUser(userResponse) {
-		ac.Error(c, constants.ErrCodeForbidden, "权限不足，仅限管理员登录")
-		return
-	}
-
-	// 生成访问令牌
-	jwtAuthService, err := service.NewJWTAuthServiceWithError()
-	if err != nil {
-		ac.Error(c, constants.ErrCodeInternal, "JWT配置错误: "+err.Error())
-		return
-	}
-	accessToken, err := jwtAuthService.GenerateAdminToken(userResponse)
-	if err != nil {
-		ac.Error(c, constants.ErrCodeInternal, "生成访问令牌失败: "+err.Error())
-		return
-	}
-
-	// 登录统计写入失败不应阻断已经成功的管理员认证流程。
-	if err := userService.RecordSuccessfulLogin(userResponse.ID, c.ClientIP()); err != nil {
-		helper.GetLogger().Error("记录管理员登录信息失败: " + err.Error())
-	}
-
-	expiresIn := int64(jwtAuthService.GetConfig().GetAccessTokenHours() * 3600)
-
-	// 下发 HttpOnly Cookie：防 XSS 读取 token。前端保留 accessToken 字段仅用于兼容展示，
-	// 浏览器请求会自动带上 Cookie，无需在 Authorization 头里手工注入。
-	setAdminAccessCookie(c, accessToken, int(expiresIn))
-
-	response := AdminLoginResponse{
-		User:        *userResponse,
-		AccessToken: accessToken,
-		TokenType:   "Bearer",
-		ExpiresIn:   expiresIn,
-	}
-
-	ac.SuccessWithMessage(c, "管理员登录成功", response)
-}
-
 // setAdminAccessCookie 将管理员 access_token 写入 HttpOnly/Secure/SameSite Cookie
 func setAdminAccessCookie(c httpInterfaces.RouterContextInterface, token string, maxAgeSeconds int) {
-	isSecure := c.Request().TLS != nil
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(middleware.AdminCookieName, token, maxAgeSeconds, "/", "", isSecure, true)
+	c.SetCookie(middleware.AdminCookieName, token, maxAgeSeconds, "/", "", requestIsSecure(c), true)
 }
 
 // clearAdminAccessCookie 清除管理员 cookie（登出时）
 func clearAdminAccessCookie(c httpInterfaces.RouterContextInterface) {
-	isSecure := c.Request().TLS != nil
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(middleware.AdminCookieName, "", -1, "/", "", isSecure, true)
+	c.SetCookie(middleware.AdminCookieName, "", -1, "/", "", requestIsSecure(c), true)
 }
 
 // Logout 管理员退出登录
 // POST /api/admin/auth/logout
 func (ac AuthController) Logout(c httpInterfaces.RouterContextInterface) {
 	clearAdminAccessCookie(c)
+	if refreshToken, err := c.Cookie("refresh_token"); err == nil && refreshToken != "" {
+		if err := dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(refreshToken); err != nil {
+			helper.GetLogger().Warn("撤销统一认证刷新令牌失败: " + err.Error())
+		}
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("refresh_token", "", -1, "/", "", requestIsSecure(c), true)
+	c.SetCookie(middleware.UserCookieName, "", -1, "/", "", requestIsSecure(c), true)
 	ac.SuccessWithMessage(c, "退出登录成功", nil)
-}
-
-// RefreshToken 刷新访问令牌
-// POST /api/admin/auth/refresh
-func (ac AuthController) RefreshToken(c httpInterfaces.RouterContextInterface) {
-	// 从请求头或请求体中获取刷新令牌
-	refreshToken := c.GetHeader("Refresh-Token")
-	if refreshToken == "" {
-		var req struct {
-			RefreshToken string `json:"refreshToken" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			ac.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
-			return
-		}
-		refreshToken = req.RefreshToken
-	}
-
-	// 验证刷新令牌并生成新的访问令牌
-	jwtAuthService, err := service.NewJWTAuthServiceWithError()
-	if err != nil {
-		ac.Error(c, constants.ErrCodeInternal, "JWT配置错误: "+err.Error())
-		return
-	}
-	newAccessToken, err := jwtAuthService.RefreshToken(refreshToken)
-	if err != nil {
-		ac.Error(c, constants.ErrCodeUnauthorized, "刷新令牌无效或已过期: "+err.Error())
-		return
-	}
-
-	expiresIn := jwtAuthService.GetConfig().GetAccessTokenHours() * 3600
-	setAdminAccessCookie(c, newAccessToken, expiresIn)
-	response := map[string]any{
-		"accessToken": newAccessToken,
-		"tokenType":   "Bearer",
-		"expiresIn":   expiresIn,
-	}
-
-	ac.SuccessWithMessage(c, "令牌刷新成功", response)
 }
 
 // GetAdminProfile 获取管理员个人信息
@@ -193,36 +71,4 @@ func (ac AuthController) GetAdminProfile(c httpInterfaces.RouterContextInterface
 	}
 
 	ac.SuccessWithMessage(c, "获取管理员信息成功", response)
-}
-
-// isAdminUser 检查用户是否为管理员
-// 通过查询用户是否关联 super_admin 系统角色来判断
-func (ac AuthController) isAdminUser(user *dto.UserResponse) bool {
-	// 创建 RoleDao 实例
-	roleDao := dao.NewRoleDao(helper.GetDatabase())
-
-	// 查询 super_admin 角色
-	superAdminRole, err := roleDao.GetByCode("super_admin")
-	if err != nil {
-		// 如果角色不存在，返回 false
-		return false
-	}
-
-	// 验证是否为系统角色
-	if !superAdminRole.IsSystem() {
-		return false
-	}
-
-	// 创建 UserRoleDao 实例
-	userRoleDao := dao.NewUserRoleDao(helper.GetDatabase())
-
-	// 查询用户和角色的关联
-	userRole, err := userRoleDao.GetByUserIDAndRoleID(user.ID, superAdminRole.ID)
-	if err != nil {
-		// 如果关联不存在，返回 false
-		return false
-	}
-
-	// 检查关联是否有效（激活、已批准且未过期）
-	return userRole.IsValid()
 }

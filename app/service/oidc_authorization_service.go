@@ -58,7 +58,7 @@ func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, u
 	handler := s.getOIDCHandler()
 
 	// 2. 验证重定向URI
-	if err := handler.ValidateRedirectURI(app, req.RedirectURI); err != nil {
+	if err := handler.ValidateRedirectURI(app, req.RedirectURI, issuer); err != nil {
 		return s.errorResponse("invalid_request", "无效的重定向URI", req.State), nil
 	}
 

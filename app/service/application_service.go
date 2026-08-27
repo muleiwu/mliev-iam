@@ -18,6 +18,7 @@ import (
 var (
 	ErrApplicationNotFound    = errors.New("应用不存在")
 	ErrApplicationDisabled    = errors.New("应用已被禁用")
+	ErrApplicationProtected   = errors.New("系统保护应用不允许执行该操作")
 	ErrInvalidApplicationIcon = errors.New("应用图标无效")
 )
 
@@ -137,7 +138,6 @@ func (s *ApplicationService) GetApplication(id uint) (*dto.ApplicationResponse, 
 		}
 		return nil, fmt.Errorf("获取应用失败: %w", err)
 	}
-
 	return s.modelToResponse(app, nil), nil
 }
 
@@ -162,6 +162,14 @@ func (s *ApplicationService) UpdateApplication(id uint, req *dto.UpdateApplicati
 			return nil, ErrApplicationNotFound
 		}
 		return nil, fmt.Errorf("获取应用失败: %w", err)
+	}
+	if app.IsProtected {
+		if req.ProtocolConfig != nil {
+			return nil, fmt.Errorf("%w：不能修改协议配置", ErrApplicationProtected)
+		}
+		if req.IsActive != nil && !*req.IsActive {
+			return nil, fmt.Errorf("%w：不能禁用", ErrApplicationProtected)
+		}
 	}
 
 	// 获取协议处理器
@@ -216,6 +224,9 @@ func (s *ApplicationService) DeleteApplication(id uint) error {
 			return ErrApplicationNotFound
 		}
 		return fmt.Errorf("获取应用失败: %w", err)
+	}
+	if app.IsProtected {
+		return ErrApplicationProtected
 	}
 
 	// 获取协议处理器
@@ -317,6 +328,7 @@ func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig
 		ProtocolType: app.ProtocolType,
 		IsActive:     app.IsActive,
 		IsVerified:   app.IsVerified,
+		IsProtected:  app.IsProtected,
 		CreatedAt:    app.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    app.UpdatedAt.Format(time.RFC3339),
 	}
@@ -567,6 +579,9 @@ func (s *ApplicationService) UpdateAccessScope(appID uint, req *dto.ApplicationA
 		}
 		return fmt.Errorf("获取应用失败: %w", err)
 	}
+	if app.IsProtected {
+		return fmt.Errorf("%w：不能修改授权范围", ErrApplicationProtected)
+	}
 
 	// 2. 更新授权范围
 	if req.UserIDs == nil {
@@ -591,6 +606,23 @@ func (s *ApplicationService) UpdateAccessScope(appID uint, req *dto.ApplicationA
 		return fmt.Errorf("更新授权范围失败: %w", err)
 	}
 
+	return nil
+}
+
+// ValidateBatchOperation 在执行批量变更前一次性检查系统保护应用，避免部分成功。
+func (s *ApplicationService) ValidateBatchOperation(action string, ids []uint) error {
+	if action != "disable" && action != "delete" {
+		return nil
+	}
+	var count int64
+	if err := s.db.Model(&model.Application{}).
+		Where("id IN ? AND is_protected = ?", ids, true).
+		Count(&count).Error; err != nil {
+		return fmt.Errorf("检查系统保护应用失败: %w", err)
+	}
+	if count > 0 {
+		return ErrApplicationProtected
+	}
 	return nil
 }
 
@@ -652,7 +684,7 @@ func (s *ApplicationService) CheckUserAccess(appID uint, userID uint) bool {
 		userRoles, err := userRoleDAO.GetByUserID(userID)
 		if err == nil && len(userRoles) > 0 {
 			for _, userRole := range userRoles {
-				if app.AccessScope.HasRoleID(userRole.RoleID) {
+				if app.AccessScope.HasRoleID(userRole.RoleID) && userRole.IsValid() && userRole.Role.IsEnabled() {
 					return true
 				}
 			}

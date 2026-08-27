@@ -50,8 +50,8 @@ func buildOIDCSuccessRedirectURL(redirectURI, code, state string) (string, error
 	return target.String(), nil
 }
 
-func validateOIDCRedirectURI(app *model.Application, redirectURI string) error {
-	return protocol.NewOIDCProtocolHandler(helper.GetDatabase()).ValidateRedirectURI(app, redirectURI)
+func validateOIDCRedirectURI(app *model.Application, redirectURI string, trustedIssuer ...string) error {
+	return protocol.NewOIDCProtocolHandler(helper.GetDatabase()).ValidateRedirectURI(app, redirectURI, trustedIssuer...)
 }
 
 func checkOIDCUserAccess(session *service.OIDCSession, userID uint) (*model.Application, *dto.AuthorizationFailure, error) {

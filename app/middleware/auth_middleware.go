@@ -160,6 +160,22 @@ func AdminAuthMiddleware() httpInterfaces.HandlerFunc {
 			})
 			return
 		}
+		claims, ok := c.Get("claims").(*jwt.Claims)
+		if !ok || claims == nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, dto.Response{
+				Code:    constants.ErrCodeForbidden,
+				Message: "管理员会话声明无效",
+			})
+			return
+		}
+		isAdmin, err := service.IsSuperAdmin(helper.GetDatabase(), claims.UserID)
+		if err != nil || !isAdmin {
+			c.AbortWithStatusJSON(http.StatusForbidden, dto.Response{
+				Code:    constants.ErrCodeForbidden,
+				Message: "超级管理员角色已失效",
+			})
+			return
+		}
 
 		c.Next()
 	}

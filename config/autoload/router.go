@@ -46,14 +46,14 @@ func (receiver Router) InitConfig() map[string]any {
 			// === 管理员路由 ===
 			admin := api.Group("/admin")
 
-			// 管理员认证：login 公开，其余需要 AdminAuth
+			// 管理员认证：OIDC 发起/回调公开，其余需要 AdminAuth
 			adminAuthPublic := admin.Group("/auth")
-			adminAuthPublic.POST("/login", AdminController.AuthController{}.Login)
+			adminAuthPublic.GET("/authorize", AdminController.AuthController{}.Authorize)
+			adminAuthPublic.GET("/callback", AdminController.AuthController{}.Callback)
+			adminAuthPublic.POST("/logout", AdminController.AuthController{}.Logout)
 
 			adminAuthProtected := admin.Group("/auth")
 			adminAuthProtected.Use(middleware.AdminAuthMiddleware())
-			adminAuthProtected.POST("/logout", AdminController.AuthController{}.Logout)
-			adminAuthProtected.POST("/refresh", AdminController.AuthController{}.RefreshToken)
 			adminAuthProtected.GET("/profile", AdminController.AuthController{}.GetAdminProfile)
 
 			// 管理员用户管理
