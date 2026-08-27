@@ -919,8 +919,8 @@ func (s *UserService) CheckUserPermission(userID uint, permissionCode string) (b
 	return hasPermission, nil
 }
 
-// GetUserRoles 获取用户角色列表
-func (s *UserService) GetUserRoles(userID uint) ([]model.Role, error) {
+// GetEffectiveRoleDefinitions 获取用户当前有效的角色定义，供鉴权逻辑使用。
+func (s *UserService) GetEffectiveRoleDefinitions(userID uint) ([]model.Role, error) {
 	// 获取用户角色关联
 	userRoles, err := s.userRoleDao.GetByUserID(userID)
 	if err != nil {
@@ -950,6 +950,17 @@ func (s *UserService) GetUserRoles(userID uint) ([]model.Role, error) {
 	}
 
 	return roles, nil
+}
+
+// GetUserRoleAssignments 获取用户的角色分配关系，供管理端展示和维护使用。
+// 与鉴权查询不同，这里保留未激活和已过期的关系，以便管理员查看其状态。
+func (s *UserService) GetUserRoleAssignments(userID uint) ([]*dto.UserRoleResponse, error) {
+	userRoles, err := s.userRoleDao.GetByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return dto.ConvertToUserRoleResponses(userRoles), nil
 }
 
 // ============= 用户角色管理方法 =============

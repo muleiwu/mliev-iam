@@ -380,7 +380,7 @@ func (auc UserController) GetUserRoles(c httpInterfaces.RouterContextInterface) 
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	response, err := userService.GetUserRoles(uint(userID))
+	response, err := userService.GetUserRoleAssignments(uint(userID))
 	if err != nil {
 		auc.Error(c, constants.ErrCodeInternal, err.Error())
 		return
