@@ -218,12 +218,12 @@ func (s *InstallService) createDefaultDepartment(tx *gorm.DB) (uint, error) {
 		return 0, err
 	}
 
-	// 创建管理员部门
+	// 创建系统管理部门
 	adminDept := &model.Department{
-		Name:        "管理员",
+		Name:        "系统管理部门",
 		Code:        "admin",
-		ShortName:   "管理",
-		Description: "系统管理员部门",
+		ShortName:   "系统管理",
+		Description: "系统管理部门",
 		Type:        model.DepartmentTypeDepartment,
 		Status:      model.DepartmentStatusEnabled,
 		ParentID:    &rootDept.ID,

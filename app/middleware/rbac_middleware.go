@@ -111,7 +111,7 @@ func RequireRole(roleCode string) httpInterfaces.HandlerFunc {
 		}
 
 		userService := service.NewUserService(helper.GetDatabase())
-		userRoles, err := userService.GetUserRoles(userID)
+		userRoles, err := userService.GetEffectiveRoleDefinitions(userID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{
 				"code":    500,
@@ -149,7 +149,7 @@ func RequireAnyRole(roleCodes []string) httpInterfaces.HandlerFunc {
 		}
 
 		userService := service.NewUserService(helper.GetDatabase())
-		userRoles, err := userService.GetUserRoles(userID)
+		userRoles, err := userService.GetEffectiveRoleDefinitions(userID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, map[string]any{
 				"code":    500,

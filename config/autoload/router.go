@@ -69,6 +69,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminUsers.POST("/batch", AdminController.UserController{}.BatchOperation)
 			adminUsers.GET("/stats/active-count", AdminController.UserController{}.GetActiveUsersCount)
 			adminUsers.GET("/:id/departments", AdminController.UserController{}.GetUserDepartments)
+			adminUsers.PUT("/:id/departments/:departmentId/primary", AdminController.UserDepartmentController{}.SetPrimary)
 			adminUsers.POST("/:id/roles/:roleId", AdminController.UserController{}.AssignUserRole)
 			adminUsers.DELETE("/:id/roles/:roleId", AdminController.UserController{}.RemoveUserRole)
 			adminUsers.GET("/:id/roles", AdminController.UserController{}.GetUserRoles)
@@ -78,6 +79,12 @@ func (receiver Router) InitConfig() map[string]any {
 			adminUsers.PUT("/:id/roles/:roleId/primary", AdminController.UserController{}.SetUserPrimaryRole)
 			adminUsers.GET("/:id/permissions", AdminController.UserController{}.GetUserPermissions)
 			adminUsers.GET("/:id/menu-tree", AdminController.UserController{}.GetUserMenuTree)
+
+			// 管理员用户部门关系管理
+			adminUserDepartments := admin.Group("/user-departments")
+			adminUserDepartments.Use(middleware.AdminAuthMiddleware())
+			adminUserDepartments.POST("", AdminController.UserDepartmentController{}.Create)
+			adminUserDepartments.DELETE("/:userId/:departmentId", AdminController.UserDepartmentController{}.Delete)
 
 			// 管理员角色管理
 			adminRoles := admin.Group("/roles")
