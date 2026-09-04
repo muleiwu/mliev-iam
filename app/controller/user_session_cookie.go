@@ -19,7 +19,13 @@ func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.User
 	}
 
 	issueUserSessionCookie(ctx, user, rememberMe)
+	recordSuccessfulUserLogin(ctx, user)
+}
 
+func recordSuccessfulUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse) {
+	if user == nil {
+		return
+	}
 	if err := service.NewUserService(helper.GetDatabase()).RecordSuccessfulLogin(user.ID, ctx.ClientIP()); err != nil {
 		helper.GetLogger().Error(fmt.Sprintf("记录用户登录信息失败: %v", err))
 	}
@@ -28,18 +34,25 @@ func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.User
 // issueUserSessionCookie 登录成功后签发个人中心会话 Cookie（HttpOnly user_access_token）。
 // 签发失败仅记录日志，绝不阻断登录主流程。
 func issueUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool) {
-	if user == nil {
+	token, maxAge, err := prepareUserSessionCookie(user, rememberMe)
+	if err != nil {
+		helper.GetLogger().Error(fmt.Sprintf("签发用户会话 Cookie 失败: %v", err))
 		return
+	}
+	setUserSessionCookie(ctx, token, maxAge)
+}
+
+func prepareUserSessionCookie(user *dto.UserResponse, rememberMe bool) (string, int, error) {
+	if user == nil {
+		return "", 0, fmt.Errorf("用户为空")
 	}
 	jwtAuthService, err := service.NewJWTAuthServiceWithError()
 	if err != nil {
-		helper.GetLogger().Error(fmt.Sprintf("签发用户会话 Cookie 失败（JWT 配置错误）: %v", err))
-		return
+		return "", 0, fmt.Errorf("JWT 配置错误: %w", err)
 	}
 	token, err := jwtAuthService.GenerateUserToken(user)
 	if err != nil {
-		helper.GetLogger().Error(fmt.Sprintf("签发用户会话 Cookie 失败（生成 Token 错误）: %v", err))
-		return
+		return "", 0, fmt.Errorf("生成 Token 失败: %w", err)
 	}
 
 	maxAge := 0 // 默认会话期，随浏览器关闭失效
@@ -47,7 +60,7 @@ func issueUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *dto
 		// 与 Token 有效期对齐：Cookie 活得更久只会带来无意义的 401
 		maxAge = jwtAuthService.GetConfig().GetAccessTokenHours() * 3600
 	}
-	setUserSessionCookie(ctx, token, maxAge)
+	return token, maxAge, nil
 }
 
 // clearUserSessionCookie 清除个人中心会话 Cookie（登出/切换账号时调用）

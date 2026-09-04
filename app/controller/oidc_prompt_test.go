@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -93,5 +94,26 @@ func oidcRegistrationTestSession() *service.OIDCSession {
 		RedirectURI: "https://client.example/callback?tenant=alpha",
 		State:       "state-1",
 		Prompt:      "create",
+	}
+}
+
+func TestValidateOIDCRegistrationChoiceHonorsPersistedDecision(t *testing.T) {
+	userID := uint(42)
+	confirmed := &service.OIDCSession{
+		Prompt:                      "create",
+		RegistrationCandidateUserID: &userID,
+		RegistrationDecision:        service.OIDCRegistrationChoiceCreate,
+	}
+	if err := validateOIDCRegistrationChoice(nil, confirmed); err != nil {
+		t.Fatalf("confirmed registration should be allowed: %v", err)
+	}
+
+	resolved := &service.OIDCSession{
+		Prompt:                      "create",
+		RegistrationCandidateUserID: &userID,
+		RegistrationDecision:        service.OIDCRegistrationChoiceCurrent,
+	}
+	if err := validateOIDCRegistrationChoice(nil, resolved); !errors.Is(err, service.ErrOIDCRegistrationChoiceResolved) {
+		t.Fatalf("current-account decision should block registration, got %v", err)
 	}
 }

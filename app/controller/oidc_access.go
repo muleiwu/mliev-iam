@@ -10,6 +10,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
+	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
 const (
@@ -138,4 +139,27 @@ func oidcRegistrationUnavailableFailure(
 		return nil, nil
 	}
 	return newOIDCFailure(session, "invalid_request", oidcRegistrationUnavailableDescription)
+}
+
+func captureOIDCRegistrationCandidate(
+	ctx httpInterfaces.RouterContextInterface,
+	sessions *service.OIDCSessionService,
+	app *model.Application,
+	session *service.OIDCSession,
+) error {
+	if session == nil || !promptHas(session.Prompt, "create") || !service.ApplicationAllowsRegistration(app) {
+		return nil
+	}
+	user, err := resolveExistingIAMUser(ctx)
+	if err != nil {
+		return fmt.Errorf("读取当前 IAM 登录账号失败: %w", err)
+	}
+	if user == nil {
+		return nil
+	}
+	if err := sessions.SetRegistrationCandidate(ctx.Request().Context(), session.SessionID, user.ID); err != nil {
+		return fmt.Errorf("记录待确认账号失败: %w", err)
+	}
+	session.RegistrationCandidateUserID = &user.ID
+	return nil
 }

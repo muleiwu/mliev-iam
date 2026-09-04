@@ -76,6 +76,11 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		oc.redirectWithError(c, req.RedirectURI, "server_error", "记录注册状态失败", req.State)
 		return
 	}
+	if err := captureOIDCRegistrationCandidate(c, sessionService, app, session); err != nil {
+		_ = sessionService.DeleteSession(rctx, session.SessionID)
+		oc.redirectWithError(c, req.RedirectURI, "server_error", "读取当前登录状态失败", req.State)
+		return
+	}
 
 	// 3. prompt=none：不允许显示任何 UI。组合冲突已在创建会话前校验。
 	if promptHas(req.Prompt, "none") {

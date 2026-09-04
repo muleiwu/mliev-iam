@@ -184,6 +184,14 @@ https://iam.example.com/oidc/{client_id}/authorize?response_type=code&client_id=
 
 `prompt=create` 不能与其他 `prompt` 值组合。如果目标应用未开放注册，统一认证页会显示明确错误，返回应用时携带 `error=invalid_request` 和原始 `state`。Iframe 集成在 `POST /api/oidc/init-session` 的 JSON 请求中传入同样的 `prompt` 字段。
 
+如果浏览器已登录 IAM，`prompt=create` 仍不会自动使用旧账号。统一认证页会先展示当前账号，由用户选择：
+
+- 继续注册新账号，成功后切换当前 IAM 登录身份。
+- 改用当前账号继续原授权流程。
+- 取消并携带 `error=access_denied` 返回应用。
+
+选择由浏览器绑定的 `POST /api/oidc/registration-choice` 接口处理，请求体为 `{ "sessionId": "...", "choice": "create|current|cancel", "csrfToken": "..." }`。当前账号会在提交选择时重新校验，不会信任前端传入的用户信息。
+
 #### 步骤2: 用户登录并授权后，重定向回客户端
 ```
 http://localhost:3000/callback?
