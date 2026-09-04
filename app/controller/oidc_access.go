@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	oidcAccessDeniedCode        = "access_denied"
-	oidcAccessDeniedDescription = "您没有访问此应用的权限"
+	oidcAccessDeniedCode                   = "access_denied"
+	oidcAccessDeniedDescription            = "您没有访问此应用的权限"
+	oidcRegistrationUnavailableDescription = "当前应用未开放注册"
 )
 
 func buildOIDCErrorRedirectURL(redirectURI, code, description, state string) (string, error) {
@@ -111,4 +112,30 @@ func markOIDCSessionFailed(
 		return fmt.Errorf("记录授权失败状态: %w", err)
 	}
 	return nil
+}
+
+func markOIDCRegistrationUnavailable(
+	ctx context.Context,
+	sessions *service.OIDCSessionService,
+	app *model.Application,
+	session *service.OIDCSession,
+) error {
+	failure, err := oidcRegistrationUnavailableFailure(app, session)
+	if err != nil {
+		return err
+	}
+	if failure == nil {
+		return nil
+	}
+	return markOIDCSessionFailed(ctx, sessions, session.SessionID, failure)
+}
+
+func oidcRegistrationUnavailableFailure(
+	app *model.Application,
+	session *service.OIDCSession,
+) (*dto.AuthorizationFailure, error) {
+	if session == nil || !promptHas(session.Prompt, "create") || service.ApplicationAllowsRegistration(app) {
+		return nil, nil
+	}
+	return newOIDCFailure(session, "invalid_request", oidcRegistrationUnavailableDescription)
 }

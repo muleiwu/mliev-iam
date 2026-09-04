@@ -26,6 +26,13 @@ func IsAdminConsoleApplication(app *model.Application) bool {
 	return app != nil && app.UUID == AdminConsoleApplicationUUID && app.IsProtected
 }
 
+// ApplicationAllowsRegistration is the single policy used by the public
+// client configuration and every server-side registration entry point.
+// The built-in admin console only accepts existing super administrators.
+func ApplicationAllowsRegistration(app *model.Application) bool {
+	return app != nil && !IsAdminConsoleApplication(app)
+}
+
 func adminConsoleProtocolConfig() map[string]interface{} {
 	return map[string]interface{}{
 		"clientId":         AdminConsoleApplicationUUID,
