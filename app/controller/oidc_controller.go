@@ -43,6 +43,12 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		oc.Error(c, constants.ErrCodeBadRequest, "无效的重定向URI")
 		return
 	}
+	prompt, err := normalizeAndValidateOIDCPrompt(req.Prompt)
+	if err != nil {
+		oc.redirectWithError(c, req.RedirectURI, "invalid_request", err.Error(), req.State)
+		return
+	}
+	req.Prompt = prompt
 
 	// 2. 创建 OIDC 会话（携带 prompt 参数）
 	rctx := c.Request().Context()
@@ -65,13 +71,14 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
-	// 3. prompt=none：不允许显示任何 UI（OIDC Core 规定 none 不得与其他值组合）
+	if err := markOIDCRegistrationUnavailable(rctx, sessionService, app, session); err != nil {
+		_ = sessionService.DeleteSession(rctx, session.SessionID)
+		oc.redirectWithError(c, req.RedirectURI, "server_error", "记录注册状态失败", req.State)
+		return
+	}
+
+	// 3. prompt=none：不允许显示任何 UI。组合冲突已在创建会话前校验。
 	if promptHas(req.Prompt, "none") {
-		if len(strings.Fields(req.Prompt)) > 1 {
-			sessionService.DeleteSession(rctx, session.SessionID)
-			oc.redirectWithError(c, req.RedirectURI, "invalid_request", "prompt=none 不能与其他值组合", req.State)
-			return
-		}
 		if ok := oc.trySSO(c, sessionService, session, req, true); ok {
 			return
 		}
@@ -81,7 +88,7 @@ func (oc OIDCController) Authorize(c httpInterfaces.RouterContextInterface) {
 	}
 
 	// 4. prompt=login 强制重新认证、prompt=create 直达注册，其余尝试 SSO 自动认证（不中断交互式流程，仅标记会话）
-	if !promptHas(req.Prompt, "login") && !promptHas(req.Prompt, "create") {
+	if !promptBypassesSSO(req.Prompt) {
 		if oc.trySSO(c, sessionService, session, req, false) {
 			return
 		}
@@ -104,6 +111,41 @@ func promptHas(prompt, value string) bool {
 		}
 	}
 	return false
+}
+
+func promptBypassesSSO(prompt string) bool {
+	return promptHas(prompt, "login") || promptHas(prompt, "create")
+}
+
+// normalizeAndValidateOIDCPrompt validates the space-delimited, case-sensitive
+// prompt parameter and returns a stable representation for the session.
+func normalizeAndValidateOIDCPrompt(prompt string) (string, error) {
+	values := strings.Fields(prompt)
+	if len(values) == 0 {
+		return "", nil
+	}
+
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !service.SupportsOIDCPromptValue(value) {
+			return "", fmt.Errorf("不支持的 prompt 值: %s", value)
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+
+	if _, ok := seen["none"]; ok && len(normalized) > 1 {
+		return "", fmt.Errorf("prompt=none 不能与其他值组合")
+	}
+	if _, ok := seen["create"]; ok && len(normalized) > 1 {
+		return "", fmt.Errorf("prompt=create 不能与其他值组合")
+	}
+
+	return strings.Join(normalized, " "), nil
 }
 
 // Token OIDC令牌端点

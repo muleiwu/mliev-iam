@@ -207,7 +207,7 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 			DarkMode:     "auto",
 		},
 		Features: ClientFeaturesConfig{
-			Registration:     true,
+			Registration:     service.ApplicationAllowsRegistration(app),
 			SocialLogin:      true,
 			EnterpriseLogin:  true,
 			RememberMe:       true,
@@ -223,11 +223,6 @@ func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAg
 		Locale:          "zh-CN",
 		Agreements:      agreements,
 	}
-	if service.IsAdminConsoleApplication(app) {
-		// 管理后台只允许已有超级管理员登录，不能从第一方入口注册新账号。
-		response.Features.Registration = false
-	}
-
 	for _, agreement := range agreements {
 		if agreement.Scope != string(model.AgreementScopeGlobal) {
 			continue
@@ -566,13 +561,6 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 0. 验证码校验
-	captchaManager := captcha.NewManager(helper.GetDatabase())
-	if err := captchaManager.ValidateForScene("register", req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
-		return
-	}
-
 	var registrationAppID *uint
 	var oidcSession *service.OIDCSession
 
@@ -590,11 +578,22 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 			c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话应用")
 			return
 		}
+		if !service.ApplicationAllowsRegistration(app) {
+			c.Error(ctx, constants.ErrCodeForbidden, oidcRegistrationUnavailableDescription)
+			return
+		}
 		registrationAppID = &app.ID
 		oidcSession = session
 	}
 
-	// 2. 根据配置验证注册字段
+	// 2. 验证码校验。先校验应用注册策略，避免禁止注册的会话触发无意义的验证码流程。
+	captchaManager := captcha.NewManager(helper.GetDatabase())
+	if err := captchaManager.ValidateForScene("register", req.CaptchaTicket, ctx.ClientIP(), helper.GetRedis()); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	// 3. 根据配置验证注册字段
 	settingService := service.NewSettingService(helper.GetDatabase())
 	createUserReq := &dto.CreateUserRequest{
 		Username: strings.TrimSpace(req.Username),
@@ -627,7 +626,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 3. 验证邮箱和手机验证码
+	// 4. 验证邮箱和手机验证码
 	emailCodeVerified := false
 	phoneCodeVerified := false
 	config := getVerificationCodeConfig()
@@ -655,7 +654,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		}
 	}
 
-	// 4. 创建用户并记录协议同意
+	// 5. 创建用户并记录协议同意
 	var userResponse *dto.UserResponse
 	err = helper.GetDatabase().Transaction(func(tx *gorm.DB) error {
 		txUserService := service.NewUserService(tx)
@@ -699,7 +698,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 5. 如果有会话，自动登录并衔接授权流程（生成 token、写 refresh_token cookie、返回 NextURL）
+	// 6. 如果有会话，自动登录并衔接授权流程（生成 token、写 refresh_token cookie、返回 NextURL）
 	if req.SessionID != "" && oidcSession != nil {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
 		loginResp, err := c.completeOIDCLogin(ctx, sessionService, oidcSession, req.SessionID, userResponse, req.RememberMe)
@@ -737,7 +736,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 6. 返回成功响应
+	// 7. 返回成功响应
 	response := RegisterResponse{
 		Success: true,
 		Message: "注册成功",
@@ -1806,6 +1805,12 @@ func (c OIDCAuthFlowController) InitSession(ctx httpInterfaces.RouterContextInte
 		c.Error(ctx, constants.ErrCodeBadRequest, "无效的重定向URI")
 		return
 	}
+	prompt, err := normalizeAndValidateOIDCPrompt(req.Prompt)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+	req.Prompt = prompt
 
 	// 2. 创建OIDC会话
 	sessionService := service.NewOIDCSessionService(helper.GetRedis())
@@ -1823,6 +1828,11 @@ func (c OIDCAuthFlowController) InitSession(ctx httpInterfaces.RouterContextInte
 	)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "创建会话失败: "+err.Error())
+		return
+	}
+	if err := markOIDCRegistrationUnavailable(ctx.Request().Context(), sessionService, app, session); err != nil {
+		_ = sessionService.DeleteSession(ctx.Request().Context(), session.SessionID)
+		c.Error(ctx, constants.ErrCodeInternal, "记录注册状态失败: "+err.Error())
 		return
 	}
 
