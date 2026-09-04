@@ -309,6 +309,7 @@ func (receiver Router) InitConfig() map[string]any {
 			apiOidc.POST("/login", controller.OIDCAuthFlowController{}.Login)
 			apiOidc.POST("/login-by-code", controller.OIDCAuthFlowController{}.LoginByCode)
 			apiOidc.POST("/register", controller.OIDCAuthFlowController{}.Register)
+			apiOidc.POST("/registration-choice", controller.OIDCAuthFlowController{}.RegistrationChoice)
 			apiOidc.GET("/auth-info", controller.OIDCAuthFlowController{}.GetAuthInfo)
 			apiOidc.GET("/client-config", controller.OIDCAuthFlowController{}.GetClientConfig)
 			apiOidc.GET("/flow-status", controller.OIDCAuthFlowController{}.GetFlowStatus)

@@ -16,6 +16,7 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "POST", "/api/auth/refresh")
 	router.assertRoute(t, "POST", "/api/auth/logout")
 	router.assertRoute(t, "GET", "/api/oidc/client-config")
+	router.assertRoute(t, "POST", "/api/oidc/registration-choice")
 	router.assertRoute(t, "POST", "/api/oidc/auth/refresh")
 	router.assertRoute(t, "POST", "/api/oidc/auth/logout")
 	router.assertRoute(t, "POST", "/api/oidc/auth/switch-account")

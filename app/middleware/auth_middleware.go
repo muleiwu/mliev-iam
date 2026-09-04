@@ -63,6 +63,21 @@ func validateUserSession(claims *jwt.Claims) error {
 	return validateUserSessionWithDB(helper.GetDatabase(), claims)
 }
 
+// ValidateUserSessionToken validates one raw IAM user-session token without
+// consulting request headers. OIDC registration-intent detection uses this for
+// the HttpOnly user cookie and deliberately ignores JavaScript-supplied bearer
+// tokens.
+func ValidateUserSessionToken(token string) (*jwt.Claims, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("认证令牌为空")
+	}
+	jwtAuthService, err := service.NewJWTAuthServiceWithError()
+	if err != nil {
+		return nil, err
+	}
+	return validateTokenCandidates(jwtAuthService, []string{token})
+}
+
 func validateUserSessionWithDB(database *gorm.DB, claims *jwt.Claims) error {
 	if claims == nil || claims.IssuedAt == nil {
 		return fmt.Errorf("令牌缺少签发时间")

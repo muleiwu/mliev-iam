@@ -106,6 +106,19 @@ type SwitchAccountRequest struct {
 	CsrfToken string `json:"csrfToken" binding:"required"`
 }
 
+type RegistrationChoiceRequest struct {
+	SessionID string `json:"sessionId" binding:"required"`
+	Choice    string `json:"choice" binding:"required,oneof=create current cancel"`
+	CsrfToken string `json:"csrfToken" binding:"required"`
+}
+
+type RegistrationChoiceResponse struct {
+	Success     bool                      `json:"success"`
+	Message     string                    `json:"message"`
+	RedirectURL string                    `json:"redirectUrl,omitempty"`
+	Error       *dto.AuthorizationFailure `json:"error,omitempty"`
+}
+
 // ConsentResponse 授权确认响应
 type ConsentResponse struct {
 	Success     bool                      `json:"success"`
@@ -413,46 +426,48 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		}, nil
 	}
 
-	// 标记会话为已认证
-	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID); err != nil {
-		return nil, fmt.Errorf("更新会话失败: %w", err)
+	// 在改变当前浏览器的账号前，先准备新账号的全部凭据。
+	userSessionToken, userSessionMaxAge, err := prepareUserSessionCookie(user, rememberMe)
+	if err != nil {
+		return nil, fmt.Errorf("准备用户会话失败: %w", err)
 	}
-
-	// 签发个人中心会话 Cookie（先于 OIDC Token 生成，后者降级失败不影响该 Cookie）
-	completeUserLogin(ctx, user, rememberMe)
-
-	// 立即生成 OIDC Token
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
-
-	var accessToken string
-	var expiresIn int64
-
 	issuer := utils.GetBaseURL(ctx, "/oidc")
 	scopes := authService.ParseScopes(session.Scope)
 	tokenResponse, err := authService.GenerateTokens(app, user.ID, scopes, session.Nonce, issuer)
 	if err != nil {
-		helper.GetLogger().Error(fmt.Sprintf("生成 Token 失败: %v", err))
-		// 不阻塞登录流程，继续执行
-	} else {
-		accessToken = tokenResponse.AccessToken
-		expiresIn = tokenResponse.ExpiresIn
-
-		// 设置 Refresh Token 到 HttpOnly Cookie
-		maxAge := 0 // 默认会话期
-		if rememberMe {
-			maxAge = 7 * 24 * 60 * 60 // 7天
-		}
-
-		isSecure := ctx.Request().TLS != nil
-		// SameSite 必须在 SetCookie 之前调用才能生效
-		// HTTPS 使用 None 支持 iframe 跨域场景；HTTP 使用 Lax（开发环境兼容）
-		if isSecure {
-			ctx.SetSameSite(http.SameSiteNoneMode)
-		} else {
-			ctx.SetSameSite(http.SameSiteLaxMode)
-		}
-		ctx.SetCookie("refresh_token", tokenResponse.RefreshToken, maxAge, "/", "", isSecure, true)
+		return nil, fmt.Errorf("生成 Token 失败: %w", err)
 	}
+
+	// 标记会话为已认证
+	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID); err != nil {
+		_ = dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(tokenResponse.RefreshToken)
+		return nil, fmt.Errorf("更新会话失败: %w", err)
+	}
+
+	// 新会话就绪后再撤销旧 refresh token。失败时回滚新会话并保留旧 Cookie。
+	oldRefreshToken, _ := ctx.Cookie("refresh_token")
+	if oldRefreshToken != "" && oldRefreshToken != tokenResponse.RefreshToken {
+		if err := dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(oldRefreshToken); err != nil {
+			_ = sessionService.ResetAuthentication(ctx.Request().Context(), sessionID)
+			_ = dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(tokenResponse.RefreshToken)
+			return nil, fmt.Errorf("撤销旧登录会话失败: %w", err)
+		}
+	}
+
+	setUserSessionCookie(ctx, userSessionToken, userSessionMaxAge)
+	recordSuccessfulUserLogin(ctx, user)
+	refreshMaxAge := 0
+	if rememberMe {
+		refreshMaxAge = 7 * 24 * 60 * 60
+	}
+	isSecure := ctx.Request().TLS != nil
+	if isSecure {
+		ctx.SetSameSite(http.SameSiteNoneMode)
+	} else {
+		ctx.SetSameSite(http.SameSiteLaxMode)
+	}
+	ctx.SetCookie("refresh_token", tokenResponse.RefreshToken, refreshMaxAge, "/", "", isSecure, true)
 
 	// 检查 scope 是否需要用户完善信息
 	missingFields := c.checkMissingUserInfo(session.Scope, user)
@@ -469,8 +484,8 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 			Username: user.Username,
 			RealName: user.RealName,
 		},
-		AccessToken: accessToken, // 返回访问令牌
-		ExpiresIn:   expiresIn,   // 返回过期时间
+		AccessToken: tokenResponse.AccessToken,
+		ExpiresIn:   tokenResponse.ExpiresIn,
 	}
 
 	if len(missingFields) > 0 {
@@ -580,6 +595,15 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		}
 		if !service.ApplicationAllowsRegistration(app) {
 			c.Error(ctx, constants.ErrCodeForbidden, oidcRegistrationUnavailableDescription)
+			return
+		}
+		if err := validateOIDCRegistrationChoice(ctx, session); err != nil {
+			errCode := constants.ErrCodeConflict
+			if !errors.Is(err, service.ErrOIDCRegistrationChoiceResolved) &&
+				!errors.Is(err, service.ErrOIDCRegistrationChoiceRequired) {
+				errCode = constants.ErrCodeInternal
+			}
+			c.Error(ctx, errCode, err.Error())
 			return
 		}
 		registrationAppID = &app.ID
@@ -744,6 +768,30 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	}
 
 	c.Success(ctx, response)
+}
+
+func validateOIDCRegistrationChoice(
+	ctx httpInterfaces.RouterContextInterface,
+	session *service.OIDCSession,
+) error {
+	if session == nil || !promptHas(session.Prompt, "create") || session.RegistrationCandidateUserID == nil {
+		return nil
+	}
+	switch session.RegistrationDecision {
+	case service.OIDCRegistrationChoiceCreate:
+		return nil
+	case "":
+		currentUser, err := resolveExistingIAMUser(ctx)
+		if err != nil {
+			return err
+		}
+		if currentUser != nil {
+			return service.ErrOIDCRegistrationChoiceRequired
+		}
+		return nil
+	default:
+		return service.ErrOIDCRegistrationChoiceResolved
+	}
 }
 
 // Consent OIDC授权确认接口
@@ -1483,6 +1531,142 @@ func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface
 	c.Success(ctx, map[string]any{"success": true, "message": "登出成功"})
 }
 
+// RegistrationChoice resolves the explicit choice shown when prompt=create is
+// started from a browser that already has a valid IAM login.
+// POST /api/oidc/registration-choice
+func (c OIDCAuthFlowController) RegistrationChoice(ctx httpInterfaces.RouterContextInterface) {
+	var req RegistrationChoiceRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
+		return
+	}
+
+	sessions := service.NewOIDCSessionService(helper.GetRedis())
+	session, err := getBoundOIDCSession(ctx, sessions, req.SessionID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
+		return
+	}
+	if session.Error != nil {
+		c.Success(ctx, RegistrationChoiceResponse{
+			Success: false,
+			Message: session.Error.Description,
+			Error:   session.Error,
+		})
+		return
+	}
+	if session.RegistrationCandidateUserID == nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, service.ErrOIDCRegistrationChoiceNotRequired.Error())
+		return
+	}
+
+	switch req.Choice {
+	case service.OIDCRegistrationChoiceCancel:
+		c.cancelRegistrationChoice(ctx, sessions, session, &req)
+	case service.OIDCRegistrationChoiceCreate:
+		if _, err := sessions.ApplyRegistrationChoice(
+			ctx.Request().Context(), req.SessionID, req.CsrfToken, req.Choice, nil,
+		); err != nil {
+			c.registrationChoiceError(ctx, err)
+			return
+		}
+		c.Success(ctx, RegistrationChoiceResponse{Success: true, Message: "已确认创建新账号"})
+	case service.OIDCRegistrationChoiceCurrent:
+		c.continueWithCurrentRegistrationUser(ctx, sessions, session, &req)
+	default:
+		c.Error(ctx, constants.ErrCodeBadRequest, "无效的注册意图选择")
+	}
+}
+
+func (c OIDCAuthFlowController) cancelRegistrationChoice(
+	ctx httpInterfaces.RouterContextInterface,
+	sessions *service.OIDCSessionService,
+	session *service.OIDCSession,
+	req *RegistrationChoiceRequest,
+) {
+	failure, err := newOIDCFailure(session, "access_denied", "用户取消创建新账号")
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, err.Error())
+		return
+	}
+	if _, err := sessions.ApplyRegistrationChoice(
+		ctx.Request().Context(), req.SessionID, req.CsrfToken, req.Choice, nil,
+	); err != nil {
+		c.registrationChoiceError(ctx, err)
+		return
+	}
+	c.Success(ctx, RegistrationChoiceResponse{
+		Success:     false,
+		Message:     "已取消创建新账号",
+		RedirectURL: failure.RedirectURL,
+	})
+}
+
+func (c OIDCAuthFlowController) continueWithCurrentRegistrationUser(
+	ctx httpInterfaces.RouterContextInterface,
+	sessions *service.OIDCSessionService,
+	session *service.OIDCSession,
+	req *RegistrationChoiceRequest,
+) {
+	currentUser, matches, err := sameOIDCBrowserUser(ctx, *session.RegistrationCandidateUserID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "读取当前登录状态失败")
+		return
+	}
+	if !matches {
+		c.Error(ctx, constants.ErrCodeUnauthorized, "当前 IAM 登录状态已失效或账号已变更")
+		return
+	}
+	if _, failure, accessErr := checkOIDCUserAccess(session, currentUser.ID); accessErr != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "检查应用访问权限失败")
+		return
+	} else if failure != nil {
+		if err := markOIDCSessionFailed(ctx.Request().Context(), sessions, req.SessionID, failure); err != nil {
+			c.Error(ctx, constants.ErrCodeInternal, err.Error())
+			return
+		}
+		c.Success(ctx, RegistrationChoiceResponse{Success: false, Message: failure.Description, Error: failure})
+		return
+	}
+
+	currentUserID := currentUser.ID
+	updated, err := sessions.ApplyRegistrationChoice(
+		ctx.Request().Context(), req.SessionID, req.CsrfToken, req.Choice, &currentUserID,
+	)
+	if err != nil {
+		c.registrationChoiceError(ctx, err)
+		return
+	}
+	loginResponse, err := c.completeOIDCLogin(ctx, sessions, updated, req.SessionID, currentUser, true)
+	if err != nil {
+		_ = sessions.ResetRegistrationChoice(ctx.Request().Context(), req.SessionID)
+		c.Error(ctx, constants.ErrCodeInternal, "使用当前账号失败: "+err.Error())
+		return
+	}
+	if loginResponse.Error != nil {
+		c.Success(ctx, RegistrationChoiceResponse{
+			Success: false,
+			Message: loginResponse.Error.Description,
+			Error:   loginResponse.Error,
+		})
+		return
+	}
+	c.Success(ctx, RegistrationChoiceResponse{Success: true, Message: "已使用当前账号继续"})
+}
+
+func (c OIDCAuthFlowController) registrationChoiceError(ctx httpInterfaces.RouterContextInterface, err error) {
+	switch {
+	case errors.Is(err, service.ErrOIDCRegistrationChoiceCSRF):
+		c.Error(ctx, constants.ErrCodeUnauthorized, "CSRF 校验失败")
+	case errors.Is(err, service.ErrOIDCRegistrationChoiceResolved):
+		c.Error(ctx, constants.ErrCodeConflict, err.Error())
+	case errors.Is(err, service.ErrOIDCRegistrationUserChanged):
+		c.Error(ctx, constants.ErrCodeUnauthorized, err.Error())
+	default:
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+	}
+}
+
 // SwitchAccount clears the current user from an OIDC authorization session,
 // preserving the client request so the next login can continue the same flow.
 // It also clears the browser-level SSO cookie to prevent the previous account
@@ -1541,14 +1725,14 @@ func validSwitchAccountCSRF(session *service.OIDCSession, csrfToken string) bool
 // FlowStatusResponse 流程状态响应
 type FlowStatusResponse struct {
 	SessionID string `json:"sessionId"`
-	Status    string `json:"status"` // needs_login | needs_consent | needs_profile | error
+	Status    string `json:"status"` // needs_registration_confirmation | needs_login | needs_consent | needs_profile | error
 	Prompt    string `json:"prompt,omitempty"`
-	// CsrfToken 仅在 status=needs_consent 时下发，供前端在 /oidc/consent approve/reject
-	// 时回传做常量时间校验；其它状态留空。
+	// CsrfToken 在注册意图确认和授权确认状态下下发。
 	CsrfToken     string                    `json:"csrfToken,omitempty"`
 	AutoApprove   bool                      `json:"autoApprove,omitempty"`
 	Client        *FlowStatusClient         `json:"client,omitempty"`
 	User          *FlowStatusUser           `json:"user,omitempty"`
+	ExistingUser  *FlowStatusUser           `json:"existingUser,omitempty"`
 	Scopes        []FlowStatusScope         `json:"scopes,omitempty"`
 	MissingFields []string                  `json:"missingFields,omitempty"`
 	Error         *dto.AuthorizationFailure `json:"error,omitempty"`
@@ -1637,7 +1821,37 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		return
 	}
 
-	// 4. 如果未认证，返回 needs_login
+	// 4. prompt=create 遇到当前浏览器已登录的 IAM 账号时，先要求用户确认。
+	if session.RegistrationCandidateUserID != nil && session.RegistrationDecision == "" {
+		existingUser, matches, resolveErr := sameOIDCBrowserUser(ctx, *session.RegistrationCandidateUserID)
+		if resolveErr != nil {
+			c.Error(ctx, constants.ErrCodeInternal, "读取当前登录状态失败")
+			return
+		}
+		if existingUser != nil {
+			if !matches {
+				if err := sessionService.SetRegistrationCandidate(ctx.Request().Context(), sessionID, existingUser.ID); err != nil {
+					c.Error(ctx, constants.ErrCodeInternal, "更新当前登录账号失败")
+					return
+				}
+			}
+			c.Success(ctx, FlowStatusResponse{
+				SessionID: sessionID,
+				Status:    "needs_registration_confirmation",
+				Prompt:    session.Prompt,
+				CsrfToken: session.CsrfToken,
+				Client:    clientInfo,
+				ExistingUser: &FlowStatusUser{
+					ID:       existingUser.ID,
+					Username: existingUser.Username,
+					RealName: existingUser.RealName,
+				},
+			})
+			return
+		}
+	}
+
+	// 5. 如果未认证，返回 needs_login
 	if !session.IsAuthenticated || session.UserID == nil {
 		c.Success(ctx, FlowStatusResponse{
 			SessionID: sessionID,
@@ -1833,6 +2047,11 @@ func (c OIDCAuthFlowController) InitSession(ctx httpInterfaces.RouterContextInte
 	if err := markOIDCRegistrationUnavailable(ctx.Request().Context(), sessionService, app, session); err != nil {
 		_ = sessionService.DeleteSession(ctx.Request().Context(), session.SessionID)
 		c.Error(ctx, constants.ErrCodeInternal, "记录注册状态失败: "+err.Error())
+		return
+	}
+	if err := captureOIDCRegistrationCandidate(ctx, sessionService, app, session); err != nil {
+		_ = sessionService.DeleteSession(ctx.Request().Context(), session.SessionID)
+		c.Error(ctx, constants.ErrCodeInternal, "读取当前登录状态失败: "+err.Error())
 		return
 	}
 
