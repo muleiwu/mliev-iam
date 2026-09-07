@@ -72,11 +72,3 @@ oidc:
   pkce:
     # 是否允许 PKCE plain 挑战方法（不安全）；默认关闭，仅声明 S256。
     allow_plain: false
-
-# Registry 小程序身份交换，仅允许一个明确配置的机密 OIDC 应用。
-# 默认关闭；此处不需要再保存一份应用密钥，接口复用应用现有的客户端密钥验证。
-miniprogram:
-  identity_exchange:
-    enabled: false
-    client_id: ""
-    connection: "mp-main"
