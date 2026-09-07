@@ -339,6 +339,7 @@ func (receiver Router) InitConfig() map[string]any {
 			externalAuth.POST("/bind-with-login", controller.ExternalAuthController{}.BindWithLogin)
 			externalAuth.POST("/register", controller.ExternalAuthController{}.Register)
 			externalAuth.POST("/:identifier/miniprogram/login", controller.ExternalAuthController{}.MiniProgramLogin)
+			externalAuth.POST("/:identifier/miniprogram/identity", controller.ExternalAuthController{}.MiniProgramIdentity)
 			externalAuth.POST("/:identifier/miniprogram/qrcode", controller.ExternalAuthController{}.CreateMiniProgramQRCode)
 			externalAuth.GET("/:identifier/miniprogram/qrcode/:scanHandle", controller.ExternalAuthController{}.GetMiniProgramQRCodeStatus)
 			externalAuth.POST("/:identifier/miniprogram/qrcode/scan", controller.ExternalAuthController{}.ScanMiniProgramQRCode)
