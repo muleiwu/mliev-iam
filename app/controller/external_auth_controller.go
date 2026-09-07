@@ -176,15 +176,17 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 			}, stateData.OpenerOrigin, "登录失败")
 			return
 		}
-		if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID); err != nil {
-			ec.Error(c, constants.ErrCodeInternal, err.Error())
+		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+			ec.Error(c, 500, "创建登录会话失败: "+err.Error())
 			return
 		}
-		completeUserLogin(c, response.User, false)
 		ec.popup(c, map[string]any{"type": "oidc-external-callback", "needsBind": false, "sessionId": response.SessionID}, stateData.OpenerOrigin, "登录成功")
 		return
 	}
-	completeUserLogin(c, response.User, false)
+	if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+		ec.Error(c, 500, "创建登录会话失败: "+err.Error())
+		return
+	}
 	ec.SuccessWithMessage(c, "登录成功", response)
 }
 
@@ -279,12 +281,14 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 				ec.Success(c, response)
 				return
 			}
-			if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), req.SessionID, response.User.ID); err != nil {
-				ec.Error(c, constants.ErrCodeInternal, err.Error())
-				return
-			}
 		}
-		completeUserLogin(c, response.User, false)
+		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+			ec.Error(c, 500, "创建登录会话失败: "+err.Error())
+			return
+		}
+	}
+	if token, ok := c.Get("login_response_token").(string); ok && response.SessionID == "" {
+		response.Token = token
 	}
 	ec.Success(c, response)
 }
@@ -331,13 +335,12 @@ func (ec ExternalAuthController) GetMiniProgramQRCodeStatus(c httpInterfaces.Rou
 			ec.Success(c, response)
 			return
 		}
-		if err := service.NewOIDCSessionService(helper.GetRedis()).MarkAsAuthenticated(c.Request().Context(), response.SessionID, response.User.ID); err != nil {
-			ec.Error(c, constants.ErrCodeInternal, err.Error())
-			return
-		}
 	}
 	if response.State == service.QRStateConfirmed && response.User != nil {
-		completeUserLogin(c, response.User, false)
+		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+			ec.Error(c, 500, "创建登录会话失败: "+err.Error())
+			return
+		}
 	}
 	if response.State == service.QRStateNeedsBind && response.ContinuationID != "" {
 		setContinuationCookie(c, response.ContinuationCSRF, response.ContinuationID)
@@ -432,12 +435,14 @@ func (ec ExternalAuthController) completeLoginResponse(c httpInterfaces.RouterCo
 			ec.SuccessWithMessage(c, message, response)
 			return
 		}
-		if err := sessionService.MarkAsAuthenticated(c.Request().Context(), sessionID, response.User.ID); err != nil {
-			ec.Error(c, constants.ErrCodeInternal, err.Error())
-			return
-		}
 	}
-	completeUserLogin(c, response.User, false)
+	if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+		ec.Error(c, 500, "创建登录会话失败: "+err.Error())
+		return
+	}
+	if token, ok := c.Get("login_response_token").(string); ok && response.SessionID == "" {
+		response.Token = token
+	}
 	ec.SuccessWithMessage(c, message, response)
 }
 

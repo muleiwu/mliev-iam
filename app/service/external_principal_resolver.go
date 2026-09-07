@@ -302,6 +302,9 @@ func (r *ExternalPrincipalResolver) ResolveConflict(conflictID, canonicalID, tar
 		}
 		now := time.Now()
 		for userID := range userSet {
+			if err := RevokeLoginSessions(tx, userID, "", "", "identity_changed", &reviewerID); err != nil {
+				return err
+			}
 			if err := tx.Model(&model.User{}).Where("id = ?", userID).Update("session_revoked_at", now).Error; err != nil {
 				return err
 			}

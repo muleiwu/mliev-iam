@@ -33,7 +33,7 @@ func resolveExistingIAMUser(ctx httpInterfaces.RouterContextInterface) (*dto.Use
 				return nil, nil
 			}
 			return userService.GetUserByID(token.UserID)
-		case tokenErr != nil && !errors.Is(tokenErr, gorm.ErrRecordNotFound):
+		case tokenErr != nil && !errors.Is(tokenErr, gorm.ErrRecordNotFound) && !errors.Is(tokenErr, dao.ErrLoginSessionInvalid):
 			return nil, tokenErr
 		}
 	}

@@ -1246,6 +1246,9 @@ func (s *DirectorySyncService) applyUserChange(change *model.DirectorySyncChange
 		}).Error; err != nil {
 			return err
 		}
+		if err := RevokeLoginSessions(s.db, *principal.UserID, "", "", "user_disabled", nil); err != nil {
+			return err
+		}
 		return dao.NewOIDCTokenDAO(s.db).RevokeByUser(*principal.UserID)
 	}
 	userID := uintValue(change.AfterData["userId"])

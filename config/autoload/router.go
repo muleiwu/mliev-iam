@@ -59,6 +59,11 @@ func (receiver Router) InitConfig() map[string]any {
 			// 管理员用户管理
 			adminUsers := admin.Group("/users")
 			adminUsers.Use(middleware.AdminAuthMiddleware())
+			adminSessions := admin.Group("/sessions")
+			adminSessions.Use(middleware.AdminAuthMiddleware())
+			adminSessions.GET("", controller.LoginSessionController{}.ListAdmin)
+			adminSessions.POST("/:sid/revoke", controller.LoginSessionController{}.RevokeAdmin)
+			adminUsers.POST("/:id/sessions/revoke-all", controller.LoginSessionController{}.RevokeAllAdmin)
 			adminUsers.POST("", AdminController.UserController{}.CreateUser)
 			adminUsers.GET("", AdminController.UserController{}.GetUserList)
 			adminUsers.GET("/:id", AdminController.UserController{}.GetUser)
@@ -276,7 +281,10 @@ func (receiver Router) InitConfig() map[string]any {
 
 			// 受保护：/api/user/*
 			userAuth := api.Group("/user")
-			userAuth.Use(middleware.AuthMiddleware())
+			userAuth.Use(middleware.UserAuthMiddleware())
+			userAuth.GET("/sessions", controller.LoginSessionController{}.ListMine)
+			userAuth.POST("/sessions/:sid/revoke", controller.LoginSessionController{}.RevokeMine)
+			userAuth.POST("/sessions/revoke-others", controller.LoginSessionController{}.RevokeOthers)
 			userAuth.GET("/profile", controller.UserController{}.GetUserProfile)
 			userAuth.PUT("/profile", controller.UserController{}.UpdateUserProfile)
 			userAuth.PUT("/password", controller.UserController{}.ChangePassword)

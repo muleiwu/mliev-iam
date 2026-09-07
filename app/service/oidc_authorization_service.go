@@ -100,6 +100,9 @@ func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, u
 		return s.errorResponse("access_denied", "您没有访问此应用的权限", req.State), nil
 	}
 
+	if _, err := dao.NewLoginSessionDAO(s.db).Valid(req.LoginSessionID, userID); err != nil {
+		return s.errorResponse("login_required", "登录会话已失效，请重新登录", req.State), nil
+	}
 	// 7. 处理不同的响应类型
 	responseType := model.ResponseType(req.ResponseType)
 	switch responseType {
@@ -157,18 +160,7 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 
 // generateTokensFromCode 基于已消费的授权码生成 token，并设置 authorization_code_id 关联
 func (s *OIDCAuthorizationService) generateTokensFromCode(app *model.Application, authCode *model.AuthorizationCode, issuer string) (*dto.TokenResponse, error) {
-	resp, err := s.GenerateTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer)
-	if err != nil {
-		return nil, err
-	}
-	// 将 token 记录与授权码绑定，便于重放检测时连锁撤销
-	// 通过 access_token hash 反查最新插入的 token 行
-	if token, lookupErr := s.tokenDAO.GetByAccessToken(resp.AccessToken); lookupErr == nil && token != nil {
-		codeID := authCode.ID
-		token.AuthorizationCodeID = &codeID
-		_ = s.tokenDAO.Update(token)
-	}
-	return resp, nil
+	return s.generateSessionTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer, authCode.LoginSessionID, &authCode.ID)
 }
 
 // ExchangeClientCredentials 客户端凭据流程
@@ -277,26 +269,39 @@ func (s *OIDCAuthorizationService) RefreshToken(req *dto.TokenRequest, issuer st
 		return nil, constants.ErrInvalidGrant
 	}
 
-	// 5. 撤销旧令牌
-	token.Revoke()
-	if err := s.tokenDAO.Update(token); err != nil {
-		return nil, constants.ErrServerError
-	}
+	return s.RotateLoginToken(token, app, req.Scope, issuer)
+}
 
-	// 6. 解析请求的作用域
-	var scopes []string
-	if req.Scope != "" {
-		scopes = s.parseScopes(req.Scope)
-		// 验证请求的作用域不能超过原有的作用域
-		if err := s.validateRefreshScopes(token.Scopes, scopes); err != nil {
-			return nil, constants.ErrInvalidScope
+// RotateLoginToken consumes a refresh credential once and preserves its browser
+// session and authorization-code lineage. The session lock also fences revoke.
+func (s *OIDCAuthorizationService) RotateLoginToken(old *model.OIDCToken, app *model.Application, requestedScope, issuer string) (*dto.TokenResponse, error) {
+	var result *dto.TokenResponse
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewLoginSessionDAO(tx).Lock(old.LoginSessionID, old.UserID); err != nil {
+			return constants.ErrInvalidGrant
 		}
-	} else {
-		scopes = token.Scopes
-	}
-
-	// 7. 生成新令牌
-	return s.GenerateTokens(app, token.UserID, scopes, "", issuer)
+		current, err := dao.NewOIDCTokenDAO(tx).GetValidByRefreshToken(old.RefreshToken)
+		if err != nil || current.UserID != old.UserID || current.ClientID != old.ClientID {
+			return constants.ErrInvalidGrant
+		}
+		scopes := current.Scopes
+		if requestedScope != "" {
+			scopes = s.parseScopes(requestedScope)
+			if err := s.validateRefreshScopes(current.Scopes, scopes); err != nil {
+				return constants.ErrInvalidScope
+			}
+		}
+		r := tx.Model(&model.OIDCToken{}).Where("id = ? AND is_revoked = ?", current.ID, false).Update("is_revoked", true)
+		if r.Error != nil {
+			return r.Error
+		}
+		if r.RowsAffected != 1 {
+			return constants.ErrInvalidGrant
+		}
+		result, err = NewOIDCAuthorizationService(tx).generateTokensLocked(app, current.UserID, scopes, "", issuer, current.LoginSessionID, current.AuthorizationCodeID)
+		return err
+	})
+	return result, err
 }
 
 // IntrospectToken 令牌内省（RFC 7662）
@@ -328,6 +333,9 @@ func (s *OIDCAuthorizationService) IntrospectToken(req *dto.IntrospectionRequest
 		}
 	}
 
+	if token.UserID > 0 {
+		_ = dao.NewLoginSessionDAO(s.db).Touch(token.LoginSessionID, "")
+	}
 	// 令牌不属于请求客户端：返回最小信息，避免跨客户端泄漏
 	if token.ClientID != requesterClientID {
 		return &dto.IntrospectionResponse{Active: true}, nil
@@ -399,6 +407,7 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 	clientID := s.getClientIDFromApp(app)
 
 	authCode := &model.AuthorizationCode{
+		LoginSessionID:      req.LoginSessionID,
 		Code:                code,
 		ClientID:            clientID,
 		UserID:              user.ID,
@@ -411,7 +420,15 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 		ExpiresAt:           time.Now().Add(10 * time.Minute),
 	}
 
-	if err := s.authCodeDAO.Create(authCode); err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewLoginSessionDAO(tx).Lock(req.LoginSessionID, user.ID); err != nil {
+			return err
+		}
+		if err := dao.NewAuthorizationCodeDAO(tx).Create(authCode); err != nil {
+			return err
+		}
+		return dao.NewLoginSessionDAO(tx).Extend(req.LoginSessionID, authCode.ExpiresAt)
+	}); err != nil {
 		if logger := helper.GetLogger(); logger != nil {
 			logger.Error(fmt.Sprintf("创建授权码失败 fp=%s err=%v", codeFingerprint(code), err))
 		}
@@ -432,7 +449,7 @@ func (s *OIDCAuthorizationService) handleAuthorizationCodeFlow(req *dto.Authoriz
 // handleImplicitFlow 处理隐式流程
 func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string, issuer string) (*dto.AuthorizeResponse, error) {
 	// 隐式流程直接生成访问令牌
-	tokenResponse, err := s.GenerateTokens(app, user.ID, scopes, req.Nonce, issuer)
+	tokenResponse, err := s.GenerateTokens(app, user.ID, scopes, req.Nonce, issuer, req.LoginSessionID)
 	if err != nil {
 		return s.errorResponse("server_error", "服务器错误", req.State), nil
 	}
@@ -447,7 +464,15 @@ func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest,
 // handleImplicitIDTokenFlow 处理隐式ID令牌流程
 func (s *OIDCAuthorizationService) handleImplicitIDTokenFlow(req *dto.AuthorizeRequest, app *model.Application, user *model.User, scopes []string, issuer string) (*dto.AuthorizeResponse, error) {
 	// 生成ID令牌
-	idToken, err := s.generateIDToken(app, user, scopes, req.Nonce, issuer)
+	var idToken string
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewLoginSessionDAO(tx).Lock(req.LoginSessionID, user.ID); err != nil {
+			return err
+		}
+		var err error
+		idToken, err = NewOIDCAuthorizationService(tx).generateIDToken(app, user, scopes, req.Nonce, issuer)
+		return err
+	})
 	if err != nil {
 		return s.errorResponse("server_error", "服务器错误", req.State), nil
 	}
@@ -572,7 +597,27 @@ func (s *OIDCAuthorizationService) validateRefreshScopes(originalScopes, request
 
 // GenerateTokens 生成访问令牌和刷新令牌（导出以供登录接口使用）
 // ID Token 中包含 at_hash，使客户端可验证 access_token 与 id_token 的绑定关系
-func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string) (*dto.TokenResponse, error) {
+func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID uint, scopes []string, nonce string, issuer string, sessionIDs ...string) (*dto.TokenResponse, error) {
+	if len(sessionIDs) != 1 || sessionIDs[0] == "" {
+		return nil, constants.ErrInvalidGrant
+	}
+	return s.generateSessionTokens(app, userID, scopes, nonce, issuer, sessionIDs[0], nil)
+}
+
+func (s *OIDCAuthorizationService) generateSessionTokens(app *model.Application, userID uint, scopes []string, nonce, issuer, sessionID string, codeID *uint) (*dto.TokenResponse, error) {
+	var result *dto.TokenResponse
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewLoginSessionDAO(tx).Lock(sessionID, userID); err != nil {
+			return constants.ErrInvalidGrant
+		}
+		var err error
+		result, err = NewOIDCAuthorizationService(tx).generateTokensLocked(app, userID, scopes, nonce, issuer, sessionID, codeID)
+		return err
+	})
+	return result, err
+}
+
+func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, userID uint, scopes []string, nonce, issuer, sessionID string, codeID *uint) (*dto.TokenResponse, error) {
 	user, err := s.userService.GetUserModelByID(userID)
 	if err != nil || !user.CanLogin() {
 		return nil, constants.ErrInvalidGrant
@@ -588,14 +633,16 @@ func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID
 	tokenLifetime := s.getTokenLifetimeFromApp(app)
 
 	token := &model.OIDCToken{
-		AccessToken:  accessToken,
-		TokenType:    model.TokenTypeBearer,
-		ClientID:     clientID,
-		UserID:       userID,
-		Scopes:       scopes,
-		RefreshToken: refreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenLifetime) * time.Second),
-		Attributes:   make(map[string]interface{}),
+		LoginSessionID:      sessionID,
+		AuthorizationCodeID: codeID,
+		AccessToken:         accessToken,
+		TokenType:           model.TokenTypeBearer,
+		ClientID:            clientID,
+		UserID:              userID,
+		Scopes:              scopes,
+		RefreshToken:        refreshToken,
+		ExpiresAt:           time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		Attributes:          make(map[string]interface{}),
 	}
 
 	// 生成 ID 令牌（若 scope 包含 openid），并写入 at_hash
@@ -612,6 +659,14 @@ func (s *OIDCAuthorizationService) GenerateTokens(app *model.Application, userID
 		return nil, err
 	}
 
+	until := token.ExpiresAt
+	if token.RefreshExpiresAt != nil && token.RefreshExpiresAt.After(until) {
+		until = *token.RefreshExpiresAt
+	}
+	if err := dao.NewLoginSessionDAO(s.db).Extend(sessionID, until); err != nil {
+		return nil, err
+	}
+	_ = dao.NewLoginSessionDAO(s.db).Touch(sessionID, "")
 	response := &dto.TokenResponse{
 		AccessToken:  accessToken,
 		TokenType:    string(token.TokenType),
@@ -915,4 +970,28 @@ func (s *OIDCAuthorizationService) getTokenLifetimeFromApp(app *model.Applicatio
 		return tokenLifetime
 	}
 	return 3600 // 默认1小时
+}
+
+// GenerateSSOTokens replaces the browser SSO refresh cookie within the same
+// login while allowing an already authenticated user to authorize another app.
+func (s *OIDCAuthorizationService) GenerateSSOTokens(app *model.Application, userID uint, scopes []string, nonce, issuer, sid, previousRefresh string) (*dto.TokenResponse, error) {
+	var result *dto.TokenResponse
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewLoginSessionDAO(tx).Lock(sid, userID); err != nil {
+			return err
+		}
+		if previousRefresh != "" {
+			old, err := dao.NewOIDCTokenDAO(tx).GetValidByRefreshToken(previousRefresh)
+			if err != nil || old.LoginSessionID != sid || old.UserID != userID {
+				return constants.ErrInvalidGrant
+			}
+			if err := dao.NewOIDCTokenDAO(tx).RevokeByRefreshToken(previousRefresh); err != nil {
+				return err
+			}
+		}
+		var err error
+		result, err = NewOIDCAuthorizationService(tx).generateTokensLocked(app, userID, scopes, nonce, issuer, sid, nil)
+		return err
+	})
+	return result, err
 }

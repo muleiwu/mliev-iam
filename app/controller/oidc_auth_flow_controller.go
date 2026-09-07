@@ -10,6 +10,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
@@ -427,20 +428,37 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 	}
 
 	// 在改变当前浏览器的账号前，先准备新账号的全部凭据。
-	userSessionToken, userSessionMaxAge, err := prepareUserSessionCookie(user, rememberMe)
+	inheritSID := ""
+	if session.RegistrationDecision == service.OIDCRegistrationChoiceCurrent {
+		if raw, err := ctx.Cookie(middleware.UserCookieName); err == nil {
+			if claims, err := middleware.ValidateUserSessionToken(raw); err == nil && claims.UserID == user.ID {
+				inheritSID = claims.SessionID
+			}
+		}
+		if inheritSID == "" {
+			return nil, dao.ErrLoginSessionInvalid
+		}
+	}
+	userSessionToken, userSessionMaxAge, loginSID, err := prepareUserSessionCookie(ctx, user, rememberMe, inheritSID)
 	if err != nil {
 		return nil, fmt.Errorf("准备用户会话失败: %w", err)
 	}
+	completed := false
+	defer func() {
+		if !completed && inheritSID == "" {
+			_ = service.NewLoginSessionService(helper.GetDatabase()).Revoke(user.ID, loginSID, "", "login_failed", nil)
+		}
+	}()
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	issuer := utils.GetBaseURL(ctx, "/oidc")
 	scopes := authService.ParseScopes(session.Scope)
-	tokenResponse, err := authService.GenerateTokens(app, user.ID, scopes, session.Nonce, issuer)
+	tokenResponse, err := authService.GenerateTokens(app, user.ID, scopes, session.Nonce, issuer, loginSID)
 	if err != nil {
 		return nil, fmt.Errorf("生成 Token 失败: %w", err)
 	}
 
 	// 标记会话为已认证
-	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID); err != nil {
+	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID, loginSID); err != nil {
 		_ = dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(tokenResponse.RefreshToken)
 		return nil, fmt.Errorf("更新会话失败: %w", err)
 	}
@@ -455,7 +473,10 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		}
 	}
 
-	setUserSessionCookie(ctx, userSessionToken, userSessionMaxAge)
+	if err := finishUserSession(ctx, userSessionToken, userSessionMaxAge, loginSID, user.ID); err != nil {
+		return nil, err
+	}
+	completed = true
 	recordSuccessfulUserLogin(ctx, user)
 	refreshMaxAge := 0
 	if rememberMe {
@@ -861,6 +882,7 @@ func (c OIDCAuthFlowController) Consent(ctx httpInterfaces.RouterContextInterfac
 	// 4. 生成授权码（服务层会再次检查应用访问范围，防止登录后权限被撤销）
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	authReq := &dto.AuthorizeRequest{
+		LoginSessionID:      session.LoginSessionID,
 		ResponseType:        session.ResponseType,
 		ClientID:            session.ClientID,
 		RedirectURI:         session.RedirectURI,
@@ -1495,16 +1517,10 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	issuer := utils.GetBaseURL(ctx, "/oidc")
-	newTokenResponse, err := authService.GenerateTokens(app, oldToken.UserID, oldToken.Scopes, "", issuer)
+	newTokenResponse, err := authService.RotateLoginToken(oldToken, app, "", issuer)
 	if err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, "生成新令牌失败: "+err.Error())
+		c.Error(ctx, 401, "刷新令牌无效或会话已撤销")
 		return
-	}
-
-	// 4. 撤销旧 Token
-	if err := tokenDAO.RevokeByRefreshToken(oldToken.RefreshToken); err != nil {
-		helper.GetLogger().Error(fmt.Sprintf("撤销旧令牌失败: %v", err))
-		// 不阻塞流程，继续执行
 	}
 
 	// 5. 更新 Cookie
@@ -1527,7 +1543,13 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 // Logout 登出接口
 // POST /api/oidc/auth/logout
 func (c OIDCAuthFlowController) Logout(ctx httpInterfaces.RouterContextInterface) {
-	c.revokeRefreshTokenCookie(ctx)
+	if !(UserController{}).requireJSONContentType(ctx) {
+		return
+	}
+	if err := LogoutBrowserSession(ctx, false); err != nil {
+		c.Error(ctx, 500, "退出登录失败，请重试")
+		return
+	}
 	c.Success(ctx, map[string]any{"success": true, "message": "登出成功"})
 }
 
@@ -1696,25 +1718,17 @@ func (c OIDCAuthFlowController) SwitchAccount(ctx httpInterfaces.RouterContextIn
 		return
 	}
 
+	if err := service.NewLoginSessionService(helper.GetDatabase()).Revoke(*session.UserID, session.LoginSessionID, "", "logout", session.UserID); err != nil {
+		c.Error(ctx, 500, "退出原会话失败，请重试")
+		return
+	}
+	ClearLoginSessionCookies(ctx, session.LoginSessionID)
 	if err := sessionService.ResetAuthentication(ctx.Request().Context(), req.SessionID); err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "切换账号失败: "+err.Error())
 		return
 	}
 
-	c.revokeRefreshTokenCookie(ctx)
 	c.Success(ctx, map[string]any{"success": true, "message": "已切换账号"})
-}
-
-func (c OIDCAuthFlowController) revokeRefreshTokenCookie(ctx httpInterfaces.RouterContextInterface) {
-	refreshToken, err := ctx.Cookie("refresh_token")
-	if err == nil && refreshToken != "" {
-		tokenDAO := dao.NewOIDCTokenDAO(helper.GetDatabase())
-		if err := tokenDAO.RevokeByRefreshToken(refreshToken); err != nil {
-			helper.GetLogger().Error(fmt.Sprintf("撤销令牌失败: %v", err))
-		}
-	}
-	ctx.SetCookie("refresh_token", "", -1, "/", "", false, true)
-	clearUserSessionCookie(ctx)
 }
 
 func validSwitchAccountCSRF(session *service.OIDCSession, csrfToken string) bool {

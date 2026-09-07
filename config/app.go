@@ -38,6 +38,7 @@ func (a App) Servers() []interfaces.ServerInterface {
 		&migrations.Server{},
 		&appService.SystemApplicationServer{},
 		&appService.SyncWorkerServer{},
+		&appService.LoginSessionCleanupServer{},
 		&service.HttpServer{},
 	}
 }

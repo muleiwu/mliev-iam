@@ -192,7 +192,7 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"identity_connections", "external_principals", "external_principal_conflicts", "directory_sync_snapshot_objects", "directory_operation_leases"} {
+	for _, table := range []string{"login_sessions", "identity_connections", "external_principals", "external_principal_conflicts", "directory_sync_snapshot_objects", "directory_operation_leases"} {
 		if !gormDB.Migrator().HasTable(table) {
 			t.Fatalf("最终 schema 缺少表 %s", table)
 		}
@@ -202,7 +202,7 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 			t.Fatalf("硬切后仍存在旧表 %s", oldTable)
 		}
 	}
-	const expectedVersion int64 = 20260720161000
+	const expectedVersion int64 = 20260907000000
 	version, err := goose.GetDBVersion(db)
 	if err != nil || version != expectedVersion {
 		t.Fatalf("迁移版本错误: got=%d want=%d err=%v", version, expectedVersion, err)

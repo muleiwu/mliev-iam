@@ -21,7 +21,7 @@ func setupUserDisableTestDB(t *testing.T) *gorm.DB {
 		&gorm.Config{},
 	)
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.OIDCToken{}))
+	require.NoError(t, db.AutoMigrate(&model.LoginSession{}, &model.AuthorizationCode{}, &model.User{}, &model.OIDCToken{}))
 	return db
 }
 

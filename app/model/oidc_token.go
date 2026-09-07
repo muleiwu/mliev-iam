@@ -18,6 +18,7 @@ const (
 // OIDCToken OIDC令牌模型
 // 用于存储访问令牌、刷新令牌和ID令牌
 type OIDCToken struct {
+	LoginSessionID string `gorm:"size:36;not null;default:'';index" json:"-"`
 	// 基础信息
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	AccessToken     string    `gorm:"type:text;not null" json:"accessToken"`

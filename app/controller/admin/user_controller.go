@@ -7,6 +7,7 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
@@ -204,7 +205,8 @@ func (auc UserController) ResetPassword(c httpInterfaces.RouterContextInterface)
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	err = userService.ResetPassword(uint(id), req.NewPassword)
+	actor, _ := middleware.GetCurrentUserID(c)
+	err = userService.ResetPassword(uint(id), req.NewPassword, actor)
 	if err != nil {
 		errCode := constants.ErrCodeUserNotFound
 		if !strings.Contains(err.Error(), "用户不存在") {
