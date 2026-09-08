@@ -1,12 +1,15 @@
 package admin
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"gorm.io/gorm"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -176,9 +179,21 @@ func (ac AuthController) Callback(c httpInterfaces.RouterContextInterface) {
 		c.Redirect(http.StatusSeeOther, adminAuthErrorURL("后台会话配置错误"))
 		return
 	}
-	adminToken, err := jwtService.GenerateAdminToken(user)
+	adminToken, err := jwtService.GenerateAdminToken(user, token.LoginSessionID)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, adminAuthErrorURL("创建后台会话失败"))
+		return
+	}
+	if err := helper.GetDatabase().Transaction(func(tx *gorm.DB) error {
+		if err := dao.NewLoginSessionDAO(tx).Lock(token.LoginSessionID, user.ID); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.LoginSession{}).Where("id = ?", token.LoginSessionID).Update("has_admin_access", true).Error; err != nil {
+			return err
+		}
+		return dao.NewLoginSessionDAO(tx).Extend(token.LoginSessionID, time.Now().Add(jwtService.GetConfig().AccessTokenTTL))
+	}); err != nil {
+		c.Redirect(http.StatusSeeOther, adminAuthErrorURL("登录会话已失效"))
 		return
 	}
 	setAdminAccessCookie(c, adminToken, jwtService.GetConfig().GetAccessTokenHours()*3600)

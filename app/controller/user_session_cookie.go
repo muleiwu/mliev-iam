@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
@@ -13,13 +16,60 @@ import (
 
 // completeUserLogin 完成普通用户登录：签发个人中心 Cookie，并记录登录统计。
 // 登录统计属于辅助信息，写入失败只记录日志，不阻断已经成功的认证流程。
-func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool) {
+func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool, oidcIDs ...string) error {
 	if user == nil {
-		return
+		return fmt.Errorf("用户为空")
 	}
-
-	issueUserSessionCookie(ctx, user, rememberMe)
+	var sid, oidcID string
+	if len(oidcIDs) > 0 {
+		oidcID = oidcIDs[0]
+	}
+	sessions := service.NewOIDCSessionService(helper.GetRedis())
+	if oidcID != "" {
+		transaction, err := getBoundOIDCSession(ctx, sessions, oidcID)
+		if err != nil {
+			return err
+		}
+		if transaction.UserID != nil && *transaction.UserID != user.ID {
+			return fmt.Errorf("登录账号与授权事务不匹配")
+		}
+		sid = transaction.LoginSessionID
+	}
+	token, maxAge, sid, err := prepareUserSessionCookie(ctx, user, rememberMe, sid)
+	if err != nil {
+		return err
+	}
+	if oidcID != "" {
+		if err := sessions.MarkAsAuthenticated(ctx.Request().Context(), oidcID, user.ID, sid); err != nil {
+			_ = service.NewLoginSessionService(helper.GetDatabase()).Revoke(user.ID, sid, "", "login_failed", nil)
+			return err
+		}
+	}
+	if err := finishUserSession(ctx, token, maxAge, sid, user.ID); err != nil {
+		return err
+	}
+	ctx.Set("login_response_token", token)
 	recordSuccessfulUserLogin(ctx, user)
+	return nil
+}
+
+// finishUserSession only replaces browser credentials after durable creation.
+func finishUserSession(ctx httpInterfaces.RouterContextInterface, token string, maxAge int, sid string, userID uint) error {
+	jwtService, err := service.NewJWTAuthServiceWithError()
+	if err != nil {
+		return err
+	}
+	if old, err := ctx.Cookie(middleware.UserCookieName); err == nil && old != "" {
+		if claims, err := jwtService.GetJWTService().LogoutClaims(old); err == nil && claims.SessionID != "" && claims.SessionID != sid {
+			if err := service.NewLoginSessionService(helper.GetDatabase()).Revoke(claims.UserID, claims.SessionID, "", "replaced", &userID); err != nil {
+				_ = service.NewLoginSessionService(helper.GetDatabase()).Revoke(userID, sid, "", "login_failed", nil)
+				return err
+			}
+			ClearLoginSessionCookies(ctx, claims.SessionID)
+		}
+	}
+	setUserSessionCookie(ctx, token, maxAge)
+	return nil
 }
 
 func recordSuccessfulUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse) {
@@ -31,36 +81,45 @@ func recordSuccessfulUserLogin(ctx httpInterfaces.RouterContextInterface, user *
 	}
 }
 
-// issueUserSessionCookie 登录成功后签发个人中心会话 Cookie（HttpOnly user_access_token）。
-// 签发失败仅记录日志，绝不阻断登录主流程。
-func issueUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool) {
-	token, maxAge, err := prepareUserSessionCookie(user, rememberMe)
-	if err != nil {
-		helper.GetLogger().Error(fmt.Sprintf("签发用户会话 Cookie 失败: %v", err))
-		return
-	}
-	setUserSessionCookie(ctx, token, maxAge)
-}
-
-func prepareUserSessionCookie(user *dto.UserResponse, rememberMe bool) (string, int, error) {
+// prepareUserSessionCookie creates or reuses the server-validated login before signing.
+func prepareUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, rememberMe bool, sid string) (string, int, string, error) {
 	if user == nil {
-		return "", 0, fmt.Errorf("用户为空")
+		return "", 0, "", fmt.Errorf("用户为空")
 	}
-	jwtAuthService, err := service.NewJWTAuthServiceWithError()
+	jwtService, err := service.NewJWTAuthServiceWithError()
 	if err != nil {
-		return "", 0, fmt.Errorf("JWT 配置错误: %w", err)
+		return "", 0, "", err
 	}
-	token, err := jwtAuthService.GenerateUserToken(user)
+	if sid == "" {
+		method := "password"
+		path := ctx.Request().URL.Path
+		switch {
+		case strings.Contains(path, "qrcode"):
+			method = "qrcode"
+		case strings.Contains(path, "external") || strings.Contains(path, "miniprogram"):
+			method = "external"
+		case strings.Contains(path, "login-by-code"):
+			method = "verification_code"
+		case strings.Contains(path, "register"):
+			method = "registration"
+		}
+		session, createErr := service.NewLoginSessionService(helper.GetDatabase()).Create(user.ID, method, ctx.ClientIP(), ctx.GetHeader("User-Agent"), time.Now().Add(jwtService.GetConfig().AccessTokenTTL))
+		if createErr != nil {
+			return "", 0, "", createErr
+		}
+		sid = session.ID
+	} else if _, err := dao.NewLoginSessionDAO(helper.GetDatabase()).Valid(sid, user.ID); err != nil {
+		return "", 0, "", err
+	}
+	token, err := jwtService.GenerateUserToken(user, sid)
 	if err != nil {
-		return "", 0, fmt.Errorf("生成 Token 失败: %w", err)
+		return "", 0, sid, err
 	}
-
-	maxAge := 0 // 默认会话期，随浏览器关闭失效
+	maxAge := 0
 	if rememberMe {
-		// 与 Token 有效期对齐：Cookie 活得更久只会带来无意义的 401
-		maxAge = jwtAuthService.GetConfig().GetAccessTokenHours() * 3600
+		maxAge = jwtService.GetConfig().GetAccessTokenHours() * 3600
 	}
-	return token, maxAge, nil
+	return token, maxAge, sid, nil
 }
 
 // clearUserSessionCookie 清除个人中心会话 Cookie（登出/切换账号时调用）

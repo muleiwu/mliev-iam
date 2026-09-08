@@ -19,6 +19,7 @@ import (
 
 // OIDCSession OIDC授权会话
 type OIDCSession struct {
+	LoginSessionID              string                    `json:"login_session_id,omitempty"`
 	SessionID                   string                    `json:"session_id"`
 	ClientID                    string                    `json:"client_id"`
 	RedirectURI                 string                    `json:"redirect_uri"`
@@ -366,12 +367,16 @@ func oidcSessionPromptHas(prompt, value string) bool {
 }
 
 // MarkAsAuthenticated 标记会话为已认证
-func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint) error {
+func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint, loginID string) error {
 	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 
+	if loginID == "" {
+		return fmt.Errorf("缺少登录会话标识")
+	}
+	session.LoginSessionID = loginID
 	session.UserID = &userID
 	session.IsAuthenticated = true
 	session.AuthTime = time.Now()
@@ -390,6 +395,7 @@ func (s *OIDCSessionService) MarkAsFailed(ctx context.Context, sessionID string,
 		return err
 	}
 
+	session.LoginSessionID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false
@@ -475,6 +481,7 @@ func resetAuthenticationState(session *OIDCSession) error {
 		return fmt.Errorf("生成CSRF令牌失败: %w", err)
 	}
 
+	session.LoginSessionID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false

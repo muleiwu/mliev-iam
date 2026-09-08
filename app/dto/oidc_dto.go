@@ -66,6 +66,7 @@ type OIDCClientWithSecretResponse struct {
 
 // AuthorizeRequest 授权请求
 type AuthorizeRequest struct {
+	LoginSessionID      string `json:"-" form:"-"` // Server supplied, never bind from request.
 	ResponseType        string `form:"response_type" binding:"required"`
 	ClientID            string `form:"client_id" binding:"required"`
 	RedirectURI         string `form:"redirect_uri" binding:"required"`

@@ -377,7 +377,12 @@ func (s *UserService) DeleteUser(id uint) error {
 		return err
 	}
 
-	return s.userDao.Delete(id)
+	return s.database.Transaction(func(tx *gorm.DB) error {
+		if err := RevokeLoginSessions(tx, id, "", "", "user_deleted", nil); err != nil {
+			return err
+		}
+		return dao.NewUserDao(tx).Delete(id)
+	})
 }
 
 // GetUserList 获取用户列表
@@ -436,7 +441,7 @@ func (s *UserService) UpdateUserStatus(id uint, req *dto.UserStatusUpdateRequest
 }
 
 // ChangePassword 修改密码
-func (s *UserService) ChangePassword(id uint, req *dto.ChangePasswordRequest) error {
+func (s *UserService) ChangePassword(id uint, req *dto.ChangePasswordRequest, currentSessionIDs ...string) error {
 	// 获取用户
 	user, err := s.userDao.GetByID(id)
 	if err != nil {
@@ -461,7 +466,7 @@ func (s *UserService) ChangePassword(id uint, req *dto.ChangePasswordRequest) er
 		"password_expiry": time.Now().AddDate(0, 3, 0), // 3个月后过期
 	}
 
-	return s.userDao.UpdateById(id, updates)
+	return s.updatePasswordAndRevoke(id, updates, "password_changed", currentSessionIDs, &id)
 }
 
 // BatchOperation 批量操作用户
@@ -481,7 +486,14 @@ func (s *UserService) BatchOperation(req *dto.BatchUserRequest) error {
 			return revokeUserAccess(tx, req.UserIDs)
 		})
 	case "delete":
-		return s.userDao.BatchDelete(req.UserIDs)
+		return s.database.Transaction(func(tx *gorm.DB) error {
+			for _, id := range req.UserIDs {
+				if err := RevokeLoginSessions(tx, id, "", "", "user_deleted", nil); err != nil {
+					return err
+				}
+			}
+			return dao.NewUserDao(tx).BatchDelete(req.UserIDs)
+		})
 	default:
 		return fmt.Errorf("不支持的操作类型: %s", req.Action)
 	}
@@ -492,6 +504,11 @@ func (s *UserService) BatchOperation(req *dto.BatchUserRequest) error {
 func revokeUserAccess(database *gorm.DB, userIDs []uint) error {
 	if len(userIDs) == 0 {
 		return nil
+	}
+	for _, id := range userIDs {
+		if err := RevokeLoginSessions(database, id, "", "", "user_disabled", nil); err != nil {
+			return err
+		}
 	}
 	now := time.Now()
 	if err := database.Model(&model.User{}).Where("id IN ?", userIDs).Updates(map[string]interface{}{
@@ -507,7 +524,7 @@ func revokeUserAccess(database *gorm.DB, userIDs []uint) error {
 }
 
 // ResetPassword 重置密码（管理员操作）
-func (s *UserService) ResetPassword(id uint, newPassword string) error {
+func (s *UserService) ResetPassword(id uint, newPassword string, actorIDs ...uint) error {
 	// 检查用户是否存在
 	_, err := s.userDao.GetByID(id)
 	if err != nil {
@@ -528,7 +545,11 @@ func (s *UserService) ResetPassword(id uint, newPassword string) error {
 		"failure_count":   0,                           // 重置失败次数
 	}
 
-	return s.userDao.UpdateById(id, updates)
+	var actor *uint
+	if len(actorIDs) > 0 {
+		actor = &actorIDs[0]
+	}
+	return s.updatePasswordAndRevoke(id, updates, "password_reset", nil, actor)
 }
 
 // GetUsersByDepartment 根据部门获取用户列表
@@ -827,7 +848,7 @@ func (s *UserService) UpdateVerifiedContact(userID uint, verificationType Verifi
 
 // SetInitialPassword 为无密码用户（社交注册）设置初始密码。
 // 已有密码的用户必须走 ChangePassword 验证旧密码，防止会话劫持后直接改密。
-func (s *UserService) SetInitialPassword(userID uint, newPassword string) error {
+func (s *UserService) SetInitialPassword(userID uint, newPassword string, currentSessionIDs ...string) error {
 	user, err := s.userDao.GetByID(userID)
 	if err != nil {
 		return err
@@ -849,7 +870,7 @@ func (s *UserService) SetInitialPassword(userID uint, newPassword string) error 
 		"failure_count":   0,
 	}
 
-	return s.userDao.UpdateById(userID, updates)
+	return s.updatePasswordAndRevoke(userID, updates, "password_changed", currentSessionIDs, &userID)
 }
 
 // ============= RBAC权限相关方法 =============
@@ -1060,4 +1081,23 @@ func (s *UserService) GetUserMenuTree(userID uint) ([]*model.Permission, error) 
 	}
 
 	return menuPermissions, nil
+}
+
+func (s *UserService) updatePasswordAndRevoke(userID uint, updates map[string]interface{}, reason string, currentSessionIDs []string, actor *uint) error {
+	return s.database.Transaction(func(tx *gorm.DB) error {
+		if err := dao.LockLoginUser(tx, userID); err != nil {
+			return err
+		}
+		except := ""
+		if len(currentSessionIDs) > 0 {
+			except = currentSessionIDs[0]
+			if _, err := dao.NewLoginSessionDAO(tx).Valid(except, userID); err != nil {
+				return err
+			}
+		}
+		if err := dao.NewUserDao(tx).UpdateById(userID, updates); err != nil {
+			return err
+		}
+		return RevokeLoginSessions(tx, userID, "", except, reason, actor)
+	})
 }

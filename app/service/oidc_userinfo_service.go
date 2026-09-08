@@ -53,6 +53,7 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResp
 	}
 
 	// 4. 构建用户信息响应
+	_ = dao.NewLoginSessionDAO(s.db).Touch(token.LoginSessionID, "")
 	return s.BuildUserInfoResponse(user, token.Scopes), nil
 }
 

@@ -1,10 +1,7 @@
 package controller
 
 import (
-	"fmt"
-
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
-	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
@@ -142,11 +139,6 @@ func (c OIDCAuthFlowController) ResetPasswordByCode(ctx httpInterfaces.RouterCon
 	if err := userService.ResetPassword(user.ID, req.NewPassword); err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, "重置密码失败: "+err.Error())
 		return
-	}
-
-	// 重置成功后撤销该用户存量 OIDC 令牌（尽力而为，失败不阻塞流程）
-	if err := dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByUser(user.ID); err != nil {
-		helper.GetLogger().Warn(fmt.Sprintf("找回密码后撤销用户令牌失败 userId=%d err=%v", user.ID, err))
 	}
 
 	c.Success(ctx, map[string]any{

@@ -11,16 +11,18 @@ import (
 // 原先直接依赖 app/dto.UserResponse，解耦后改为本包独立的轻量类型，
 // 便于未来将 jwt 包抽取为独立 SDK。
 type TokenSubject struct {
-	UserID   uint
-	Username string
-	Role     string // 必填，不得为空（GenerateToken 会拒绝空 role，防止静默提权）
+	SessionID string
+	UserID    uint
+	Username  string
+	Role      string // 必填，不得为空（GenerateToken 会拒绝空 role，防止静默提权）
 }
 
 // Claims JWT声明结构
 type Claims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	SessionID string `json:"sid"`
+	UserID    uint   `json:"user_id"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -51,9 +53,10 @@ func (j *JWTService) GenerateToken(sub TokenSubject, expirationHours int) (strin
 
 	// 创建声明
 	claims := &Claims{
-		UserID:   sub.UserID,
-		Username: sub.Username,
-		Role:     sub.Role,
+		SessionID: sub.SessionID,
+		UserID:    sub.UserID,
+		Username:  sub.Username,
+		Role:      sub.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -104,6 +107,22 @@ func (j *JWTService) ValidateToken(tokenString string) (*Claims, error) {
 	return claims, nil
 }
 
+// LogoutClaims verifies the signature while allowing an expired credential to
+// identify cookies to clear. Never use it for authentication or token renewal.
+func (j *JWTService) LogoutClaims(raw string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(raw, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		return j.secretKey, nil
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithoutClaimsValidation())
+	if err != nil || token == nil || !token.Valid {
+		return nil, errors.New("无效的签名")
+	}
+	claims, ok := token.Claims.(*Claims)
+	if !ok || claims.Issuer != j.issuer {
+		return nil, errors.New("无效的签发者")
+	}
+	return claims, nil
+}
+
 // RefreshToken 刷新JWT token
 func (j *JWTService) RefreshToken(tokenString string, expirationHours int) (string, error) {
 	// 验证旧token（即使过期也要能解析出用户信息）
@@ -148,9 +167,10 @@ func (j *JWTService) RefreshToken(tokenString string, expirationHours int) (stri
 
 	// 创建新的声明
 	newClaims := &Claims{
-		UserID:   claims.UserID,
-		Username: claims.Username,
-		Role:     claims.Role,
+		SessionID: claims.SessionID,
+		UserID:    claims.UserID,
+		Username:  claims.Username,
+		Role:      claims.Role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expirationHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

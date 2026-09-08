@@ -101,7 +101,7 @@ func openPrincipalResolverTestDB(t *testing.T) (*gorm.DB, *model.IdentityConnect
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(
+	require.NoError(t, db.AutoMigrate(&model.LoginSession{}, &model.AuthorizationCode{},
 		&model.User{}, &model.IdentityConnection{}, &model.ExternalPrincipal{},
 		&model.ExternalIdentifier{}, &model.ExternalPrincipalConflict{},
 	))

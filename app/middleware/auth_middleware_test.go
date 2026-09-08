@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	internaljwt "cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	jwtlib "github.com/golang-jwt/jwt/v5"
 	"gorm.io/driver/sqlite"
@@ -32,19 +33,23 @@ func openUserSessionTestDB(t *testing.T, withRevocationColumn bool) *gorm.DB {
 		t.Fatalf("create users table: %v", err)
 	}
 
+	if err := database.AutoMigrate(&model.LoginSession{}); err != nil {
+		t.Fatal(err)
+	}
 	return database
 }
 
 func issuedClaims(userID uint, issuedAt time.Time) *internaljwt.Claims {
 	return &internaljwt.Claims{
-		UserID: userID,
+		UserID:    userID,
+		SessionID: "test-session",
 		RegisteredClaims: jwtlib.RegisteredClaims{
 			IssuedAt: jwtlib.NewNumericDate(issuedAt),
 		},
 	}
 }
 
-func TestValidateUserSessionSupportsSchemaBeforeRevocationColumn(t *testing.T) {
+func TestValidateUserSessionRequiresManagedSession(t *testing.T) {
 	database := openUserSessionTestDB(t, false)
 	if err := database.Exec(
 		"INSERT INTO users (id, status, is_activated) VALUES (?, ?, ?)",
@@ -53,8 +58,17 @@ func TestValidateUserSessionSupportsSchemaBeforeRevocationColumn(t *testing.T) {
 		t.Fatalf("insert user: %v", err)
 	}
 
-	if err := validateUserSessionWithDB(database, issuedClaims(1, time.Now())); err != nil {
-		t.Fatalf("active user on pre-migration schema should be accepted: %v", err)
+	claims := issuedClaims(1, time.Now())
+	claims.SessionID = ""
+	if err := validateUserSessionWithDB(database, claims); err == nil {
+		t.Fatal("legacy JWT must be rejected")
+	}
+	claims.SessionID = "test-session"
+	if err := database.Create(&model.LoginSession{ID: claims.SessionID, UserID: 1, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := validateUserSessionWithDB(database, claims); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -68,6 +82,9 @@ func TestValidateUserSessionStillRejectsRevokedSession(t *testing.T) {
 		t.Fatalf("insert user: %v", err)
 	}
 
+	if err := database.Create(&model.LoginSession{ID: "test-session", UserID: 1, CreatedAt: revokedAt.Add(-time.Minute), ExpiresAt: time.Now().Add(time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
 	err := validateUserSessionWithDB(database, issuedClaims(1, revokedAt.Add(-time.Minute)))
 	if err == nil || !strings.Contains(err.Error(), "会话已撤销") {
 		t.Fatalf("revoked session should be rejected, got: %v", err)

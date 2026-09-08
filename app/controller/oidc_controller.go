@@ -9,6 +9,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
@@ -462,14 +463,10 @@ func (oc OIDCController) getJWKSArrayForApplication(db *gorm.DB, clientID string
 
 // 私有方法
 
-// trySSO 尝试基于 refresh_token cookie 完成 SSO。
-//   - silent=true：prompt=none 场景，成功则直接完成授权重定向，失败返回 false
-//   - silent=false：普通场景，仅标记会话为已认证，便于后续 UI 跳过输入密码步骤
-//
-// 重要安全策略（RFC 6749 §6 + OWASP）：
-//   - 每次 SSO 成功都**撤销旧 refresh_token**（连同其 access_token）
-//   - 生成全新的 IAM 内部会话令牌并写入新的 Set-Cookie，实现 refresh token rotation
-//   - 若检测到旧 token 已被使用（可能是攻击者重放），会话链整体撤销
+// trySSO reuses a valid browser login for another authorization transaction.
+// It accepts the IAM cookie or its associated SSO refresh credential, rotates
+// the browser refresh cookie atomically, and preserves the login session ID.
+// silent completes authorization directly; otherwise the UI handles consent.
 func (oc OIDCController) trySSO(
 	c httpInterfaces.RouterContextInterface,
 	sessionService *service.OIDCSessionService,
@@ -478,30 +475,41 @@ func (oc OIDCController) trySSO(
 	silent bool,
 ) bool {
 	rctx := c.Request().Context()
-	refreshToken, cookieErr := c.Cookie("refresh_token")
-	if cookieErr != nil || refreshToken == "" {
-		return false
-	}
-
 	db := helper.GetDatabase()
-	tokenDAO := dao.NewOIDCTokenDAO(db)
-	oldToken, tokenErr := tokenDAO.GetValidByRefreshToken(refreshToken)
-	if tokenErr != nil || oldToken == nil {
+	var loginSID string
+	var userID uint
+	for _, name := range []string{middleware.UserCookieName, middleware.AdminCookieName} {
+		if raw, err := c.Cookie(name); err == nil {
+			if claims, err := middleware.ValidateUserSessionToken(raw); err == nil {
+				loginSID, userID = claims.SessionID, claims.UserID
+				break
+			}
+		}
+	}
+	refreshToken, _ := c.Cookie("refresh_token")
+	oldToken, _ := dao.NewOIDCTokenDAO(db).GetValidByRefreshToken(refreshToken)
+	if loginSID == "" && oldToken != nil {
+		loginSID, userID = oldToken.LoginSessionID, oldToken.UserID
+	}
+	if loginSID == "" {
 		return false
 	}
-
+	if oldToken != nil && oldToken.LoginSessionID != loginSID {
+		oldToken = nil
+	}
 	userService := service.NewUserService(db)
-	userModel, userErr := userService.GetUserModelByID(oldToken.UserID)
+	userModel, userErr := userService.GetUserModelByID(userID)
 	if userErr != nil || userModel == nil || !userModel.CanLogin() {
 		return false
 	}
-	user, userErr := userService.GetUserByID(oldToken.UserID)
+	user, userErr := userService.GetUserByID(userID)
 	if userErr != nil || user == nil {
 		return false
 	}
+	session.LoginSessionID = loginSID
 
 	// 在旋转全局 SSO Cookie、认证事务或签发新 Token 前检查目标应用范围。
-	_, failure, accessErr := checkOIDCUserAccess(session, oldToken.UserID)
+	_, failure, accessErr := checkOIDCUserAccess(session, userID)
 	if accessErr != nil {
 		if silent {
 			sessionService.DeleteSession(rctx, session.SessionID)
@@ -536,27 +544,23 @@ func (oc OIDCController) trySSO(
 		return false
 	}
 
-	// 强制旋转：撤销旧 refresh_token 及其 access_token
-	// 连锁撤销防止攻击者在旧 cookie 泄漏后长期滥用
-	oldToken.Revoke()
-	if err := tokenDAO.Update(oldToken); err != nil {
-		helper.GetLogger().Error(fmt.Sprintf("SSO: 撤销旧 refresh_token 失败 user=%d err=%v", oldToken.UserID, err))
-		if silent {
-			sessionService.DeleteSession(rctx, session.SessionID)
-			oc.redirectWithError(c, req.RedirectURI, "server_error", "会话旋转失败", req.State)
-			return true
-		}
+	if err := sessionService.MarkAsAuthenticated(rctx, session.SessionID, userID, loginSID); err != nil {
+		return false
+	}
+	previousRefresh := ""
+	if oldToken != nil {
+		previousRefresh = oldToken.RefreshToken
+	}
+	if err := oc.reissueSSOCookie(c, session, userID, previousRefresh); err != nil {
+		_ = sessionService.ResetAuthentication(rctx, session.SessionID)
 		return false
 	}
 
-	_ = sessionService.MarkAsAuthenticated(rctx, session.SessionID, oldToken.UserID)
-
 	if !silent {
-		helper.GetLogger().Info(fmt.Sprintf("SSO: 用户 %d 通过 refresh_token 自动认证并旋转", oldToken.UserID))
+		helper.GetLogger().Info(fmt.Sprintf("SSO: 用户 %d 通过 refresh_token 自动认证并旋转", userID))
 		// 旧 token 已在上方旋转撤销，必须在此立即续发新 cookie：
 		// 后续的 Consent 接口不会写 cookie，若不在这里续发，
 		// 浏览器将持有已撤销的凭证，下次访问被迫重新输入密码
-		oc.reissueSSOCookie(c, session, oldToken.UserID)
 		return false
 	}
 
@@ -571,6 +575,7 @@ func (oc OIDCController) trySSO(
 	issuer := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", session.ClientID))
 
 	authReq := &dto.AuthorizeRequest{
+		LoginSessionID:      loginSID,
 		ResponseType:        session.ResponseType,
 		ClientID:            session.ClientID,
 		RedirectURI:         session.RedirectURI,
@@ -580,7 +585,7 @@ func (oc OIDCController) trySSO(
 		CodeChallenge:       session.CodeChallenge,
 		CodeChallengeMethod: session.CodeChallengeMethod,
 	}
-	authResponse, authErr := authService.ProcessAuthorize(authReq, oldToken.UserID, issuer)
+	authResponse, authErr := authService.ProcessAuthorize(authReq, userID, issuer)
 	sessionService.DeleteSession(rctx, session.SessionID)
 	if authErr != nil {
 		oc.redirectWithError(c, req.RedirectURI, "server_error", "处理授权失败", req.State)
@@ -592,7 +597,6 @@ func (oc OIDCController) trySSO(
 	}
 
 	// 续发新的 IAM 内部会话 refresh_token cookie（独立于 RP 的 token）
-	oc.reissueSSOCookie(c, session, oldToken.UserID)
 
 	redirectURL := session.RedirectURI
 	sep := "?"
@@ -608,29 +612,30 @@ func (oc OIDCController) trySSO(
 	return true
 }
 
-// reissueSSOCookie 在旧 refresh_token 被旋转撤销后，为浏览器续发新的 IAM 内部
-// 会话 refresh_token cookie（7 天，与登录接口保持一致）。
-// 任一步骤失败仅记录日志并跳过续发（不阻塞主流程），下次访问将退回密码登录。
+// reissueSSOCookie issues the browser SSO refresh credential within the same
+// persistent login. Rotation failures abort SSO rather than creating an
+// authenticated transaction with unusable credentials.
 func (oc OIDCController) reissueSSOCookie(
 	c httpInterfaces.RouterContextInterface,
 	session *service.OIDCSession,
 	userID uint,
-) {
+	previousRefresh string,
+) error {
 	db := helper.GetDatabase()
 	appService := service.NewApplicationService(db)
 	app, err := appService.GetApplicationByClientID(session.ClientID)
 	if err != nil || app == nil {
 		helper.GetLogger().Error(fmt.Sprintf("SSO: 续发 cookie 时读取应用失败 client=%s err=%v", session.ClientID, err))
-		return
+		return fmt.Errorf("无法续发 SSO 登录凭据")
 	}
 
 	authService := service.NewOIDCAuthorizationService(db)
 	issuer := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", session.ClientID))
 	scopes := authService.ParseScopes(session.Scope)
-	newResp, err := authService.GenerateTokens(app, userID, scopes, session.Nonce, issuer)
+	newResp, err := authService.GenerateSSOTokens(app, userID, scopes, session.Nonce, issuer, session.LoginSessionID, previousRefresh)
 	if err != nil || newResp == nil {
 		helper.GetLogger().Error(fmt.Sprintf("SSO: 续发 refresh_token 失败 user=%d err=%v", userID, err))
-		return
+		return fmt.Errorf("无法续发 SSO 登录凭据")
 	}
 
 	isSecure := c.Request().TLS != nil
@@ -641,6 +646,7 @@ func (oc OIDCController) reissueSSOCookie(
 		c.SetSameSite(http.SameSiteLaxMode)
 	}
 	c.SetCookie("refresh_token", newResp.RefreshToken, 7*24*60*60, "/", "", isSecure, true)
+	return nil
 }
 
 // redirectWithError 重定向并携带错误信息（RFC 6749 §4.1.2.1）

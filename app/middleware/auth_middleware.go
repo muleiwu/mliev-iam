@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
@@ -36,7 +37,11 @@ func extractTokenCandidates(c httpInterfaces.RouterContextInterface) []string {
 		return nil
 	}
 	var candidates []string
-	for _, name := range []string{AdminCookieName, UserCookieName} {
+	names := []string{AdminCookieName, UserCookieName}
+	if c.Get("prefer_user_cookie") == true {
+		names = []string{UserCookieName, AdminCookieName}
+	}
+	for _, name := range names {
 		if cookie, err := c.Cookie(name); err == nil && cookie != "" {
 			candidates = append(candidates, cookie)
 		}
@@ -103,7 +108,11 @@ func validateUserSessionWithDB(database *gorm.DB, claims *jwt.Claims) error {
 	if state.Status != int(model.UserStatusActive) || !state.IsActivated {
 		return fmt.Errorf("用户已停用")
 	}
-	if state.SessionRevokedAt != nil && !claims.IssuedAt.Time.After(*state.SessionRevokedAt) {
+	session, err := dao.NewLoginSessionDAO(database).Valid(claims.SessionID, claims.UserID)
+	if err != nil {
+		return err
+	}
+	if state.SessionRevokedAt != nil && !session.CreatedAt.After(*state.SessionRevokedAt) {
 		return fmt.Errorf("会话已撤销")
 	}
 	return nil
@@ -142,6 +151,7 @@ func authenticate(c httpInterfaces.RouterContextInterface) bool {
 	c.Set("username", claims.Username)
 	c.Set("role", claims.Role)
 	c.Set("claims", claims)
+	_ = dao.NewLoginSessionDAO(helper.GetDatabase()).Touch(claims.SessionID, c.ClientIP())
 	return true
 }
 
@@ -258,4 +268,21 @@ func GetCurrentRole(c httpInterfaces.RouterContextInterface) (string, bool) {
 	}
 	role, ok := v.(string)
 	return role, ok
+}
+
+// UserAuthMiddleware resolves personal cookies before administrator cookies.
+func UserAuthMiddleware() httpInterfaces.HandlerFunc {
+	return func(c httpInterfaces.RouterContextInterface) {
+		c.Set("prefer_user_cookie", true)
+		if authenticate(c) {
+			c.Next()
+		}
+	}
+}
+
+func GetCurrentSessionID(c httpInterfaces.RouterContextInterface) string {
+	if claims, ok := c.Get("claims").(*jwt.Claims); ok && claims != nil {
+		return claims.SessionID
+	}
+	return ""
 }

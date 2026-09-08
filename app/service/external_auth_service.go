@@ -534,19 +534,6 @@ func (s *ExternalAuthService) loginUser(userID uint, isNew, issueToken bool) (*d
 		return nil, err
 	}
 	response := &dto.SocialAuthCallbackResponse{User: userResponse, IsNewUser: isNew}
-	if !issueToken {
-		return response, nil
-	}
-	jwtService, err := ensureJWTAuthService(s.jwtAuthService)
-	if err != nil {
-		return nil, err
-	}
-	s.jwtAuthService = jwtService
-	token, err := jwtService.GenerateUserToken(userResponse)
-	if err != nil {
-		return nil, err
-	}
-	response.Token = token
 	return response, nil
 }
 

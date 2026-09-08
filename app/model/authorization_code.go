@@ -9,6 +9,7 @@ import (
 // AuthorizationCode 授权码模型
 // 用于存储OAuth 2.0授权码信息
 type AuthorizationCode struct {
+	LoginSessionID string `gorm:"size:36;not null;default:'';index" json:"-"`
 	// 基础信息
 	ID   uint   `gorm:"primaryKey" json:"id"`
 	Code string `gorm:"uniqueIndex;size:100;not null" json:"code"`

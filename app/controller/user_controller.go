@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/jwt"
 	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
@@ -48,7 +49,7 @@ func (uc UserController) ChangePassword(c httpInterfaces.RouterContextInterface)
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	err := userService.ChangePassword(userId, &req)
+	err := userService.ChangePassword(userId, &req, middleware.GetCurrentSessionID(c))
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
@@ -102,7 +103,10 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 		return
 	}
 
-	completeUserLogin(c, response, req.RememberMe)
+	if err := completeUserLogin(c, response, req.RememberMe); err != nil {
+		uc.Error(c, 500, "创建登录会话失败")
+		return
+	}
 
 	uc.SuccessWithMessage(c, "登录成功", sanitizeSelfProfile(response))
 }
@@ -191,7 +195,7 @@ func (uc UserController) SetInitialPassword(c httpInterfaces.RouterContextInterf
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	if err := userService.SetInitialPassword(userId, req.NewPassword); err != nil {
+	if err := userService.SetInitialPassword(userId, req.NewPassword, middleware.GetCurrentSessionID(c)); err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
@@ -211,9 +215,13 @@ func (uc UserController) SetInitialPassword(c httpInterfaces.RouterContextInterf
 // Logout 用户退出登录
 // POST /api/auth/logout
 func (uc UserController) Logout(c httpInterfaces.RouterContextInterface) {
-	// 这里可以添加令牌失效逻辑
-	// 例如将令牌加入黑名单或从Redis中删除
-
+	if !uc.requireJSONContentType(c) {
+		return
+	}
+	if err := LogoutBrowserSession(c, false); err != nil {
+		uc.Error(c, 500, "退出登录失败，请重试")
+		return
+	}
 	uc.SuccessWithMessage(c, "退出登录成功", nil)
 }
 
@@ -237,6 +245,12 @@ func (uc UserController) RefreshToken(c httpInterfaces.RouterContextInterface) {
 	jwtAuthService, err := service.NewJWTAuthServiceWithError()
 	if err != nil {
 		uc.Error(c, constants.ErrCodeInternal, "JWT配置错误: "+err.Error())
+		return
+	}
+	refreshClaims, err := middleware.ValidateUserSessionToken(refreshToken)
+	currentClaims, _ := c.Get("claims").(*jwt.Claims)
+	if err != nil || currentClaims == nil || refreshClaims.SessionID != currentClaims.SessionID || refreshClaims.UserID != currentClaims.UserID || refreshClaims.Role != currentClaims.Role {
+		uc.Error(c, 401, "刷新凭据与当前会话不匹配")
 		return
 	}
 	newAccessToken, err := jwtAuthService.RefreshToken(refreshToken)
