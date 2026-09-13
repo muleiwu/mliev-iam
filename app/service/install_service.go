@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/installation"
+	dbConfig "cnb.cool/mliev/open/go-web/pkg/server/database/config"
 	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
@@ -41,7 +45,7 @@ func (s *InstallService) CheckInstallStatus() *dto.InstallCheckResponse {
 	// 检查数据库配置是否存在
 	dbHost := viper.GetString("database.host")
 	dbName := viper.GetString("database.database")
-	if dbHost != "" && dbName != "" {
+	if (dbHost != "" && dbName != "") || (viper.GetString("database.driver") == "sqlite" && viper.GetString("database.filepath") != "") {
 		response.DatabaseConfigured = true
 		response.CurrentDatabase = dbName
 	}
@@ -71,6 +75,9 @@ func (s *InstallService) CheckInstallStatus() *dto.InstallCheckResponse {
 
 // TestDatabaseConnection 测试数据库连接
 func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gorm.DB, error) {
+	if err := validateDatabase(config); err != nil {
+		return nil, err
+	}
 	var dialector gorm.Dialector
 	driver := config.Driver
 	if driver == "" {
@@ -79,42 +86,29 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gor
 
 	switch driver {
 	case "mysql":
-		// 设置默认字符集
-		charset := config.Charset
-		if charset == "" {
-			charset = "utf8mb4"
+		cfg := dbConfig.DatabaseConfig{Driver: "mysql", Host: config.Host, Port: config.Port, Username: config.Username, Password: config.Password, DBName: config.Database}
+		dsn := cfg.GetMySQLDSN()
+		if dsn == "" {
+			return nil, fmt.Errorf("MySQL 连接参数无效")
 		}
-
-		// 构建MySQL DSN
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
-			config.Username,
-			config.Password,
-			config.Host,
-			config.Port,
-			config.Database,
-			charset,
-		)
 		dialector = mysql.Open(dsn)
 
 	case "postgresql":
-		// 构建PostgreSQL DSN
-		dsn := fmt.Sprintf("user=%s password=%s host=%s port=%d dbname=%s sslmode=disable TimeZone=Asia/Shanghai",
-			config.Username,
-			config.Password,
-			config.Host,
-			config.Port,
-			config.Database,
-		)
-		dialector = postgres.New(postgres.Config{
-			DSN:                  dsn,
-			PreferSimpleProtocol: true,
-		})
+		cfg := dbConfig.DatabaseConfig{Driver: "postgresql", Host: config.Host, Port: config.Port, Username: config.Username, Password: config.Password, DBName: config.Database}
+		dsn := cfg.GetPostgreSQLDSN()
+		if dsn == "" {
+			return nil, fmt.Errorf("PostgreSQL 连接参数无效")
+		}
+		dialector = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
 
 	case "sqlite":
 		// SQLite 使用文件路径
 		filePath := config.FilePath
 		if filePath == "" {
 			filePath = "mliev_iam.db"
+		}
+		if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
+			return nil, err
 		}
 		dialector = sqlite.Open(filePath)
 
@@ -144,6 +138,9 @@ func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gor
 
 // TestRedisConnection 测试Redis连接
 func (s *InstallService) TestRedisConnection(config dto.RedisConfig) (*redis.Client, error) {
+	if config.Host == "" || config.Port < 1 || config.Port > 65535 || config.DB < 0 {
+		return nil, fmt.Errorf("Redis 配置无效")
+	}
 	client := redis.NewClient(&redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", config.Host, config.Port),
 		Password: config.Password,
@@ -461,87 +458,13 @@ func (s *InstallService) generatePasswordHash(password string) (salt, hash strin
 
 // UpdateDatabaseConfig 更新数据库配置到配置文件
 func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
-	// 设置驱动类型，默认为 mysql
-	driver := config.Driver
-	if driver == "" {
-		driver = "mysql"
-	}
-
-	// 更新配置
-	viper.Set("database.driver", driver)
-
-	if driver == "sqlite" {
-		// SQLite 只需要文件路径
-		filePath := config.FilePath
-		if filePath == "" {
-			filePath = "mliev_iam.db"
-		}
-		viper.Set("database.filepath", filePath)
-	} else {
-		// MySQL 和 PostgreSQL 需要连接信息
-		viper.Set("database.host", config.Host)
-		viper.Set("database.port", config.Port)
-		viper.Set("database.username", config.Username)
-		viper.Set("database.password", config.Password)
-		viper.Set("database.database", config.Database)
-
-		// MySQL 需要字符集配置
-		if driver == "mysql" {
-			charset := config.Charset
-			if charset == "" {
-				charset = "utf8mb4"
-			}
-			viper.Set("database.charset", charset)
-		}
-	}
-
-	// 写入配置文件
-	// 先尝试 SafeWriteConfig（如果文件不存在会创建）
-	viper.SetConfigFile("./config/config.yaml")
-	if err := viper.SafeWriteConfig(); err != nil {
-		// 如果文件已存在，使用 WriteConfig 更新
-		if err := viper.WriteConfig(); err != nil {
-			return fmt.Errorf("写入数据库配置失败: %w", err)
-		}
-	}
-
-	return nil
+	return installation.PersistSettings(databaseSettings(config))
 }
 
-// UpdateRedisConfig 更新Redis配置到配置文件
 func (s *InstallService) UpdateRedisConfig(config dto.RedisConfig) error {
-	// 更新配置
-	viper.Set("redis.host", config.Host)
-	viper.Set("redis.port", config.Port)
-	viper.Set("redis.password", config.Password)
-	viper.Set("redis.db", config.DB)
-
-	// 写入配置文件
-	viper.SetConfigFile("./config/config.yaml")
-	if err := viper.SafeWriteConfig(); err != nil {
-		// 如果文件已存在，使用 WriteConfig 更新
-		if err := viper.WriteConfig(); err != nil {
-			return fmt.Errorf("写入Redis配置失败: %w", err)
-		}
-	}
-
-	return nil
+	return installation.PersistSettings(map[string]any{"redis.host": config.Host, "redis.port": config.Port, "redis.password": config.Password, "redis.db": config.DB})
 }
 
-// MarkAsInstalled 标记系统为已安装
 func (s *InstallService) MarkAsInstalled() error {
-	// 设置安装标记
-	viper.Set("app.installed", true)
-
-	// 写入配置文件
-	// 先尝试 SafeWriteConfig（如果文件不存在会创建）
-	viper.SetConfigFile("./config/config.yaml")
-	if err := viper.SafeWriteConfig(); err != nil {
-		// 如果文件已存在，使用 WriteConfig 更新
-		if err := viper.WriteConfig(); err != nil {
-			return fmt.Errorf("标记系统已安装失败: %w", err)
-		}
-	}
-
-	return nil
+	return installation.PersistSettings(map[string]any{"app.installed": true})
 }

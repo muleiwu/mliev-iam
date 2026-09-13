@@ -29,6 +29,9 @@ func (receiver Database) InitConfig() map[string]any {
 		host = envOr("DB_FILEPATH", env.GetString("database.filepath", "./config/mliev_iam.db"))
 	}
 
+	if !env.GetBool("app.installed", false) {
+		driver = "memory"
+	}
 	return map[string]any{
 		"database.driver":   driver,
 		"database.host":     host,

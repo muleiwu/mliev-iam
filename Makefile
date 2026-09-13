@@ -45,6 +45,7 @@ build-packages:
 build-frontend: build-packages
 	@$(MAKE) build-oidc-only
 	@$(MAKE) build-antd-only
+	@$(MAKE) build-install-only
 
 # 编译 OIDC 登录 UI（frontend-oidc，独立项目，不依赖 @vben-core）
 # vite.config.ts 的 outDir 已指向 ../static/auth，且 emptyOutDir=true 会自动清理

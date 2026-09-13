@@ -24,7 +24,7 @@ func (sc SystemController) ReloadConfig(c httpInterfaces.RouterContextInterface)
 	helper.GetLogger().Info("管理员触发配置重载")
 
 	// 异步触发重启。go-web 的 TriggerReload 不返回状态；若通道已满会静默丢弃。
-	go reload.TriggerReload()
+	go reload.Restart()
 
 	// 立即返回响应
 	sc.Success(c, ReloadConfigResponse{

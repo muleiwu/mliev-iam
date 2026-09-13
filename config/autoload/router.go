@@ -4,7 +4,9 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"context"
 )
 
 // Router 注册所有 HTTP 路由。
@@ -14,6 +16,8 @@ import (
 //   - 公开与受保护路由共享前缀时，拆成两个同名 Group（不同实例）分别挂载 vs 不挂载中间件。
 //   - 原 Gin 的 .Match(GET|POST, ...) 拆成 .GET 和 .POST 两次注册。
 type Router struct {
+	ExtraRoutes  []func(httpInterfaces.RouterInterface)
+	Capabilities func(context.Context) extension.Capabilities
 }
 
 func (receiver Router) InitConfig() map[string]any {
@@ -45,6 +49,15 @@ func (receiver Router) InitConfig() map[string]any {
 
 			// === 管理员路由 ===
 			admin := api.Group("/admin")
+			capabilityRoutes := admin.Group("")
+			capabilityRoutes.Use(middleware.AdminAuthMiddleware())
+			capabilityRoutes.GET("/capabilities", func(c httpInterfaces.RouterContextInterface) {
+				result := extension.Capabilities{Edition: "community", Version: "1.0.0", Features: map[string]bool{}}
+				if receiver.Capabilities != nil {
+					result = receiver.Capabilities(c.Request().Context())
+				}
+				controller.BaseResponse{}.Success(c, result)
+			})
 
 			// 管理员认证：OIDC 发起/回调公开，其余需要 AdminAuth
 			adminAuthPublic := admin.Group("/auth")
@@ -376,6 +389,9 @@ func (receiver Router) InitConfig() map[string]any {
 			// === Webhook ===
 			webhookOidc := router.Group("/webhook/oidc")
 			webhookOidc.POST("/consent", controller.OIDCAuthFlowController{}.Consent)
+			for _, register := range receiver.ExtraRoutes {
+				register(router)
+			}
 		},
 	}
 }
