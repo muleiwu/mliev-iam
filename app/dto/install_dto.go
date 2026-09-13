@@ -2,6 +2,7 @@ package dto
 
 // InstallCheckResponse 安装检查响应
 type InstallCheckResponse struct {
+	Ready              bool   `json:"ready"`
 	Installed          bool   `json:"installed"`                 // 是否已安装
 	DatabaseConnected  bool   `json:"databaseConnected"`         // 数据库是否连接
 	DatabaseConfigured bool   `json:"databaseConfigured"`        // 数据库是否已配置
@@ -11,21 +12,21 @@ type InstallCheckResponse struct {
 
 // InstallSubmitRequest 安装提交请求
 type InstallSubmitRequest struct {
-	Database DatabaseConfig   `json:"database" binding:"required"` // 数据库配置
-	Redis    RedisConfig      `json:"redis" binding:"required"`    // Redis配置
-	Admin    AdminAccountInfo `json:"admin" binding:"required"`    // 管理员账户信息
+	Database DatabaseConfig   `json:"database"`                 // 数据库配置
+	Redis    RedisConfig      `json:"redis" binding:"required"` // Redis配置
+	Admin    AdminAccountInfo `json:"admin" binding:"required"` // 管理员账户信息
 }
 
 // DatabaseConfig 数据库配置
 type DatabaseConfig struct {
-	Driver   string `json:"driver"`                                  // 数据库驱动类型：mysql、postgresql、sqlite
-	FilePath string `json:"filePath"`                                // SQLite 数据库文件路径（仅sqlite时使用）
-	Host     string `json:"host" binding:"required"`                 // 数据库主机地址
-	Port     int    `json:"port" binding:"required,min=1,max=65535"` // 数据库端口
-	Username string `json:"username" binding:"required"`             // 数据库用户名
-	Password string `json:"password" binding:"required"`             // 数据库密码
-	Database string `json:"database" binding:"required"`             // 数据库名称
-	Charset  string `json:"charset"`                                 // 字符集，默认 utf8mb4
+	Driver   string `json:"driver"`   // 数据库驱动类型：mysql、postgresql、sqlite
+	FilePath string `json:"filePath"` // SQLite 数据库文件路径（仅sqlite时使用）
+	Host     string `json:"host"`     // 数据库主机地址
+	Port     int    `json:"port"`     // 数据库端口
+	Username string `json:"username"` // 数据库用户名
+	Password string `json:"password"` // 数据库密码
+	Database string `json:"database"` // 数据库名称
+	Charset  string `json:"charset"`  // 字符集，默认 utf8mb4
 }
 
 // AdminAccountInfo 管理员账户信息

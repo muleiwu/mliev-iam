@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	"net/http"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
@@ -13,6 +14,7 @@ type BaseResponse struct {
 
 // Success 成功响应
 func (receiver BaseResponse) Success(c httpInterfaces.RouterContextInterface, data any) {
+	c.Set(extension.ResponseCodeKey, constants.ErrCodeSuccess)
 	c.JSON(http.StatusOK, dto.Response{
 		Code:    constants.ErrCodeSuccess,
 		Message: constants.GetErrMessage(constants.ErrCodeSuccess),
@@ -22,6 +24,7 @@ func (receiver BaseResponse) Success(c httpInterfaces.RouterContextInterface, da
 
 // SuccessWithMessage 带自定义消息的成功响应
 func (receiver BaseResponse) SuccessWithMessage(c httpInterfaces.RouterContextInterface, message string, data any) {
+	c.Set(extension.ResponseCodeKey, constants.ErrCodeSuccess)
 	c.JSON(http.StatusOK, dto.Response{
 		Code:    constants.ErrCodeSuccess,
 		Message: message,
@@ -36,6 +39,7 @@ func (receiver BaseResponse) Error(c httpInterfaces.RouterContextInterface, code
 		message = constants.GetErrMessage(code)
 	}
 
+	c.Set(extension.ResponseCodeKey, code)
 	c.JSON(httpStatus, dto.Response{
 		Code:    code,
 		Message: message,
@@ -49,6 +53,7 @@ func (receiver BaseResponse) ErrorWithData(c httpInterfaces.RouterContextInterfa
 		message = constants.GetErrMessage(code)
 	}
 
+	c.Set(extension.ResponseCodeKey, code)
 	c.JSON(httpStatus, dto.Response{
 		Code:    code,
 		Message: message,
