@@ -21,8 +21,11 @@ func (receiver Http) InitConfig() map[string]any {
 	if defaultAddr == "" {
 		defaultAddr = ":8080"
 	}
-	staticDirs := env.GetStringSlice("http.static_dir", []string{"admin", "auth", "install", "static"})
+	staticDirs := slices.DeleteFunc(append([]string(nil), env.GetStringSlice("http.static_dir", []string{"admin", "auth", "static"})...), func(dir string) bool { return dir == "install" })
 	for _, dir := range receiver.ExtraStaticDirs {
+		if dir == "install" {
+			continue
+		}
 		if !slices.Contains(staticDirs, dir) {
 			staticDirs = append(staticDirs, dir)
 		}

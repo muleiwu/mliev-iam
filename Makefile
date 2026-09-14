@@ -1,4 +1,4 @@
-.PHONY: all install-frontend build-frontend build-packages build-oidc build-install build-oidc-only build-antd build-antd-only build-install-only build-go release dev-build-frontend dev-go dev run clean clean-oidc clean-antd clean-go clean-packages help migrate-new migrate-status migrate-up migrate-down
+.PHONY: all help install-frontend build-packages build-frontend build-oidc build-oidc-only build-antd build-antd-only build-go release dev-build-frontend dev-go dev run run-go clean clean-oidc clean-antd clean-packages clean-go migrate-new migrate-status migrate-up migrate-down
 
 # 默认目标：编译所有内容
 all: build-frontend build-go
@@ -11,7 +11,6 @@ help:
 	@echo "  make build-frontend     - 编译所有前端应用（包含核心包）"
 	@echo "  make build-packages     - 仅编译 @vben-core 核心包"
 	@echo "  make build-oidc         - 编译 frontend-oidc（OIDC 登录/同意 UI）"
-	@echo "  make build-install      - 编译 web-install 前端"
 	@echo "  make build-antd         - 编译 web-antd 前端"
 	@echo "  make build-go           - 编译 Go 后端"
 	@echo "  make release            - 交叉编译发布（goreleaser）"
@@ -43,9 +42,9 @@ build-packages:
 
 # 编译所有前端应用（先确保核心包已构建）
 build-frontend: build-packages
+	@rm -rf static/install
 	@$(MAKE) build-oidc-only
 	@$(MAKE) build-antd-only
-	@$(MAKE) build-install-only
 
 # 编译 OIDC 登录 UI（frontend-oidc，独立项目，不依赖 @vben-core）
 # vite.config.ts 的 outDir 已指向 ../static/auth，且 emptyOutDir=true 会自动清理
@@ -67,16 +66,8 @@ build-antd-only:
 	@cd admin-web && pnpm build:antd
 	@echo "==> web-antd 前端编译完成！产物已写入 static/admin"
 
-# 编译 web-install 前端（包含核心包依赖）
-build-install: build-packages build-install-only
 
-# 编译 web-install 前端（仅应用本身，不构建核心包）
 # vite.config.mts 的 outDir 已指向 ../../../static/install，且 emptyOutDir=true 会自动清理
-build-install-only:
-	@echo "==> 开始编译 web-install 前端..."
-	@rm -rf static/install
-	@cd admin-web && pnpm build:install
-	@echo "==> web-install 前端编译完成！产物已写入 static/install"
 
 # 编译 Go 后端
 build-go:
@@ -94,10 +85,7 @@ dev-build-frontend:
 	@echo "==> 启动开发模式..."
 	@echo "==> 启动 frontend-oidc watch 模式（后台运行）..."
 	@cd frontend-oidc && pnpm dev &
-	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-antd && pnpm dev:static
 
 dev-go:
 	@echo "==> 启动 Go 后端 (mode=debug)..."
@@ -108,10 +96,7 @@ dev:
 	@echo "==> 启动开发模式..."
 	@echo "==> 启动 frontend-oidc watch 模式（后台运行）..."
 	@cd frontend-oidc && pnpm dev &
-	@echo "==> 启动 web-install 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-install && pnpm dev:static &
 	@echo "==> 启动 web-antd 前端 watch 模式（后台运行）..."
-	@cd admin-web/apps/web-antd && pnpm dev:static &
 	@sleep 3
 	@echo "==> 启动 Go 后端 (mode=debug)..."
 	@mode=debug go run .

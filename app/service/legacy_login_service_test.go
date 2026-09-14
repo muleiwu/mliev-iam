@@ -13,7 +13,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
-	"github.com/glebarez/sqlite"
+	"cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	"gorm.io/gorm"
 )
 

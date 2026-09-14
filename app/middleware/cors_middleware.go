@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,11 @@ func CorsWithConfig(config CorsConfig) httpInterfaces.HandlerFunc {
 	}
 
 	return func(c httpInterfaces.RouterContextInterface) {
+		p := path.Clean(c.Path())
+		if p == "/install" || strings.HasPrefix(p, "/install/") {
+			c.Next()
+			return
+		}
 		origin := c.GetHeader("Origin")
 		allowed := ""
 

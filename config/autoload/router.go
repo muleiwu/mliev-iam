@@ -4,6 +4,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"context"
@@ -16,6 +17,7 @@ import (
 //   - 公开与受保护路由共享前缀时，拆成两个同名 Group（不同实例）分别挂载 vs 不挂载中间件。
 //   - 原 Gin 的 .Match(GET|POST, ...) 拆成 .GET 和 .POST 两次注册。
 type Router struct {
+	Setup        func() *service.SetupInstaller
 	ExtraRoutes  []func(httpInterfaces.RouterInterface)
 	Capabilities func(context.Context) extension.Capabilities
 }
@@ -23,6 +25,9 @@ type Router struct {
 func (receiver Router) InitConfig() map[string]any {
 	return map[string]any{
 		"http.router": func(router httpInterfaces.RouterInterface) {
+			if receiver.Setup != nil {
+				receiver.Setup().Register(router)
+			}
 			// 首页
 			router.GET("/", controller.IndexController{}.GetIndex)
 
@@ -34,12 +39,9 @@ func (receiver Router) InitConfig() map[string]any {
 			// API 路由组
 			api := router.Group("/api")
 
-			// 系统安装（公开访问，中间件 InstallCheckMiddleware 会放行 /api/install/*）
+			// 保留只读就绪接口；安装写操作由 setup-kit 提供。
 			install := api.Group("/install")
 			install.GET("/check", controller.InstallController{}.CheckInstall)
-			install.POST("/test-connection", controller.InstallController{}.TestConnection)
-			install.POST("/test-redis", controller.InstallController{}.TestRedisConnection)
-			install.POST("/submit", controller.InstallController{}.SubmitInstall)
 
 			// 系统级路由（非 /admin 命名空间，仅管理员可访问）
 			adminSystem := api.Group("/system")
