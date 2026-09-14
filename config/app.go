@@ -8,7 +8,6 @@ import (
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	cacheAssembly "cnb.cool/mliev/open/go-web/pkg/server/cache/assembly"
 	configAssembly "cnb.cool/mliev/open/go-web/pkg/server/config/assembly"
-	databaseAssembly "cnb.cool/mliev/open/go-web/pkg/server/database/assembly"
 	envAssembly "cnb.cool/mliev/open/go-web/pkg/server/env/assembly"
 	"cnb.cool/mliev/open/go-web/pkg/server/http_server/service"
 	loggerAssembly "cnb.cool/mliev/open/go-web/pkg/server/logger/assembly"
@@ -32,7 +31,7 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 		&envAssembly.Env{},
 		&configAssembly.Config{DefaultConfigs: Config{Modules: a.Modules, Edition: a.Edition, Version: a.Version, DefaultHTTPAddr: a.DefaultHTTPAddr}.Get()},
 		&loggerAssembly.Logger{},
-		&databaseAssembly.Database{},
+		&bootstrapDatabase{},
 		&bootstrapRedis{},
 		&cacheAssembly.Cache{},
 		&startupChecks{modules: a.Modules},
