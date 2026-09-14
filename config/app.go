@@ -8,7 +8,6 @@ import (
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	cacheAssembly "cnb.cool/mliev/open/go-web/pkg/server/cache/assembly"
 	configAssembly "cnb.cool/mliev/open/go-web/pkg/server/config/assembly"
-	databaseAssembly "cnb.cool/mliev/open/go-web/pkg/server/database/assembly"
 	envAssembly "cnb.cool/mliev/open/go-web/pkg/server/env/assembly"
 	"cnb.cool/mliev/open/go-web/pkg/server/http_server/service"
 	loggerAssembly "cnb.cool/mliev/open/go-web/pkg/server/logger/assembly"
@@ -20,6 +19,10 @@ type App struct {
 	Edition         string
 	Version         string
 	DefaultHTTPAddr string
+	// Optional installation branding and final destination. Empty values retain
+	// the edition's standard name and the /admin/ destination.
+	SetupName      string
+	SetupEntryPath string
 }
 
 // Assemblies 声明装配顺序 env → config → logger → database → redis → cache。
@@ -28,11 +31,11 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 		&envAssembly.Env{},
 		&configAssembly.Config{DefaultConfigs: Config{Modules: a.Modules, Edition: a.Edition, Version: a.Version, DefaultHTTPAddr: a.DefaultHTTPAddr}.Get()},
 		&loggerAssembly.Logger{},
-		&databaseAssembly.Database{},
+		&bootstrapDatabase{},
 		&bootstrapRedis{},
 		&cacheAssembly.Cache{},
 		&startupChecks{modules: a.Modules},
-		&setupAssembly{edition: a.Edition},
+		&setupAssembly{edition: a.Edition, options: appService.SetupOptions{Name: a.SetupName, EntryPath: a.SetupEntryPath}},
 	}
 }
 

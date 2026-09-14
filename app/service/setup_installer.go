@@ -1,12 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
 	_ "embed"
 	"encoding/base64"
+	"fmt"
+	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,6 +18,7 @@ import (
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/installation"
 	dbConfig "cnb.cool/mliev/open/go-web/pkg/server/database/config"
@@ -38,6 +43,8 @@ import (
 //go:embed setup_enter.html
 var setupEnterHTML []byte
 
+var setupEnterTemplate = template.Must(template.New("setup-enter").Parse(string(setupEnterHTML)))
+
 //go:embed setup_enter.js
 var setupEnterJS []byte
 
@@ -48,20 +55,48 @@ var setupLogo []byte
 var setupFavicon []byte
 
 type SetupInstaller struct {
-	Kit   *setupkit.Kit
-	ready func() bool
+	Kit       *setupkit.Kit
+	ready     func() bool
+	entryPath string
+	enterHTML []byte
 }
 
-func NewSetupInstaller(edition string, installed bool, ready func() bool) (*SetupInstaller, error) {
+// SetupOptions customizes presentation without duplicating installation logic.
+type SetupOptions struct {
+	Name      string
+	EntryPath string
+}
+
+func NewSetupInstaller(edition string, installed bool, ready func() bool, options ...SetupOptions) (*SetupInstaller, error) {
+	if len(options) > 1 {
+		return nil, fmt.Errorf("provide at most one setup options value")
+	}
+	var presentation SetupOptions
+	if len(options) == 1 {
+		presentation = options[0]
+	}
+	if presentation.Name == "" {
+		presentation.Name = "MLiev IAM"
+		if edition == "enterprise" {
+			presentation.Name += " Enterprise"
+		}
+	}
+	if presentation.EntryPath == "" {
+		presentation.EntryPath = "/admin/"
+	}
+	entry, err := url.Parse(presentation.EntryPath)
+	if err != nil || entry.IsAbs() || entry.Host != "" || !strings.HasPrefix(entry.Path, "/") || strings.HasPrefix(entry.Path, "//") || strings.ContainsAny(entry.Path, "\\\r\n") || strings.ContainsAny(presentation.EntryPath, "\\\r\n") {
+		return nil, fmt.Errorf("setup entry must be a site-relative path")
+	}
+	var enterHTML bytes.Buffer
+	if err := setupEnterTemplate.Execute(&enterHTML, presentation); err != nil {
+		return nil, err
+	}
 	configPath := installation.ConfigPath()
 	if !installed {
 		if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
 			return nil, err
 		}
-	}
-	name := "MLiev IAM"
-	if edition == "enterprise" {
-		name += " Enterprise"
 	}
 	db := presets.Database("database", "mysql", "postgresql", "sqlite")
 	db.Connections[0].ConfigKeys = map[string]string{"database": "database"}
@@ -70,12 +105,18 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool) (*Setu
 		"sqlite.path": filepath.Join(filepath.Dir(configPath), "mliev_iam.db"),
 	}
 	admin := presets.Admin()
+	for i := range admin.Fields {
+		if admin.Fields[i].Key == "admin.username" {
+			admin.Fields[i].Pattern = utils.UsernamePattern
+			admin.Fields[i].Help = "3–50 位字母、数字或下划线，纯数字账户保留前导零。"
+		}
+	}
 	admin.Fields = append(admin.Fields,
 		setupkit.Field{Key: "admin.realName", Label: "姓名", Type: "text", Required: true, MaxLength: 50},
 		setupkit.Field{Key: "admin.phone", Label: "手机号", Type: "text", MaxLength: 20})
 	jwtConfigured := os.Getenv("JWT_SECRET_KEY") != "" || viper.GetString("jwt.secret") != ""
 	kit, err := setupkit.New(setupkit.Options{
-		Name: name, Description: "配置数据库与 Redis，创建系统管理员。",
+		Name: presentation.Name, Description: "配置数据库与 Redis，创建系统管理员。",
 		BasePath: "/install", RedirectURL: "/install/enter", Logo: "/install/logo.svg",
 		Store:          &installation.SetupStore{FileStore: setupkit.FileStore{ConfigPath: configPath}, InstalledAtStartup: installed},
 		Steps:          []setupkit.Step{db, presets.Redis("redis", nil), admin},
@@ -118,7 +159,7 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool) (*Setu
 	if err != nil {
 		return nil, err
 	}
-	return &SetupInstaller{Kit: kit, ready: ready}, nil
+	return &SetupInstaller{Kit: kit, ready: ready, entryPath: presentation.EntryPath, enterHTML: enterHTML.Bytes()}, nil
 }
 
 func withSetupDatabase(ctx context.Context, connection setupkit.ConnectionValues, run func(*gorm.DB, *sql.DB) error) error {
@@ -185,14 +226,14 @@ func (s *SetupInstaller) Register(router httpInterfaces.RouterInterface) {
 		c.SetHeader("Cache-Control", "no-store")
 		c.SetHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'")
 		if s.ready() {
-			c.Redirect(http.StatusFound, "/admin/")
+			c.Redirect(http.StatusFound, s.entryPath)
 			return
 		}
 		if !s.Kit.Status().Installed {
 			c.Redirect(http.StatusFound, "/install/")
 			return
 		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", setupEnterHTML)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", s.enterHTML)
 	})
 	router.GET("/install/enter.js", func(c httpInterfaces.RouterContextInterface) {
 		c.SetHeader("Cache-Control", "no-store")
