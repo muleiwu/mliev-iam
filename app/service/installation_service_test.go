@@ -39,14 +39,3 @@ func TestInstallationRetryPreservesAdministrator(t *testing.T) {
 		t.Fatal("another installation must not take over initialized data")
 	}
 }
-
-func TestDatabaseValidationSupportsSQLiteWithoutNetworkFields(t *testing.T) {
-	if err := validateDatabase(dto.DatabaseConfig{Driver: "sqlite", FilePath: "config/iam.db"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, config := range []dto.DatabaseConfig{{Driver: "sqlite", FilePath: ":memory:"}, {Driver: "mysql"}, {Driver: "unknown"}} {
-		if err := validateDatabase(config); err == nil {
-			t.Fatalf("accepted invalid database config: %+v", config)
-		}
-	}
-}

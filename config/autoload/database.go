@@ -33,13 +33,15 @@ func (receiver Database) InitConfig() map[string]any {
 		driver = "memory"
 	}
 	return map[string]any{
-		"database.driver":   driver,
-		"database.host":     host,
-		"database.filepath": envOr("DB_FILEPATH", env.GetString("database.filepath", "./config/mliev_iam.db")),
-		"database.port":     env.GetInt("database.port", 3306),
-		"database.dbname":   envOr("DB_DATABASE", env.GetString("database.database", "test")),
-		"database.username": envOr("DB_USERNAME", env.GetString("database.username", "test")),
-		"database.password": envOr("DB_PASSWORD", env.GetString("database.password", "123456")),
-		"database.charset":  envOr("DB_CHARSET", env.GetString("database.charset", "utf8mb4")),
+		"database.driver":                 driver,
+		"database.host":                   host,
+		"database.filepath":               envOr("DB_FILEPATH", env.GetString("database.filepath", "./config/mliev_iam.db")),
+		"database.port":                   env.GetInt("database.port", 3306),
+		"database.dbname":                 envOr("DB_DATABASE", env.GetString("database.database", "test")),
+		"database.username":               envOr("DB_USERNAME", env.GetString("database.username", "test")),
+		"database.password":               envOr("DB_PASSWORD", env.GetString("database.password", "123456")),
+		"database.charset":                envOr("DB_CHARSET", env.GetString("database.charset", "utf8mb4")),
+		"database.tls":                    env.GetBool("database.tls", false),
+		"database.prefer_simple_protocol": env.GetBool("database.prefer_simple_protocol", true),
 	}
 }

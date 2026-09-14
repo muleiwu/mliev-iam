@@ -1,9 +1,11 @@
 package config
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/config/autoload"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/firstparty"
+	"cnb.cool/mliev/open/go-web/pkg/container"
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	http "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"context"
@@ -62,6 +64,6 @@ func (receiver Config) Get() []interfaces.InitConfig {
 		autoload.Redis{},
 		autoload.Push{},
 		autoload.Middleware{Extra: middleware},
-		autoload.Router{ExtraRoutes: routes, Capabilities: capabilities},
+		autoload.Router{ExtraRoutes: routes, Capabilities: capabilities, Setup: func() *service.SetupInstaller { return container.MustGet[*service.SetupInstaller]() }},
 	}
 }

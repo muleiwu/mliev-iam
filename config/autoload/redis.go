@@ -14,5 +14,7 @@ func (receiver Redis) InitConfig() map[string]any {
 		"redis.port":     env.GetInt("redis.port", 6379),
 		"redis.password": envOr("REDIS_PASSWORD", env.GetString("redis.password", "")),
 		"redis.db":       env.GetInt("redis.db", 0),
+		"redis.username": envOr("REDIS_USERNAME", env.GetString("redis.username", "")),
+		"redis.tls":      env.GetBool("redis.tls", false),
 	}
 }

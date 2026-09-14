@@ -12,7 +12,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/script"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
-	"github.com/glebarez/sqlite"
+	"cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
