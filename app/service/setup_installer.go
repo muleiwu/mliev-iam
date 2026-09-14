@@ -17,6 +17,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/installation"
 	dbConfig "cnb.cool/mliev/open/go-web/pkg/server/database/config"
+	"cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"cnb.cool/mliev/open/go-web/pkg/server/reload"
 	setupkit "cnb.cool/mliev/open/setup-kit"
@@ -25,7 +26,6 @@ import (
 	redischeck "cnb.cool/mliev/open/setup-kit/checkers/redis"
 	sqlitecheck "cnb.cool/mliev/open/setup-kit/checkers/sqlite"
 	"cnb.cool/mliev/open/setup-kit/presets"
-	"cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/spf13/viper"
@@ -40,6 +40,12 @@ var setupEnterHTML []byte
 
 //go:embed setup_enter.js
 var setupEnterJS []byte
+
+//go:embed setup_logo.svg
+var setupLogo []byte
+
+//go:embed setup_favicon.ico
+var setupFavicon []byte
 
 type SetupInstaller struct {
 	Kit   *setupkit.Kit
@@ -70,7 +76,7 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool) (*Setu
 	jwtConfigured := os.Getenv("JWT_SECRET_KEY") != "" || viper.GetString("jwt.secret") != ""
 	kit, err := setupkit.New(setupkit.Options{
 		Name: name, Description: "配置数据库与 Redis，创建系统管理员。",
-		BasePath: "/install", RedirectURL: "/install/enter",
+		BasePath: "/install", RedirectURL: "/install/enter", Logo: "/install/logo.svg",
 		Store:          &installation.SetupStore{FileStore: setupkit.FileStore{ConfigPath: configPath}, InstalledAtStartup: installed},
 		Steps:          []setupkit.Step{db, presets.Redis("redis", nil), admin},
 		Checkers:       []setupkit.Checker{mysqlcheck.New(), pgcheck.New(), sqlitecheck.New(), redischeck.New()},
@@ -173,6 +179,8 @@ func withSetupDatabase(ctx context.Context, connection setupkit.ConnectionValues
 
 func (s *SetupInstaller) Register(router httpInterfaces.RouterInterface) {
 	s.Kit.Register(router)
+	router.GET("/install/logo.svg", func(c httpInterfaces.RouterContextInterface) { c.Data(http.StatusOK, "image/svg+xml", setupLogo) })
+	router.GET("/favicon.ico", func(c httpInterfaces.RouterContextInterface) { c.Data(http.StatusOK, "image/x-icon", setupFavicon) })
 	router.GET("/install/enter", func(c httpInterfaces.RouterContextInterface) {
 		c.SetHeader("Cache-Control", "no-store")
 		c.SetHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'")
@@ -197,7 +205,7 @@ func (s *SetupInstaller) Register(router httpInterfaces.RouterInterface) {
 func (s *SetupInstaller) Middleware() httpInterfaces.HandlerFunc {
 	return func(c httpInterfaces.RouterContextInterface) {
 		p := path.Clean("/" + strings.TrimPrefix(c.Path(), "/"))
-		if p == "/install" || strings.HasPrefix(p, "/install/") || p == "/health" || strings.HasPrefix(p, "/health/") || p == "/api/install/check" {
+		if p == "/install" || strings.HasPrefix(p, "/install/") || p == "/health" || strings.HasPrefix(p, "/health/") || p == "/api/install/check" || p == "/favicon.ico" {
 			c.Next()
 			return
 		}
