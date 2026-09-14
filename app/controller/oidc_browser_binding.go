@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"strings"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 )
 
@@ -38,6 +40,14 @@ func getBoundOIDCSession(ctx httpInterfaces.RouterContextInterface, sessions *se
 	}
 	if err := sessions.ValidateBrowserBinding(session, token); err != nil {
 		return nil, err
+	}
+	if session.IsAuthenticated {
+		if session.UserID == nil {
+			return nil, dao.ErrLoginSessionInvalid
+		}
+		if _, err := dao.NewLoginSessionDAO(helper.GetDatabase()).Valid(session.LoginSessionID, *session.UserID); err != nil {
+			return nil, err
+		}
 	}
 	return session, nil
 }

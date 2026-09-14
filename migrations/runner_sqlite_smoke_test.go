@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
-	_ "github.com/glebarez/go-sqlite"
 	"github.com/pressly/goose/v3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	_ "modernc.org/sqlite"
 )
 
 func TestSqliteSmoke(t *testing.T) {
@@ -47,7 +47,7 @@ func TestSqliteSmoke(t *testing.T) {
 	}
 
 	for _, table := range []string{
-		"captcha_configs", "identity_connections", "identity_connection_credentials",
+		"login_sessions", "captcha_configs", "identity_connections", "identity_connection_credentials",
 		"external_principals", "external_identifiers", "attachments",
 		"directory_sync_policies", "external_org_units", "external_memberships",
 		"directory_sync_runs", "directory_sync_changes",
@@ -99,7 +99,7 @@ func TestSqliteSmoke(t *testing.T) {
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const remediationSchemaVersion int64 = 20260827000001
+	const remediationSchemaVersion int64 = 20260907000000
 	if maxV != remediationSchemaVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", remediationSchemaVersion, maxV)
 	}
@@ -124,6 +124,62 @@ func TestSqliteSmoke(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO users (uuid, username, email, phone, status, is_activated) VALUES ('active-3', 'active-user', 'active@example.test', '10001', 1, 1)`); err != nil {
 		t.Fatalf("软删除后应允许复用活跃唯一字段: %v", err)
+	}
+}
+
+func TestRenameAdminDepartmentMigration(t *testing.T) {
+	setIdentityCredentialsTestKey(t)
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(FS)
+	const previousVersion int64 = 20260827000001
+	const renameVersion int64 = 20260827000002
+	if err := goose.UpTo(db, "sqlite", previousVersion); err != nil {
+		t.Fatalf("迁移到重命名前版本失败: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO departments
+		(name, code, short_name, description, remark)
+		VALUES ('管理员', 'admin', '管理', '系统管理员部门', '系统默认管理员部门')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := goose.UpTo(db, "sqlite", renameVersion); err != nil {
+		t.Fatalf("执行默认部门重命名失败: %v", err)
+	}
+	assertAdminDepartmentNames(t, db, "系统管理部门", "系统管理", "系统管理部门")
+
+	if err := goose.DownTo(db, "sqlite", previousVersion); err != nil {
+		t.Fatalf("回滚默认部门重命名失败: %v", err)
+	}
+	assertAdminDepartmentNames(t, db, "管理员", "管理", "系统管理员部门")
+
+	if _, err := db.Exec(`UPDATE departments SET remark = '用户自定义部门' WHERE code = 'admin'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "sqlite", renameVersion); err != nil {
+		t.Fatalf("重新执行默认部门重命名失败: %v", err)
+	}
+	assertAdminDepartmentNames(t, db, "管理员", "管理", "系统管理员部门")
+}
+
+func assertAdminDepartmentNames(t *testing.T, db *sql.DB, wantName, wantShortName, wantDescription string) {
+	t.Helper()
+	var name, shortName, description string
+	if err := db.QueryRow(`SELECT name, short_name, description FROM departments WHERE code = 'admin'`).
+		Scan(&name, &shortName, &description); err != nil {
+		t.Fatal(err)
+	}
+	if name != wantName || shortName != wantShortName || description != wantDescription {
+		t.Fatalf("默认部门名称不匹配: got (%q, %q, %q), want (%q, %q, %q)",
+			name, shortName, description, wantName, wantShortName, wantDescription)
 	}
 }
 

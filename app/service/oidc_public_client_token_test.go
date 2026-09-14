@@ -20,6 +20,7 @@ func setupOIDCPublicClientTokenDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	if err := db.AutoMigrate(
+		&model.LoginSession{},
 		&model.User{},
 		&model.Application{},
 		&model.ApplicationOIDCKey{},
@@ -74,7 +75,12 @@ func TestPublicClientAuthorizationCodePKCEExchangeWithoutClientSecret(t *testing
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 
+	login, err := NewLoginSessionService(db).Create(user.ID, "password", "192.0.2.1", "", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	authCode := &model.AuthorizationCode{
+		LoginSessionID:      login.ID,
 		Code:                "public-code-with-pkce",
 		ClientID:            clientID,
 		UserID:              user.ID,

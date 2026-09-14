@@ -2,42 +2,53 @@ package config
 
 import (
 	appService "cnb.cool/mliev/iam/mliev-iam/app/service"
-	"cnb.cool/mliev/iam/mliev-iam/migrations"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
+	"cnb.cool/mliev/open/go-web/pkg/container"
+	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	cacheAssembly "cnb.cool/mliev/open/go-web/pkg/server/cache/assembly"
 	configAssembly "cnb.cool/mliev/open/go-web/pkg/server/config/assembly"
-	databaseAssembly "cnb.cool/mliev/open/go-web/pkg/server/database/assembly"
 	envAssembly "cnb.cool/mliev/open/go-web/pkg/server/env/assembly"
 	"cnb.cool/mliev/open/go-web/pkg/server/http_server/service"
 	loggerAssembly "cnb.cool/mliev/open/go-web/pkg/server/logger/assembly"
-	redisAssembly "cnb.cool/mliev/open/go-web/pkg/server/redis/assembly"
 )
 
 // App 是 mliev-iam 的 AppProvider 实现。
-type App struct{}
+type App struct {
+	Modules         []extension.Module
+	Edition         string
+	Version         string
+	DefaultHTTPAddr string
+	// Optional installation branding and final destination. Empty values retain
+	// the edition's standard name and the /admin/ destination.
+	SetupName      string
+	SetupEntryPath string
+}
 
 // Assemblies 声明装配顺序 env → config → logger → database → redis → cache。
 func (a App) Assemblies() []interfaces.AssemblyInterface {
 	return []interfaces.AssemblyInterface{
 		&envAssembly.Env{},
-		&configAssembly.Config{DefaultConfigs: Config{}.Get()},
+		&configAssembly.Config{DefaultConfigs: Config{Modules: a.Modules, Edition: a.Edition, Version: a.Version, DefaultHTTPAddr: a.DefaultHTTPAddr}.Get()},
 		&loggerAssembly.Logger{},
-		&databaseAssembly.Database{},
-		&redisAssembly.Redis{},
+		&bootstrapDatabase{},
+		&bootstrapRedis{},
 		&cacheAssembly.Cache{},
+		&startupChecks{modules: a.Modules},
+		&setupAssembly{edition: a.Edition, options: appService.SetupOptions{Name: a.SetupName, EntryPath: a.SetupEntryPath}},
 	}
 }
 
-// Servers 声明运行服务：先跑 migration，再起 http_server。
-// 注意使用我们自己的 migrations.Server 而非框架自带的 migration.Migration：
-// 后者用 goose.Up(db, "migrations") 读文件系统根目录，而我们按方言把 SQL
-// 放在 migrations/{mysql,postgresql,sqlite}/ 并通过 //go:embed 打包，那个
-// 版本扫不到新 SQL，老库升级时会错过未应用的迁移。
+// Servers starts HTTP alone during installation. On an installed deployment,
+// the final assembly has already completed migrations and extension checks.
 func (a App) Servers() []interfaces.ServerInterface {
+	if !helper.GetConfig().GetBool("app.installed", false) {
+		return []interfaces.ServerInterface{container.MustGet[*appService.SetupInstaller](), &service.HttpServer{}}
+	}
 	return []interfaces.ServerInterface{
-		&migrations.Server{},
-		&appService.SystemApplicationServer{},
+		container.MustGet[*appService.SetupInstaller](),
 		&appService.SyncWorkerServer{},
+		&appService.LoginSessionCleanupServer{},
 		&service.HttpServer{},
 	}
 }

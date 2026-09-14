@@ -16,6 +16,7 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "POST", "/api/auth/refresh")
 	router.assertRoute(t, "POST", "/api/auth/logout")
 	router.assertRoute(t, "GET", "/api/oidc/client-config")
+	router.assertRoute(t, "POST", "/api/oidc/registration-choice")
 	router.assertRoute(t, "POST", "/api/oidc/auth/refresh")
 	router.assertRoute(t, "POST", "/api/oidc/auth/logout")
 	router.assertRoute(t, "POST", "/api/oidc/auth/switch-account")
@@ -67,6 +68,11 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertRoute(t, "POST", "/external-events/:identifier")
 	router.assertRoute(t, "GET", "/external-events/:identifier")
 
+	// 用户组织部门关系管理
+	router.assertRoute(t, "POST", "/api/admin/user-departments")
+	router.assertRoute(t, "DELETE", "/api/admin/user-departments/:userId/:departmentId")
+	router.assertRoute(t, "PUT", "/api/admin/users/:id/departments/:departmentId/primary")
+
 	for _, route := range []string{
 		"/social/providers", "/social/auth/:provider", "/social/callback/:provider",
 		"/identity/providers", "/identity/auth/:provider", "/identity/callback/:provider",
@@ -84,6 +90,12 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	}
 	if router.middlewarePrefixes["/api/oidc/auth"] != 0 {
 		t.Fatal("/api/oidc/auth must stay public so it can use the OIDC refresh_token cookie")
+	}
+	if router.middlewarePrefixes["/api/admin/user-departments"] == 0 {
+		t.Fatal("/api/admin/user-departments must keep AdminAuthMiddleware protection")
+	}
+	if router.middlewarePrefixes["/api/admin/users"] == 0 {
+		t.Fatal("/api/admin/users must keep AdminAuthMiddleware protection")
 	}
 }
 

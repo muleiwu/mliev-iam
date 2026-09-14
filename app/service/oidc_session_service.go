@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -18,27 +19,29 @@ import (
 
 // OIDCSession OIDC授权会话
 type OIDCSession struct {
-	SessionID           string                    `json:"session_id"`
-	ClientID            string                    `json:"client_id"`
-	RedirectURI         string                    `json:"redirect_uri"`
-	Scope               string                    `json:"scope"`
-	State               string                    `json:"state"`
-	Nonce               string                    `json:"nonce"`
-	ResponseType        string                    `json:"response_type"`
-	CodeChallenge       string                    `json:"code_challenge,omitempty"`
-	CodeChallengeMethod string                    `json:"code_challenge_method,omitempty"`
-	Prompt              string                    `json:"prompt,omitempty"`
-	UserID              *uint                     `json:"user_id,omitempty"`
-	IsAuthenticated     bool                      `json:"is_authenticated"`
-	IsConsentGranted    bool                      `json:"is_consent_granted"`
-	AuthTime            time.Time                 `json:"auth_time,omitempty"`
-	Error               *dto.AuthorizationFailure `json:"error,omitempty"`
-	CreatedAt           time.Time                 `json:"created_at"`
-	ExpiresAt           time.Time                 `json:"expires_at"`
+	LoginSessionID              string                    `json:"login_session_id,omitempty"`
+	SessionID                   string                    `json:"session_id"`
+	ClientID                    string                    `json:"client_id"`
+	RedirectURI                 string                    `json:"redirect_uri"`
+	Scope                       string                    `json:"scope"`
+	State                       string                    `json:"state"`
+	Nonce                       string                    `json:"nonce"`
+	ResponseType                string                    `json:"response_type"`
+	CodeChallenge               string                    `json:"code_challenge,omitempty"`
+	CodeChallengeMethod         string                    `json:"code_challenge_method,omitempty"`
+	Prompt                      string                    `json:"prompt,omitempty"`
+	RegistrationCandidateUserID *uint                     `json:"registration_candidate_user_id,omitempty"`
+	RegistrationDecision        string                    `json:"registration_decision,omitempty"`
+	UserID                      *uint                     `json:"user_id,omitempty"`
+	IsAuthenticated             bool                      `json:"is_authenticated"`
+	IsConsentGranted            bool                      `json:"is_consent_granted"`
+	AuthTime                    time.Time                 `json:"auth_time,omitempty"`
+	Error                       *dto.AuthorizationFailure `json:"error,omitempty"`
+	CreatedAt                   time.Time                 `json:"created_at"`
+	ExpiresAt                   time.Time                 `json:"expires_at"`
 
-	// CsrfToken 绑定到会话的一次性 CSRF 令牌。由服务端在 CreateSession 时生成，
-	// 通过 /api/oidc/auth-info 交给前端；前端在 POST /webhook/oidc/consent 时携带，
-	// 服务端使用 subtle.ConstantTimeCompare 校验后再执行授权动作。
+	// CsrfToken 绑定到会话的一次性 CSRF 令牌。注册意图选择后会轮换，
+	// 后续授权确认使用新令牌，防止选择请求重放。
 	CsrfToken string `json:"csrf_token"`
 
 	// BrowserBindingHash binds a public session_id to the browser that started
@@ -72,6 +75,20 @@ type OIDCSessionService struct {
 }
 
 const oidcLoginTicketPrefix = "oidc:login-ticket:"
+
+const (
+	OIDCRegistrationChoiceCreate  = "create"
+	OIDCRegistrationChoiceCurrent = "current"
+	OIDCRegistrationChoiceCancel  = "cancel"
+)
+
+var (
+	ErrOIDCRegistrationChoiceNotRequired = errors.New("当前会话无需确认注册意图")
+	ErrOIDCRegistrationChoiceRequired    = errors.New("请先确认是否创建新账号")
+	ErrOIDCRegistrationChoiceResolved    = errors.New("注册意图已确认")
+	ErrOIDCRegistrationChoiceCSRF        = errors.New("注册意图 CSRF 校验失败")
+	ErrOIDCRegistrationUserChanged       = errors.New("当前 IAM 登录账号已变更")
+)
 
 // NewOIDCSessionService 创建OIDC会话服务
 func NewOIDCSessionService(redisClient *redis.Client) *OIDCSessionService {
@@ -219,13 +236,147 @@ func (s *OIDCSessionService) UpdateSession(ctx context.Context, session *OIDCSes
 	return s.saveSession(ctx, session)
 }
 
+func (s *OIDCSessionService) SetRegistrationCandidate(ctx context.Context, sessionID string, userID uint) error {
+	session, err := s.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	session.RegistrationCandidateUserID = &userID
+	session.RegistrationDecision = ""
+	return s.UpdateSession(ctx, session)
+}
+
+// ApplyRegistrationChoice atomically consumes the pending registration choice.
+// Concurrent clicks and CSRF replay can only commit one transition.
+func (s *OIDCSessionService) ApplyRegistrationChoice(
+	ctx context.Context,
+	sessionID, csrfToken, choice string,
+	currentUserID *uint,
+) (*OIDCSession, error) {
+	key := s.keyPrefix + sessionID
+	var updated *OIDCSession
+
+	for attempt := 0; attempt < 3; attempt++ {
+		err := s.redis.Watch(ctx, func(tx *redis.Tx) error {
+			data, err := tx.Get(ctx, key).Bytes()
+			if errors.Is(err, redis.Nil) {
+				return fmt.Errorf("会话不存在或已过期")
+			}
+			if err != nil {
+				return err
+			}
+
+			var session OIDCSession
+			if err := json.Unmarshal(data, &session); err != nil {
+				return fmt.Errorf("解析会话数据失败: %w", err)
+			}
+			if time.Now().After(session.ExpiresAt) {
+				return fmt.Errorf("会话已过期")
+			}
+			deleteSession, err := applyOIDCRegistrationChoice(&session, csrfToken, choice, currentUserID)
+			if err != nil {
+				return err
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				if deleteSession {
+					pipe.Del(ctx, key)
+					return nil
+				}
+				payload, marshalErr := json.Marshal(&session)
+				if marshalErr != nil {
+					return marshalErr
+				}
+				ttl := time.Until(session.ExpiresAt)
+				if ttl <= 0 {
+					return fmt.Errorf("会话已过期")
+				}
+				pipe.Set(ctx, key, payload, ttl)
+				return nil
+			})
+			if err == nil {
+				updated = &session
+			}
+			return err
+		}, key)
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return updated, err
+	}
+
+	return nil, redis.TxFailedErr
+}
+
+func applyOIDCRegistrationChoice(
+	session *OIDCSession,
+	csrfToken, choice string,
+	currentUserID *uint,
+) (bool, error) {
+	if session == nil || !oidcSessionPromptHas(session.Prompt, "create") || session.RegistrationCandidateUserID == nil {
+		return false, ErrOIDCRegistrationChoiceNotRequired
+	}
+	if session.RegistrationDecision != "" {
+		return false, ErrOIDCRegistrationChoiceResolved
+	}
+	if session.CsrfToken == "" || subtle.ConstantTimeCompare([]byte(session.CsrfToken), []byte(csrfToken)) != 1 {
+		return false, ErrOIDCRegistrationChoiceCSRF
+	}
+	if choice != OIDCRegistrationChoiceCreate && choice != OIDCRegistrationChoiceCurrent && choice != OIDCRegistrationChoiceCancel {
+		return false, fmt.Errorf("无效的注册意图选择")
+	}
+	if choice == OIDCRegistrationChoiceCurrent &&
+		(currentUserID == nil || *currentUserID != *session.RegistrationCandidateUserID) {
+		return false, ErrOIDCRegistrationUserChanged
+	}
+
+	session.RegistrationDecision = choice
+	if choice == OIDCRegistrationChoiceCancel {
+		return true, nil
+	}
+	csrf, err := newCsrfToken()
+	if err != nil {
+		return false, err
+	}
+	session.CsrfToken = csrf
+	return false, nil
+}
+
+func (s *OIDCSessionService) ResetRegistrationChoice(ctx context.Context, sessionID string) error {
+	session, err := s.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session.RegistrationDecision != OIDCRegistrationChoiceCurrent || session.Error != nil {
+		return nil
+	}
+	if err := resetAuthenticationState(session); err != nil {
+		return err
+	}
+	session.RegistrationDecision = ""
+	return s.UpdateSession(ctx, session)
+}
+
+func oidcSessionPromptHas(prompt, value string) bool {
+	for _, item := range strings.Fields(prompt) {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
 // MarkAsAuthenticated 标记会话为已认证
-func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint) error {
+func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint, loginID string) error {
 	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 
+	if loginID == "" {
+		return fmt.Errorf("缺少登录会话标识")
+	}
+	session.LoginSessionID = loginID
 	session.UserID = &userID
 	session.IsAuthenticated = true
 	session.AuthTime = time.Now()
@@ -244,6 +395,7 @@ func (s *OIDCSessionService) MarkAsFailed(ctx context.Context, sessionID string,
 		return err
 	}
 
+	session.LoginSessionID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false
@@ -329,6 +481,7 @@ func resetAuthenticationState(session *OIDCSession) error {
 		return fmt.Errorf("生成CSRF令牌失败: %w", err)
 	}
 
+	session.LoginSessionID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false

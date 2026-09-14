@@ -162,9 +162,8 @@ func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUs
 }
 
 // resolveMigrationUsername 为迁移用户确定主表账户名。
-// 旧系统常用纯数字手机号或含 "@" 的邮箱当用户名，不符合主表账户格式
-// （禁纯数字/禁 "@"，保证登录标识符判断无歧义），或者已被占用——
-// 这些情况一律改用生成的账户名，用户仍可用手机号/邮箱登录。
+// 保留符合账户格式且未被占用的旧用户名，包括纯数字。
+// 含 "@" 的邮箱等不符合格式或已占用的名称改用生成账户名，仍可用手机号/邮箱登录。
 func (s *LegacyLoginService) resolveMigrationUsername(candidate string) (string, error) {
 	if candidate != "" && utils.ValidateUsernameFormat(candidate) == nil {
 		exists, err := dao.NewUserDao(s.db).ExistsUsername(candidate)

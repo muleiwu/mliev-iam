@@ -54,6 +54,11 @@ func (dao *OIDCTokenDAO) GetValidByAccessToken(accessToken string) (*model.OIDCT
 	if err != nil {
 		return nil, err
 	}
+	if token.UserID > 0 {
+		if _, err := NewLoginSessionDAO(dao.db).Valid(token.LoginSessionID, token.UserID); err != nil {
+			return nil, err
+		}
+	}
 	return &token, nil
 }
 
@@ -64,6 +69,11 @@ func (dao *OIDCTokenDAO) GetValidByRefreshToken(refreshToken string) (*model.OID
 		refreshToken, false, time.Now()).First(&token).Error
 	if err != nil {
 		return nil, err
+	}
+	if token.UserID > 0 {
+		if _, err := NewLoginSessionDAO(dao.db).Valid(token.LoginSessionID, token.UserID); err != nil {
+			return nil, err
+		}
 	}
 	return &token, nil
 }

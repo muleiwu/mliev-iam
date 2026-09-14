@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/datatypes"
@@ -122,9 +123,7 @@ func (d *Department) BeforeCreate(tx *gorm.DB) error {
 	if d.Status == 0 {
 		d.Status = DepartmentStatusEnabled
 	}
-	if d.Type == 0 {
-		d.Type = DepartmentTypeDepartment
-	}
+
 	if d.Level == 0 {
 		d.Level = 1
 	}
@@ -142,7 +141,7 @@ func (d *Department) AfterCreate(tx *gorm.DB) error {
 		if err := tx.First(&parent, *d.ParentID).Error; err != nil {
 			return err
 		}
-		d.Path = parent.Path + "/" + string(rune(d.ID))
+		d.Path = parent.Path + "/" + fmt.Sprint(d.ID)
 		d.Level = parent.Level + 1
 
 		// 更新父部门的hasChildren标志
@@ -153,7 +152,7 @@ func (d *Department) AfterCreate(tx *gorm.DB) error {
 			return err
 		}
 	} else {
-		d.Path = "/" + string(rune(d.ID))
+		d.Path = "/" + fmt.Sprint(d.ID)
 		d.Level = 1
 	}
 

@@ -97,6 +97,19 @@ func TestGetClientConfigReturnsDefaultFrontendContract(t *testing.T) {
 	}
 }
 
+func TestBuildClientConfigDisablesAdminConsoleRegistration(t *testing.T) {
+	app := &model.Application{
+		UUID:        service.AdminConsoleApplicationUUID,
+		Name:        service.AdminConsoleApplicationName,
+		IsProtected: true,
+	}
+
+	config := buildClientConfigResponse(app, nil)
+	if config.Features.Registration {
+		t.Fatal("the built-in admin console must not expose registration")
+	}
+}
+
 func TestBuildFlowStatusClientIncludesApplicationIcon(t *testing.T) {
 	app := &model.Application{
 		Name:        "流程测试应用",

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="iam-setup-entry" content="{{.EntryPath}}">
+<title>正在启动 · {{.Name}}</title>
+<style>
+:root{color-scheme:light dark;font-family:system-ui,sans-serif}
+body{margin:0;min-height:100vh;display:grid;place-items:center}
+main{max-width:32rem;padding:2rem;line-height:1.7}
+button{padding:.7rem 1.2rem;border:0;border-radius:.6rem;background:#315fe9;color:#fff;font:inherit;cursor:pointer}
+</style>
+<main><h1>正在启动服务</h1><p id="status" role="status">配置已保存，正在等待数据库和应用就绪…</p><button id="retry" hidden>重新检查</button></main>
+<script src="/install/enter.js" defer></script>
+</html>

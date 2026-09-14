@@ -37,13 +37,13 @@
 
 | 端点 | 方法 | 描述 |
 |------|------|------|
-| `/.well-known/openid-configuration` | GET | OIDC发现文档 |
-| `/api/oidc/authorize` | GET | 授权端点 |
-| `/api/oidc/token` | POST | 令牌端点 |
-| `/api/oidc/userinfo` | GET | 用户信息端点 |
-| `/api/oidc/introspect` | POST | 令牌内省端点 |
-| `/api/oidc/revoke` | POST | 令牌撤销端点 |
-| `/api/oidc/jwks` | GET | JSON Web Key Set端点 |
+| `/oidc/:client_id/.well-known/openid-configuration` | GET | OIDC发现文档 |
+| `/oidc/:client_id/authorize` | GET/POST | 授权端点 |
+| `/oidc/:client_id/token` | POST | 令牌端点 |
+| `/oidc/:client_id/userinfo` | GET/POST | 用户信息端点 |
+| `/oidc/:client_id/introspect` | POST | 令牌内省端点 |
+| `/oidc/:client_id/revoke` | POST | 令牌撤销端点 |
+| `/oidc/:client_id/jwks` | GET | JSON Web Key Set端点 |
 
 ### 管理端点 (需要管理员权限)
 
@@ -157,7 +157,7 @@ curl -X POST http://localhost:8080/api/admin/oidc/clients \
 
 #### 步骤1: 重定向到授权端点
 ```
-http://localhost:8080/api/oidc/authorize?
+http://localhost:8080/oidc/550e8400-e29b-41d4-a716-446655440000/authorize?
   response_type=code&
   client_id=550e8400-e29b-41d4-a716-446655440000&
   redirect_uri=http://localhost:3000/callback&
@@ -165,6 +165,32 @@ http://localhost:8080/api/oidc/authorize?
   state=xyz&
   nonce=abc123
 ```
+
+#### 指定登录或注册入口
+
+授权请求可以通过标准 OIDC `prompt` 参数选择统一认证页的初始表单：
+
+- `prompt=login`：强制重新认证并展示登录表单，不使用已有 SSO 会话自动登录。
+- `prompt=create`：直接展示注册表单；注册成功后继续原授权流程。
+- 不传 `prompt`：保持默认 SSO 和登录行为。
+
+```text
+# 强制登录
+https://iam.example.com/oidc/{client_id}/authorize?response_type=code&client_id={client_id}&redirect_uri={encoded_redirect_uri}&scope=openid%20profile&state={state}&prompt=login
+
+# 直达注册
+https://iam.example.com/oidc/{client_id}/authorize?response_type=code&client_id={client_id}&redirect_uri={encoded_redirect_uri}&scope=openid%20profile&state={state}&prompt=create
+```
+
+`prompt=create` 不能与其他 `prompt` 值组合。如果目标应用未开放注册，统一认证页会显示明确错误，返回应用时携带 `error=invalid_request` 和原始 `state`。Iframe 集成在 `POST /api/oidc/init-session` 的 JSON 请求中传入同样的 `prompt` 字段。
+
+如果浏览器已登录 IAM，`prompt=create` 仍不会自动使用旧账号。统一认证页会先展示当前账号，由用户选择：
+
+- 继续注册新账号，成功后切换当前 IAM 登录身份。
+- 改用当前账号继续原授权流程。
+- 取消并携带 `error=access_denied` 返回应用。
+
+选择由浏览器绑定的 `POST /api/oidc/registration-choice` 接口处理，请求体为 `{ "sessionId": "...", "choice": "create|current|cancel", "csrfToken": "..." }`。当前账号会在提交选择时重新校验，不会信任前端传入的用户信息。
 
 #### 步骤2: 用户登录并授权后，重定向回客户端
 ```
@@ -175,7 +201,7 @@ http://localhost:3000/callback?
 
 #### 步骤3: 交换授权码获取令牌
 ```bash
-curl -X POST http://localhost:8080/api/oidc/token \
+curl -X POST http://localhost:8080/oidc/550e8400-e29b-41d4-a716-446655440000/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=authorization_code&code=授权码&redirect_uri=http://localhost:3000/callback&client_id=550e8400-e29b-41d4-a716-446655440000&client_secret=客户端密钥"
 ```
@@ -195,7 +221,7 @@ curl -X POST http://localhost:8080/api/oidc/token \
 ### 3. 获取用户信息
 
 ```bash
-curl -X GET http://localhost:8080/api/oidc/userinfo \
+curl -X GET http://localhost:8080/oidc/550e8400-e29b-41d4-a716-446655440000/userinfo \
   -H "Authorization: Bearer 访问令牌"
 ```
 
@@ -215,7 +241,7 @@ curl -X GET http://localhost:8080/api/oidc/userinfo \
 用于服务间认证，不涉及用户：
 
 ```bash
-curl -X POST http://localhost:8080/api/oidc/token \
+curl -X POST http://localhost:8080/oidc/550e8400-e29b-41d4-a716-446655440000/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=550e8400-e29b-41d4-a716-446655440000&client_secret=客户端密钥&scope=api"
 ```

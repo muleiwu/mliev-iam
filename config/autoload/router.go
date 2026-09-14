@@ -4,7 +4,10 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/controller"
 	AdminController "cnb.cool/mliev/iam/mliev-iam/app/controller/admin"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
+	"cnb.cool/mliev/iam/mliev-iam/app/service"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
+	"context"
 )
 
 // Router 注册所有 HTTP 路由。
@@ -14,11 +17,17 @@ import (
 //   - 公开与受保护路由共享前缀时，拆成两个同名 Group（不同实例）分别挂载 vs 不挂载中间件。
 //   - 原 Gin 的 .Match(GET|POST, ...) 拆成 .GET 和 .POST 两次注册。
 type Router struct {
+	Setup        func() *service.SetupInstaller
+	ExtraRoutes  []func(httpInterfaces.RouterInterface)
+	Capabilities func(context.Context) extension.Capabilities
 }
 
 func (receiver Router) InitConfig() map[string]any {
 	return map[string]any{
 		"http.router": func(router httpInterfaces.RouterInterface) {
+			if receiver.Setup != nil {
+				receiver.Setup().Register(router)
+			}
 			// 首页
 			router.GET("/", controller.IndexController{}.GetIndex)
 
@@ -30,12 +39,9 @@ func (receiver Router) InitConfig() map[string]any {
 			// API 路由组
 			api := router.Group("/api")
 
-			// 系统安装（公开访问，中间件 InstallCheckMiddleware 会放行 /api/install/*）
+			// 保留只读就绪接口；安装写操作由 setup-kit 提供。
 			install := api.Group("/install")
 			install.GET("/check", controller.InstallController{}.CheckInstall)
-			install.POST("/test-connection", controller.InstallController{}.TestConnection)
-			install.POST("/test-redis", controller.InstallController{}.TestRedisConnection)
-			install.POST("/submit", controller.InstallController{}.SubmitInstall)
 
 			// 系统级路由（非 /admin 命名空间，仅管理员可访问）
 			adminSystem := api.Group("/system")
@@ -45,6 +51,15 @@ func (receiver Router) InitConfig() map[string]any {
 
 			// === 管理员路由 ===
 			admin := api.Group("/admin")
+			capabilityRoutes := admin.Group("")
+			capabilityRoutes.Use(middleware.AdminAuthMiddleware())
+			capabilityRoutes.GET("/capabilities", func(c httpInterfaces.RouterContextInterface) {
+				result := extension.Capabilities{Edition: "community", Version: "1.0.0", Features: map[string]bool{}}
+				if receiver.Capabilities != nil {
+					result = receiver.Capabilities(c.Request().Context())
+				}
+				controller.BaseResponse{}.Success(c, result)
+			})
 
 			// 管理员认证：OIDC 发起/回调公开，其余需要 AdminAuth
 			adminAuthPublic := admin.Group("/auth")
@@ -59,6 +74,11 @@ func (receiver Router) InitConfig() map[string]any {
 			// 管理员用户管理
 			adminUsers := admin.Group("/users")
 			adminUsers.Use(middleware.AdminAuthMiddleware())
+			adminSessions := admin.Group("/sessions")
+			adminSessions.Use(middleware.AdminAuthMiddleware())
+			adminSessions.GET("", controller.LoginSessionController{}.ListAdmin)
+			adminSessions.POST("/:sid/revoke", controller.LoginSessionController{}.RevokeAdmin)
+			adminUsers.POST("/:id/sessions/revoke-all", controller.LoginSessionController{}.RevokeAllAdmin)
 			adminUsers.POST("", AdminController.UserController{}.CreateUser)
 			adminUsers.GET("", AdminController.UserController{}.GetUserList)
 			adminUsers.GET("/:id", AdminController.UserController{}.GetUser)
@@ -69,6 +89,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminUsers.POST("/batch", AdminController.UserController{}.BatchOperation)
 			adminUsers.GET("/stats/active-count", AdminController.UserController{}.GetActiveUsersCount)
 			adminUsers.GET("/:id/departments", AdminController.UserController{}.GetUserDepartments)
+			adminUsers.PUT("/:id/departments/:departmentId/primary", AdminController.UserDepartmentController{}.SetPrimary)
 			adminUsers.POST("/:id/roles/:roleId", AdminController.UserController{}.AssignUserRole)
 			adminUsers.DELETE("/:id/roles/:roleId", AdminController.UserController{}.RemoveUserRole)
 			adminUsers.GET("/:id/roles", AdminController.UserController{}.GetUserRoles)
@@ -78,6 +99,12 @@ func (receiver Router) InitConfig() map[string]any {
 			adminUsers.PUT("/:id/roles/:roleId/primary", AdminController.UserController{}.SetUserPrimaryRole)
 			adminUsers.GET("/:id/permissions", AdminController.UserController{}.GetUserPermissions)
 			adminUsers.GET("/:id/menu-tree", AdminController.UserController{}.GetUserMenuTree)
+
+			// 管理员用户部门关系管理
+			adminUserDepartments := admin.Group("/user-departments")
+			adminUserDepartments.Use(middleware.AdminAuthMiddleware())
+			adminUserDepartments.POST("", AdminController.UserDepartmentController{}.Create)
+			adminUserDepartments.DELETE("/:userId/:departmentId", AdminController.UserDepartmentController{}.Delete)
 
 			// 管理员角色管理
 			adminRoles := admin.Group("/roles")
@@ -269,7 +296,10 @@ func (receiver Router) InitConfig() map[string]any {
 
 			// 受保护：/api/user/*
 			userAuth := api.Group("/user")
-			userAuth.Use(middleware.AuthMiddleware())
+			userAuth.Use(middleware.UserAuthMiddleware())
+			userAuth.GET("/sessions", controller.LoginSessionController{}.ListMine)
+			userAuth.POST("/sessions/:sid/revoke", controller.LoginSessionController{}.RevokeMine)
+			userAuth.POST("/sessions/revoke-others", controller.LoginSessionController{}.RevokeOthers)
 			userAuth.GET("/profile", controller.UserController{}.GetUserProfile)
 			userAuth.PUT("/profile", controller.UserController{}.UpdateUserProfile)
 			userAuth.PUT("/password", controller.UserController{}.ChangePassword)
@@ -302,6 +332,7 @@ func (receiver Router) InitConfig() map[string]any {
 			apiOidc.POST("/login", controller.OIDCAuthFlowController{}.Login)
 			apiOidc.POST("/login-by-code", controller.OIDCAuthFlowController{}.LoginByCode)
 			apiOidc.POST("/register", controller.OIDCAuthFlowController{}.Register)
+			apiOidc.POST("/registration-choice", controller.OIDCAuthFlowController{}.RegistrationChoice)
 			apiOidc.GET("/auth-info", controller.OIDCAuthFlowController{}.GetAuthInfo)
 			apiOidc.GET("/client-config", controller.OIDCAuthFlowController{}.GetClientConfig)
 			apiOidc.GET("/flow-status", controller.OIDCAuthFlowController{}.GetFlowStatus)
@@ -360,6 +391,9 @@ func (receiver Router) InitConfig() map[string]any {
 			// === Webhook ===
 			webhookOidc := router.Group("/webhook/oidc")
 			webhookOidc.POST("/consent", controller.OIDCAuthFlowController{}.Consent)
+			for _, register := range receiver.ExtraRoutes {
+				register(router)
+			}
 		},
 	}
 }

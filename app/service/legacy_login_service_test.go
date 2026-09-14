@@ -13,7 +13,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
 	"cnb.cool/mliev/iam/mliev-iam/migrations"
-	"github.com/glebarez/sqlite"
+	"cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -293,7 +293,7 @@ func TestPromoteByVerifiedPhone(t *testing.T) {
 }
 
 // TestLegacyLoginPureDigitUsernamePromotes 覆盖"旧系统用纯数字手机号当用户名 → 密码登录迁移"：
-// 旧用户名不符合主表账户格式（禁纯数字），promoteUser 应改用生成账户名而非落库失败。
+// 纯数字符合账户规则，迁移应保留原账户名及前导零。
 func TestLegacyLoginPureDigitUsernamePromotes(t *testing.T) {
 	db := newMigratedTestDB(t)
 
@@ -335,7 +335,7 @@ func TestLegacyLoginPureDigitUsernamePromotes(t *testing.T) {
 		t.Fatalf("create legacy user: %v", err)
 	}
 
-	// 用 E.164 + 旧密码做密码登录：脚本校验通过后应成功迁移（账户名改用生成的）。
+	// 用 E.164 + 旧密码登录：脚本校验通过后应迁移并保留原账户名。
 	resp, err := NewUserService(db).ValidateUserForLogin(e164Phone, oldPass)
 	if err != nil {
 		t.Fatalf("expected legacy password login success, got: %v", err)
@@ -345,11 +345,8 @@ func TestLegacyLoginPureDigitUsernamePromotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload promoted user: %v", err)
 	}
-	if promoted.Username == barePhone {
-		t.Fatalf("expected generated username, got legacy pure-digit username %q", promoted.Username)
-	}
-	if !strings.HasPrefix(promoted.Username, "u_") {
-		t.Fatalf("expected generated username with u_ prefix, got %q", promoted.Username)
+	if promoted.Username != barePhone {
+		t.Fatalf("expected original numeric username %q, got %q", barePhone, promoted.Username)
 	}
 	if promoted.Phone == nil || *promoted.Phone != e164Phone {
 		t.Fatalf("expected phone %s, got %v", e164Phone, promoted.Phone)

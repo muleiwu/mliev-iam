@@ -53,6 +53,33 @@ func (s *UserService) GenerateAvailableUsername() (string, error) {
 	return s.generateAvailableUsername(utils.GenerateUUIDv7)
 }
 
+// CreateUnactivatedUser provisions a credential-free account for reviewed
+// directory imports. It cannot log in until explicitly activated later.
+func (s *UserService) CreateUnactivatedUser(realName string) (*dto.UserResponse, error) {
+	username, err := s.GenerateAvailableUsername()
+	if err != nil {
+		return nil, err
+	}
+	return s.CreateUnactivatedUserWithUsername(username, realName)
+}
+
+// CreateUnactivatedUserWithUsername provisions an explicitly named account
+// without credentials. The caller can include provisioning in its transaction.
+func (s *UserService) CreateUnactivatedUserWithUsername(username, realName string) (*dto.UserResponse, error) {
+	if err := utils.ValidateUsernameFormat(username); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(realName) == "" || len([]rune(realName)) > 50 {
+		return nil, fmt.Errorf("姓名须为1至50字")
+	}
+	user := model.User{Username: username, RealName: realName, Nickname: realName, Status: model.UserStatusActive, IsActivated: false}
+	if err := s.userDao.Create(&user); err != nil {
+		return nil, err
+	}
+	response := dto.ConvertToUserResponse(&user)
+	return &response, nil
+}
+
 func (s *UserService) generateAvailableUsername(generateID func() (string, error)) (string, error) {
 	for i := 0; i < 5; i++ {
 		id, err := generateID()
@@ -80,7 +107,7 @@ func (s *UserService) generateAvailableUsername(generateID func() (string, error
 
 // CreateUser 创建用户
 func (s *UserService) CreateUser(req *dto.CreateUserRequest) (*dto.UserResponse, error) {
-	// 校验账户格式：禁止纯数字、禁止含 "@"（保证登录标识符判断无歧义）
+	// 账户允许纯数字；"+" 和 "@" 分别留给手机号和邮箱登录。
 	if err := utils.ValidateUsernameFormat(req.Username); err != nil {
 		return nil, err
 	}
@@ -377,7 +404,12 @@ func (s *UserService) DeleteUser(id uint) error {
 		return err
 	}
 
-	return s.userDao.Delete(id)
+	return s.database.Transaction(func(tx *gorm.DB) error {
+		if err := RevokeLoginSessions(tx, id, "", "", "user_deleted", nil); err != nil {
+			return err
+		}
+		return dao.NewUserDao(tx).Delete(id)
+	})
 }
 
 // GetUserList 获取用户列表
@@ -436,7 +468,7 @@ func (s *UserService) UpdateUserStatus(id uint, req *dto.UserStatusUpdateRequest
 }
 
 // ChangePassword 修改密码
-func (s *UserService) ChangePassword(id uint, req *dto.ChangePasswordRequest) error {
+func (s *UserService) ChangePassword(id uint, req *dto.ChangePasswordRequest, currentSessionIDs ...string) error {
 	// 获取用户
 	user, err := s.userDao.GetByID(id)
 	if err != nil {
@@ -461,7 +493,7 @@ func (s *UserService) ChangePassword(id uint, req *dto.ChangePasswordRequest) er
 		"password_expiry": time.Now().AddDate(0, 3, 0), // 3个月后过期
 	}
 
-	return s.userDao.UpdateById(id, updates)
+	return s.updatePasswordAndRevoke(id, updates, "password_changed", currentSessionIDs, &id)
 }
 
 // BatchOperation 批量操作用户
@@ -481,7 +513,14 @@ func (s *UserService) BatchOperation(req *dto.BatchUserRequest) error {
 			return revokeUserAccess(tx, req.UserIDs)
 		})
 	case "delete":
-		return s.userDao.BatchDelete(req.UserIDs)
+		return s.database.Transaction(func(tx *gorm.DB) error {
+			for _, id := range req.UserIDs {
+				if err := RevokeLoginSessions(tx, id, "", "", "user_deleted", nil); err != nil {
+					return err
+				}
+			}
+			return dao.NewUserDao(tx).BatchDelete(req.UserIDs)
+		})
 	default:
 		return fmt.Errorf("不支持的操作类型: %s", req.Action)
 	}
@@ -492,6 +531,11 @@ func (s *UserService) BatchOperation(req *dto.BatchUserRequest) error {
 func revokeUserAccess(database *gorm.DB, userIDs []uint) error {
 	if len(userIDs) == 0 {
 		return nil
+	}
+	for _, id := range userIDs {
+		if err := RevokeLoginSessions(database, id, "", "", "user_disabled", nil); err != nil {
+			return err
+		}
 	}
 	now := time.Now()
 	if err := database.Model(&model.User{}).Where("id IN ?", userIDs).Updates(map[string]interface{}{
@@ -507,7 +551,7 @@ func revokeUserAccess(database *gorm.DB, userIDs []uint) error {
 }
 
 // ResetPassword 重置密码（管理员操作）
-func (s *UserService) ResetPassword(id uint, newPassword string) error {
+func (s *UserService) ResetPassword(id uint, newPassword string, actorIDs ...uint) error {
 	// 检查用户是否存在
 	_, err := s.userDao.GetByID(id)
 	if err != nil {
@@ -528,7 +572,11 @@ func (s *UserService) ResetPassword(id uint, newPassword string) error {
 		"failure_count":   0,                           // 重置失败次数
 	}
 
-	return s.userDao.UpdateById(id, updates)
+	var actor *uint
+	if len(actorIDs) > 0 {
+		actor = &actorIDs[0]
+	}
+	return s.updatePasswordAndRevoke(id, updates, "password_reset", nil, actor)
 }
 
 // GetUsersByDepartment 根据部门获取用户列表
@@ -617,13 +665,14 @@ func (s *UserService) RecordSuccessfulLogin(userID uint, clientIP string) error 
 
 // ValidateUserForLogin 验证用户登录。
 // account 可以是 用户名 / 手机号 / 邮箱，按输入自动判断类型查找用户。
-// 因用户账户(username) 禁止全数字、禁止含 "@"，三类标识符不会冲突。
+// 裸数字按账户名查询，手机号由前端发送带 "+" 的 E.164 格式。
 func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserResponse, error) {
 	// 根据标识符类型获取用户
 	var (
 		user *model.User
 		err  error
 	)
+	account = strings.TrimSpace(account)
 	switch utils.DetectLoginIdentifier(account) {
 	case utils.LoginIdentifierPhone:
 		user, err = s.userDao.GetByPhone(account)
@@ -827,7 +876,7 @@ func (s *UserService) UpdateVerifiedContact(userID uint, verificationType Verifi
 
 // SetInitialPassword 为无密码用户（社交注册）设置初始密码。
 // 已有密码的用户必须走 ChangePassword 验证旧密码，防止会话劫持后直接改密。
-func (s *UserService) SetInitialPassword(userID uint, newPassword string) error {
+func (s *UserService) SetInitialPassword(userID uint, newPassword string, currentSessionIDs ...string) error {
 	user, err := s.userDao.GetByID(userID)
 	if err != nil {
 		return err
@@ -849,7 +898,7 @@ func (s *UserService) SetInitialPassword(userID uint, newPassword string) error 
 		"failure_count":   0,
 	}
 
-	return s.userDao.UpdateById(userID, updates)
+	return s.updatePasswordAndRevoke(userID, updates, "password_changed", currentSessionIDs, &userID)
 }
 
 // ============= RBAC权限相关方法 =============
@@ -919,8 +968,8 @@ func (s *UserService) CheckUserPermission(userID uint, permissionCode string) (b
 	return hasPermission, nil
 }
 
-// GetUserRoles 获取用户角色列表
-func (s *UserService) GetUserRoles(userID uint) ([]model.Role, error) {
+// GetEffectiveRoleDefinitions 获取用户当前有效的角色定义，供鉴权逻辑使用。
+func (s *UserService) GetEffectiveRoleDefinitions(userID uint) ([]model.Role, error) {
 	// 获取用户角色关联
 	userRoles, err := s.userRoleDao.GetByUserID(userID)
 	if err != nil {
@@ -950,6 +999,17 @@ func (s *UserService) GetUserRoles(userID uint) ([]model.Role, error) {
 	}
 
 	return roles, nil
+}
+
+// GetUserRoleAssignments 获取用户的角色分配关系，供管理端展示和维护使用。
+// 与鉴权查询不同，这里保留未激活和已过期的关系，以便管理员查看其状态。
+func (s *UserService) GetUserRoleAssignments(userID uint) ([]*dto.UserRoleResponse, error) {
+	userRoles, err := s.userRoleDao.GetByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return dto.ConvertToUserRoleResponses(userRoles), nil
 }
 
 // ============= 用户角色管理方法 =============
@@ -1049,4 +1109,23 @@ func (s *UserService) GetUserMenuTree(userID uint) ([]*model.Permission, error) 
 	}
 
 	return menuPermissions, nil
+}
+
+func (s *UserService) updatePasswordAndRevoke(userID uint, updates map[string]interface{}, reason string, currentSessionIDs []string, actor *uint) error {
+	return s.database.Transaction(func(tx *gorm.DB) error {
+		if err := dao.LockLoginUser(tx, userID); err != nil {
+			return err
+		}
+		except := ""
+		if len(currentSessionIDs) > 0 {
+			except = currentSessionIDs[0]
+			if _, err := dao.NewLoginSessionDAO(tx).Valid(except, userID); err != nil {
+				return err
+			}
+		}
+		if err := dao.NewUserDao(tx).UpdateById(userID, updates); err != nil {
+			return err
+		}
+		return RevokeLoginSessions(tx, userID, "", except, reason, actor)
+	})
 }

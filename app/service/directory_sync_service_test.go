@@ -264,7 +264,7 @@ func openDirectorySyncTestDB(t *testing.T) *gorm.DB {
 	t.Setenv("IDENTITY_CREDENTIALS_KEY", base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(
+	require.NoError(t, db.AutoMigrate(&model.LoginSession{}, &model.AuthorizationCode{},
 		&model.User{}, &model.Department{}, &model.UserDepartment{},
 		&model.OIDCToken{},
 		&model.IdentityConnection{}, &model.IdentityConnectionCredential{},

@@ -100,3 +100,16 @@ func (s *AttachmentService) ResolveRedirectURL(ctx context.Context, attachmentUU
 
 	return storageService.ResolveURL(ctx, attachment.StorageKey)
 }
+
+// UploadBrandImage reuses raster image validation and configured object storage.
+func (s *AttachmentService) UploadBrandImage(ctx context.Context, file *multipart.FileHeader, uploaderUserID uint) (*dto.UploadAvatarResponse, error) {
+	storage, err := NewStorageService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, err := storage.UploadApplicationIconFile(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	return s.saveUploadedImage(file, result, uploaderUserID, "brand_image")
+}

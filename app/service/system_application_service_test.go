@@ -82,6 +82,22 @@ func TestEnsureAdminConsoleApplicationCreatesAndRepairsIdempotently(t *testing.T
 	}
 }
 
+func TestApplicationAllowsRegistration(t *testing.T) {
+	regular := &model.Application{UUID: "client-a", IsProtected: false}
+	if !ApplicationAllowsRegistration(regular) {
+		t.Fatal("regular applications should allow registration")
+	}
+
+	admin := &model.Application{UUID: AdminConsoleApplicationUUID, IsProtected: true}
+	if ApplicationAllowsRegistration(admin) {
+		t.Fatal("the built-in admin console must not allow registration")
+	}
+
+	if ApplicationAllowsRegistration(nil) {
+		t.Fatal("a missing application must not allow registration")
+	}
+}
+
 func TestProtectedApplicationAllowsCosmeticsAndRejectsCriticalChanges(t *testing.T) {
 	db := newSystemApplicationTestDB(t)
 	app, err := EnsureAdminConsoleApplication(db, 7)
