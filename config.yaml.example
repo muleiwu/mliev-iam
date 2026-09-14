@@ -10,7 +10,6 @@ server:
 # 数据库配置
 database:
   tls: false
-  charset: utf8mb4
   prefer_simple_protocol: true
   driver: mysql  # 数据库驱动类型: mysql, postgresql, sqlite
   halt_on_migration_failure: true
