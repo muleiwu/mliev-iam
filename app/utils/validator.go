@@ -10,9 +10,8 @@ import (
 
 // 登录/注册相关的标识符校验工具。
 //
-// 关键约束：用户账户(username) 禁止全数字、禁止包含 "@"。
-// 因此登录时可无歧义地按输入判断标识符类型：
-//   - 纯数字且命中手机号正则 → 手机号
+// 账户允许纯数字，但不允许包含 "+" 或 "@"，按输入判断登录方式：
+//   - 带 "+" 的合法 E.164 号码 → 手机号
 //   - 含 "@" → 邮箱
 //   - 其余 → 用户名
 
@@ -34,16 +33,13 @@ func IsAllDigits(s string) bool {
 }
 
 // ValidateUsernameFormat 校验用户账户格式：
-// 长度 3-50、仅含字母/数字/下划线、且不能为纯数字。
+// 长度 3-50、仅含字母/数字/下划线，允许纯数字并保留前导零。
 func ValidateUsernameFormat(username string) error {
 	if len(username) < 3 || len(username) > 50 {
 		return fmt.Errorf("账户长度需在3-50个字符之间")
 	}
 	if !usernameCharsetRegex.MatchString(username) {
 		return fmt.Errorf("账户只能包含字母、数字和下划线")
-	}
-	if IsAllDigits(username) {
-		return fmt.Errorf("账户不能为纯数字")
 	}
 	return nil
 }

@@ -1,6 +1,9 @@
 package utils
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDetectLoginIdentifier(t *testing.T) {
 	cases := []struct {
@@ -11,6 +14,7 @@ func TestDetectLoginIdentifier(t *testing.T) {
 		{"+14155552671", LoginIdentifierPhone},
 		{"user@example.com", LoginIdentifierEmail},
 		{"alice", LoginIdentifierUsername},
+		{"000100", LoginIdentifierUsername},
 		{"13800138000", LoginIdentifierUsername}, // 裸号无 "+"，按用户名处理（登录走区号选择器发 E.164）
 	}
 	for _, c := range cases {
@@ -46,13 +50,13 @@ func TestNormalizePhoneToE164(t *testing.T) {
 }
 
 func TestValidateUsernameFormat(t *testing.T) {
-	valid := []string{"alice", "user_01", "Bob123"}
+	valid := []string{"alice", "user_01", "Bob123", "000100", "13800138000", "000", strings.Repeat("1", 50)}
 	for _, u := range valid {
 		if err := ValidateUsernameFormat(u); err != nil {
 			t.Errorf("ValidateUsernameFormat(%q) unexpected error: %v", u, err)
 		}
 	}
-	invalid := []string{"12345678", "ab", "user@x", "with space"}
+	invalid := []string{"", "ab", "01", "user@x", "with space", "+8613800138000", "学号001", strings.Repeat("1", 51)}
 	for _, u := range invalid {
 		if err := ValidateUsernameFormat(u); err == nil {
 			t.Errorf("ValidateUsernameFormat(%q) expected error, got nil", u)
