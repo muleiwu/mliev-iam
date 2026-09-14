@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/pkg/firstparty"
 	"errors"
 	"fmt"
 
@@ -30,7 +31,11 @@ func IsAdminConsoleApplication(app *model.Application) bool {
 // client configuration and every server-side registration entry point.
 // The built-in admin console only accepts existing super administrators.
 func ApplicationAllowsRegistration(app *model.Application) bool {
-	return app != nil && !IsAdminConsoleApplication(app)
+	if app == nil {
+		return false
+	}
+	_, builtin := firstparty.Lookup(app.UUID)
+	return !(builtin && app.IsProtected)
 }
 
 func adminConsoleProtocolConfig() map[string]interface{} {
@@ -62,26 +67,34 @@ func EnsureAdminConsoleApplication(db *gorm.DB, superAdminRoleID uint) (*model.A
 		superAdminRoleID = role.ID
 	}
 
+	return EnsureFirstPartyApplication(db, AdminConsoleApplicationUUID, &model.ApplicationAccessScope{UserIDs: []uint{}, DepartmentIDs: []uint{}, RoleIDs: []uint{superAdminRoleID}})
+}
+
+// EnsureFirstPartyApplication reconciles only clients registered by the binary.
+func EnsureFirstPartyApplication(db *gorm.DB, clientID string, scope *model.ApplicationAccessScope) (*model.Application, error) {
+	client, ok := firstparty.Lookup(clientID)
+	if !ok || db == nil {
+		return nil, errors.New("内置认证客户端未注册或数据库未初始化")
+	}
+	protocolConfig := adminConsoleProtocolConfig()
+	protocolConfig["clientId"] = client.ID
+	protocolConfig["redirectUris"] = []interface{}{client.CallbackPath}
 	var result *model.Application
 	err := db.Transaction(func(tx *gorm.DB) error {
 		var app model.Application
-		err := tx.Unscoped().Where("uuid = ?", AdminConsoleApplicationUUID).First(&app).Error
+		err := tx.Unscoped().Where("uuid = ?", client.ID).First(&app).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			app = model.Application{
-				UUID:           AdminConsoleApplicationUUID,
-				Name:           AdminConsoleApplicationName,
-				Description:    "IAM 系统内置管理后台",
+				UUID:           client.ID,
+				Name:           client.Name,
+				Description:    client.Description,
 				ProtocolType:   string(model.ProtocolTypeOIDC),
-				ProtocolConfig: adminConsoleProtocolConfig(),
+				ProtocolConfig: protocolConfig,
 				IsActive:       true,
 				IsVerified:     true,
 				IsProtected:    true,
-				AccessScope: &model.ApplicationAccessScope{
-					UserIDs:       []uint{},
-					DepartmentIDs: []uint{},
-					RoleIDs:       []uint{superAdminRoleID},
-				},
+				AccessScope:    scope,
 			}
 			if err := tx.Create(&app).Error; err != nil {
 				return fmt.Errorf("创建内置管理后台应用失败: %w", err)
@@ -90,15 +103,11 @@ func EnsureAdminConsoleApplication(db *gorm.DB, superAdminRoleID uint) (*model.A
 			return fmt.Errorf("检查内置管理后台应用失败: %w", err)
 		default:
 			app.ProtocolType = string(model.ProtocolTypeOIDC)
-			app.ProtocolConfig = adminConsoleProtocolConfig()
+			app.ProtocolConfig = protocolConfig
 			app.IsActive = true
 			app.IsVerified = true
 			app.IsProtected = true
-			app.AccessScope = &model.ApplicationAccessScope{
-				UserIDs:       []uint{},
-				DepartmentIDs: []uint{},
-				RoleIDs:       []uint{superAdminRoleID},
-			}
+			app.AccessScope = scope
 			app.DeletedAt = gorm.DeletedAt{}
 			if err := tx.Unscoped().Save(&app).Error; err != nil {
 				return fmt.Errorf("修复内置管理后台应用失败: %w", err)

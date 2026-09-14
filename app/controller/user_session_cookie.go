@@ -138,3 +138,17 @@ func setUserSessionCookie(ctx httpInterfaces.RouterContextInterface, token strin
 	}
 	ctx.SetCookie(middleware.UserCookieName, token, maxAge, "/", "", isSecure, true)
 }
+
+// EstablishExistingUserSession reuses a validated SID; it never creates/revokes
+// a login session. First-party OIDC callbacks use it after consuming the code.
+func EstablishExistingUserSession(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, sid string) error {
+	if sid == "" {
+		return fmt.Errorf("登录会话为空")
+	}
+	token, maxAge, _, err := prepareUserSessionCookie(ctx, user, false, sid)
+	if err != nil {
+		return err
+	}
+	setUserSessionCookie(ctx, token, maxAge)
+	return nil
+}

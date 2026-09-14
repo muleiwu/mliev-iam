@@ -30,8 +30,9 @@ type AdminAuthTransaction struct {
 }
 
 type AdminAuthFlowService struct {
-	store adminAuthTransactionStore
-	ttl   time.Duration
+	store  adminAuthTransactionStore
+	ttl    time.Duration
+	prefix string
 }
 
 func NewAdminAuthFlowService(redisClient *redis.Client) *AdminAuthFlowService {
@@ -39,7 +40,7 @@ func NewAdminAuthFlowService(redisClient *redis.Client) *AdminAuthFlowService {
 	if redisClient != nil {
 		store = redisAdminAuthTransactionStore{client: redisClient}
 	}
-	return &AdminAuthFlowService{store: store, ttl: 10 * time.Minute}
+	return &AdminAuthFlowService{store: store, ttl: 10 * time.Minute, prefix: adminAuthTransactionPrefix}
 }
 
 type adminAuthTransactionStore interface {
@@ -106,7 +107,7 @@ func (s *AdminAuthFlowService) Start(ctx context.Context, redirectURI, returnTo 
 	if err != nil {
 		return nil, "", fmt.Errorf("序列化后台认证事务失败: %w", err)
 	}
-	if err := s.store.Put(ctx, adminAuthTransactionPrefix+state, payload, s.ttl); err != nil {
+	if err := s.store.Put(ctx, s.keyPrefix()+state, payload, s.ttl); err != nil {
 		return nil, "", fmt.Errorf("保存后台认证事务失败: %w", err)
 	}
 	return transaction, browserToken, nil
@@ -116,7 +117,7 @@ func (s *AdminAuthFlowService) Consume(ctx context.Context, state, browserToken 
 	if s.store == nil || state == "" || len(state) > 128 || browserToken == "" {
 		return nil, errors.New("后台认证事务无效")
 	}
-	key := adminAuthTransactionPrefix + state
+	key := s.keyPrefix() + state
 	payload, err := s.store.Get(ctx, key)
 	if err != nil {
 		return nil, errors.New("后台认证事务不存在或已过期")
@@ -163,4 +164,20 @@ func IsSuperAdmin(db *gorm.DB, userID uint) (bool, error) {
 		return false, nil
 	}
 	return assignment.IsValid(), nil
+}
+
+// NewFirstPartyAuthFlowService isolates transactions for a compiled client.
+func NewFirstPartyAuthFlowService(client *redis.Client, namespace string) *AdminAuthFlowService {
+	if namespace == "" || namespace == "admin" {
+		panic("extension auth namespace must be distinct")
+	}
+	s := NewAdminAuthFlowService(client)
+	s.prefix = "first-party:" + namespace + ":transaction:"
+	return s
+}
+func (s *AdminAuthFlowService) keyPrefix() string {
+	if s.prefix == "" {
+		return adminAuthTransactionPrefix
+	}
+	return s.prefix
 }

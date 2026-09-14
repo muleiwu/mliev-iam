@@ -3,6 +3,7 @@ package config
 import (
 	"cnb.cool/mliev/iam/mliev-iam/config/autoload"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/firstparty"
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	http "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"context"
@@ -18,7 +19,12 @@ type Config struct {
 func (receiver Config) Get() []interfaces.InitConfig {
 	var routes []func(http.RouterInterface)
 	var middleware []http.HandlerFunc
+	var staticDirs []string
 	for _, module := range receiver.Modules {
+		staticDirs = append(staticDirs, module.StaticDirs...)
+		for _, client := range module.FirstPartyClients {
+			firstparty.Register(client)
+		}
 		if module.Routes != nil {
 			routes = append(routes, module.Routes)
 		}
@@ -45,7 +51,7 @@ func (receiver Config) Get() []interfaces.InitConfig {
 	return []interfaces.InitConfig{
 		autoload.Base{},
 		autoload.Cache{},
-		autoload.Http{DefaultAddr: receiver.DefaultHTTPAddr},
+		autoload.Http{DefaultAddr: receiver.DefaultHTTPAddr, ExtraStaticDirs: staticDirs},
 		autoload.Cors{},
 		autoload.StaticFs{},
 		autoload.Database{},
