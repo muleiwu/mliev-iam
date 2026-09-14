@@ -40,8 +40,6 @@ require (
 	modernc.org/sqlite v1.53.0
 )
 
-//replace cnb.cool/mliev/open/go-web => ../../open/go-web
-
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect

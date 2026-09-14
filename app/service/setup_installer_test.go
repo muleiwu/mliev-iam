@@ -76,3 +76,38 @@ func TestSetupSQLiteProbeDoesNotCreateDatabase(t *testing.T) {
 		t.Fatal("memory database accepted")
 	}
 }
+
+func TestSetupRecoversInterruptedProgressWithoutReplayingInput(t *testing.T) {
+	installer := setupTestInstaller(t)
+	if err := installer.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	store := &setupkit.FileStore{ConfigPath: filepath.Join("config", "config.yaml")}
+	id := "interrupted-installation"
+	if err := store.SaveState(context.Background(), setupkit.State{
+		InstallationID: id, Phase: "running", Stage: "initialize",
+		Actions: []setupkit.ActionProgress{{ID: "initialize", Title: "初始化系统与管理员", Status: "running"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewSetupInstaller("enterprise", false, func() bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Stop()
+	state := restarted.Kit.Status()
+	if state.Phase != "failed" || state.Installed || state.InstallationID != id || state.Actions[0].Status != "failed" {
+		t.Fatalf("interrupted state was not safely recovered: %+v", state)
+	}
+	if _, err := os.Stat("config/config.yaml"); !os.IsNotExist(err) {
+		t.Fatal("recovery replayed installation")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := withSetupDatabase(ctx, setupkit.ConnectionValues{Driver: "sqlite", Values: setupkit.Values{"path": "config/cancelled.db"}}, nil); err == nil {
+		t.Fatal("cancelled action connected")
+	}
+	if _, err := os.Stat("config/cancelled.db"); !os.IsNotExist(err) {
+		t.Fatal("cancelled action created database")
+	}
+}
