@@ -672,8 +672,8 @@ func UserMatchesAccessScope(db *gorm.DB, userID uint, scope *model.ApplicationAc
 							authDept, err := deptDAO.GetByID(authDeptID)
 							if err == nil {
 								// 如果用户部门路径包含授权部门路径，则用户属于该部门的子部门
-								if len(dept.Path) >= len(authDept.Path) &&
-									dept.Path[:len(authDept.Path)] == authDept.Path {
+								if strings.TrimRight(dept.Path, "/") == strings.TrimRight(authDept.Path, "/") ||
+									strings.HasPrefix(dept.Path, strings.TrimRight(authDept.Path, "/")+"/") {
 									return true
 								}
 							}

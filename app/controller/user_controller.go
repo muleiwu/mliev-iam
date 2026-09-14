@@ -88,7 +88,7 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	response, err := userService.ValidateUserForLogin(req.Username, req.Password)
+	response, err := userService.ValidateUserForLogin(req.Username, req.Password, req.IdentifierType)
 	if err != nil {
 		errCode := constants.ErrCodeInvalidPassword
 		errMsg := err.Error()

@@ -15,6 +15,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	httpInterfaces "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
 	"github.com/google/uuid"
@@ -28,11 +29,12 @@ type OIDCAuthFlowController struct {
 
 // LoginRequest 登录请求
 type LoginRequest struct {
-	Username      string             `json:"username" binding:"required"`
-	Password      string             `json:"password" binding:"required"`
-	SessionID     string             `json:"sessionId" binding:"required"`
-	CaptchaTicket *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
-	RememberMe    bool               `json:"rememberMe"`              // 记住我
+	IdentifierType string             `json:"identifierType,omitempty"`
+	Username       string             `json:"username" binding:"required"`
+	Password       string             `json:"password" binding:"required"`
+	SessionID      string             `json:"sessionId" binding:"required"`
+	CaptchaTicket  *dto.CaptchaTicket `json:"captchaTicket,omitempty"` // 验证码凭证（可选）
+	RememberMe     bool               `json:"rememberMe"`              // 记住我
 }
 
 // LoginByCodeRequest 验证码登录请求
@@ -152,18 +154,19 @@ type AuthInfoResponse struct {
 // ClientConfigResponse OIDC 登录页客户端配置响应。
 // v1 先用应用基础信息和固定默认值补齐前端契约，不引入额外持久化字段。
 type ClientConfigResponse struct {
-	ClientID         string                    `json:"clientId"`
-	AppName          string                    `json:"appName"`
-	Description      string                    `json:"description,omitempty"`
-	Logo             string                    `json:"logo,omitempty"`
-	Appearance       ClientAppearanceConfig    `json:"appearance"`
-	Features         ClientFeaturesConfig      `json:"features"`
-	LoginMethods     ClientLoginMethods        `json:"loginMethods"`
-	SocialProviders  []string                  `json:"socialProviders"`
-	Locale           string                    `json:"locale"`
-	PrivacyPolicyURL string                    `json:"privacyPolicyUrl,omitempty"`
-	TermsURL         string                    `json:"termsUrl,omitempty"`
-	Agreements       []dto.ClientAgreementLink `json:"agreements"`
+	IdentifierTypes  []extension.LoginIdentifierOption `json:"identifierTypes,omitempty"`
+	ClientID         string                            `json:"clientId"`
+	AppName          string                            `json:"appName"`
+	Description      string                            `json:"description,omitempty"`
+	Logo             string                            `json:"logo,omitempty"`
+	Appearance       ClientAppearanceConfig            `json:"appearance"`
+	Features         ClientFeaturesConfig              `json:"features"`
+	LoginMethods     ClientLoginMethods                `json:"loginMethods"`
+	SocialProviders  []string                          `json:"socialProviders"`
+	Locale           string                            `json:"locale"`
+	PrivacyPolicyURL string                            `json:"privacyPolicyUrl,omitempty"`
+	TermsURL         string                            `json:"termsUrl,omitempty"`
+	Agreements       []dto.ClientAgreementLink         `json:"agreements"`
 }
 
 type ClientAppearanceConfig struct {
@@ -212,10 +215,11 @@ type SendRegisterVerificationCodeRequest struct {
 
 func buildClientConfigResponse(app *model.Application, agreements []dto.ClientAgreementLink) ClientConfigResponse {
 	response := ClientConfigResponse{
-		ClientID:    app.UUID,
-		AppName:     app.Name,
-		Description: app.Description,
-		Logo:        app.Icon,
+		IdentifierTypes: extension.LoginIdentifierOptions(),
+		ClientID:        app.UUID,
+		AppName:         app.Name,
+		Description:     app.Description,
+		Logo:            app.Icon,
 		Appearance: ClientAppearanceConfig{
 			PrimaryColor: "#3b82f6",
 			DarkMode:     "auto",
@@ -390,7 +394,7 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 
 	// 2. 验证用户凭据
 	userService := service.NewUserService(helper.GetDatabase())
-	user, err := userService.ValidateUserForLogin(req.Username, req.Password)
+	user, err := userService.ValidateUserForLogin(req.Username, req.Password, req.IdentifierType)
 	if err != nil {
 		response := LoginResponse{
 			Success: false,

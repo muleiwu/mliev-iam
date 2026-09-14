@@ -59,10 +59,11 @@ type SetInitialPasswordRequest struct {
 
 // AccountLoginRequest 个人中心独立登录请求（不依赖 OIDC session）
 type AccountLoginRequest struct {
-	Username      string         `json:"username" binding:"required"`
-	Password      string         `json:"password" binding:"required"`
-	CaptchaTicket *CaptchaTicket `json:"captchaTicket,omitempty"`
-	RememberMe    bool           `json:"rememberMe"`
+	IdentifierType string         `json:"identifierType,omitempty"`
+	Username       string         `json:"username" binding:"required"`
+	Password       string         `json:"password" binding:"required"`
+	CaptchaTicket  *CaptchaTicket `json:"captchaTicket,omitempty"`
+	RememberMe     bool           `json:"rememberMe"`
 }
 
 // SendContactVerificationCodeRequest 个人中心改绑邮箱/手机发送验证码请求
