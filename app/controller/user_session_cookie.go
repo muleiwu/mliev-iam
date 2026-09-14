@@ -138,3 +138,25 @@ func setUserSessionCookie(ctx httpInterfaces.RouterContextInterface, token strin
 	}
 	ctx.SetCookie(middleware.UserCookieName, token, maxAge, "/", "", isSecure, true)
 }
+
+// EstablishExistingUserSession reuses a validated SID; it never creates/revokes
+// a login session. First-party OIDC callbacks use it after consuming the code.
+func EstablishExistingUserSession(ctx httpInterfaces.RouterContextInterface, user *dto.UserResponse, sid string) error {
+	if user == nil || sid == "" {
+		return fmt.Errorf("登录会话为空")
+	}
+	// The unified login has usually already set this cookie. Preserve its
+	// original expiry and remember-me semantics instead of replacing it with
+	// a session cookie on the first-party callback.
+	if raw, err := ctx.Cookie(middleware.UserCookieName); err == nil {
+		if claims, err := middleware.ValidateUserSessionToken(raw); err == nil && claims.UserID == user.ID && claims.SessionID == sid {
+			return nil
+		}
+	}
+	token, maxAge, _, err := prepareUserSessionCookie(ctx, user, false, sid)
+	if err != nil {
+		return err
+	}
+	setUserSessionCookie(ctx, token, maxAge)
+	return nil
+}

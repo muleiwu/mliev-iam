@@ -634,40 +634,46 @@ func (s *ApplicationService) CheckUserAccess(appID uint, userID uint) bool {
 		return false
 	}
 
+	return UserMatchesAccessScope(s.db, userID, app.AccessScope)
+}
+
+// UserMatchesAccessScope shares the existing application audience semantics.
+// Callers must explicitly handle restricted-empty scopes before calling.
+func UserMatchesAccessScope(db *gorm.DB, userID uint, scope *model.ApplicationAccessScope) bool {
 	// 2. 如果未设置授权范围，允许所有用户访问
-	if app.AccessScope == nil || app.AccessScope.IsEmpty() {
+	if scope == nil || scope.IsEmpty() {
 		return true
 	}
 
 	// 3. 检查用户是否在授权列表中
-	if app.AccessScope.HasUserID(userID) {
+	if scope.HasUserID(userID) {
 		return true
 	}
 
 	// 4. 检查用户的部门是否在授权列表中
-	if len(app.AccessScope.DepartmentIDs) > 0 {
-		userDeptDAO := dao.NewUserDepartmentDao(s.db)
+	if len(scope.DepartmentIDs) > 0 {
+		userDeptDAO := dao.NewUserDepartmentDao(db)
 		userDepts, err := userDeptDAO.FindActiveDepartmentsByUser(userID)
 		if err == nil && len(userDepts) > 0 {
 			for _, userDept := range userDepts {
 				// 检查用户的直接部门
-				if app.AccessScope.HasDepartmentID(userDept.DepartmentID) {
+				if scope.HasDepartmentID(userDept.DepartmentID) {
 					return true
 				}
 
 				// 如果设置了包含子部门，检查父级部门
-				if app.AccessScope.IncludeSubDepartments {
+				if scope.IncludeSubDepartments {
 					// 获取部门详情以检查路径
-					deptDAO := dao.NewDepartmentDao(s.db)
+					deptDAO := dao.NewDepartmentDao(db)
 					dept, err := deptDAO.GetByID(userDept.DepartmentID)
 					if err == nil {
 						// 检查用户部门的所有祖先部门
-						for _, authDeptID := range app.AccessScope.DepartmentIDs {
+						for _, authDeptID := range scope.DepartmentIDs {
 							authDept, err := deptDAO.GetByID(authDeptID)
 							if err == nil {
 								// 如果用户部门路径包含授权部门路径，则用户属于该部门的子部门
-								if len(dept.Path) >= len(authDept.Path) &&
-									dept.Path[:len(authDept.Path)] == authDept.Path {
+								if strings.TrimRight(dept.Path, "/") == strings.TrimRight(authDept.Path, "/") ||
+									strings.HasPrefix(dept.Path, strings.TrimRight(authDept.Path, "/")+"/") {
 									return true
 								}
 							}
@@ -679,12 +685,12 @@ func (s *ApplicationService) CheckUserAccess(appID uint, userID uint) bool {
 	}
 
 	// 5. 检查用户的角色是否在授权列表中
-	if len(app.AccessScope.RoleIDs) > 0 {
-		userRoleDAO := dao.NewUserRoleDao(s.db)
+	if len(scope.RoleIDs) > 0 {
+		userRoleDAO := dao.NewUserRoleDao(db)
 		userRoles, err := userRoleDAO.GetByUserID(userID)
 		if err == nil && len(userRoles) > 0 {
 			for _, userRole := range userRoles {
-				if app.AccessScope.HasRoleID(userRole.RoleID) && userRole.IsValid() && userRole.Role.IsEnabled() {
+				if scope.HasRoleID(userRole.RoleID) && userRole.IsValid() && userRole.Role.IsEnabled() {
 					return true
 				}
 			}

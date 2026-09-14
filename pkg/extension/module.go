@@ -2,6 +2,7 @@
 package extension
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/pkg/firstparty"
 	"context"
 
 	http "cnb.cool/mliev/open/go-web/pkg/server/http_server/interfaces"
@@ -21,9 +22,12 @@ type Capabilities struct {
 // before workers or HTTP can accept requests. Module functions must be safe
 // for concurrent HTTP requests after Startup completes.
 type Module struct {
-	Name         string
-	Routes       func(http.RouterInterface)
-	Middleware   []http.HandlerFunc
-	Startup      func(context.Context, *gorm.DB, string) error
-	Capabilities func(context.Context) map[string]bool
+	LoginIdentifiers  []LoginIdentifier
+	StaticDirs        []string
+	FirstPartyClients []firstparty.Client
+	Name              string
+	Routes            func(http.RouterInterface)
+	Middleware        []http.HandlerFunc
+	Startup           func(context.Context, *gorm.DB, string) error
+	Capabilities      func(context.Context) map[string]bool
 }

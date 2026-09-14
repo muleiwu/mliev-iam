@@ -13,6 +13,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/utils"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
+	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -51,6 +52,24 @@ func NewUserService(database *gorm.DB) *UserService {
 // GenerateAvailableUsername 生成符合账户格式且未被占用的内部用户名。
 func (s *UserService) GenerateAvailableUsername() (string, error) {
 	return s.generateAvailableUsername(utils.GenerateUUIDv7)
+}
+
+// CreateUnactivatedUser provisions a credential-free account for reviewed
+// directory imports. It cannot log in until explicitly activated later.
+func (s *UserService) CreateUnactivatedUser(realName string) (*dto.UserResponse, error) {
+	if strings.TrimSpace(realName) == "" || len([]rune(realName)) > 50 {
+		return nil, fmt.Errorf("姓名须为1至50字")
+	}
+	username, err := s.GenerateAvailableUsername()
+	if err != nil {
+		return nil, err
+	}
+	user := model.User{Username: username, RealName: realName, Nickname: realName, Status: model.UserStatusActive, IsActivated: false}
+	if err = s.userDao.Create(&user); err != nil {
+		return nil, err
+	}
+	response := dto.ConvertToUserResponse(&user)
+	return &response, nil
 }
 
 func (s *UserService) generateAvailableUsername(generateID func() (string, error)) (string, error) {
@@ -639,25 +658,37 @@ func (s *UserService) RecordSuccessfulLogin(userID uint, clientIP string) error 
 // ValidateUserForLogin 验证用户登录。
 // account 可以是 用户名 / 手机号 / 邮箱，按输入自动判断类型查找用户。
 // 因用户账户(username) 禁止全数字、禁止含 "@"，三类标识符不会冲突。
-func (s *UserService) ValidateUserForLogin(account, password string) (*dto.UserResponse, error) {
+func (s *UserService) ValidateUserForLogin(account, password string, identifierTypes ...string) (*dto.UserResponse, error) {
 	// 根据标识符类型获取用户
 	var (
 		user *model.User
 		err  error
 	)
-	switch utils.DetectLoginIdentifier(account) {
-	case utils.LoginIdentifierPhone:
-		user, err = s.userDao.GetByPhone(account)
-	case utils.LoginIdentifierEmail:
-		user, err = s.userDao.GetByEmail(account)
-	default:
-		user, err = s.userDao.GetByUsername(account)
+	customIdentifier := len(identifierTypes) > 0 && identifierTypes[0] != "" && identifierTypes[0] != "auto"
+	if customIdentifier {
+		id, resolveErr := extension.ResolveLoginIdentifier(s.database, identifierTypes[0], strings.TrimSpace(account))
+		if resolveErr != nil || id == 0 {
+			return nil, fmt.Errorf("用户名或密码错误")
+		}
+		user, err = s.userDao.GetByID(id)
+	} else {
+		switch utils.DetectLoginIdentifier(account) {
+		case utils.LoginIdentifierPhone:
+			user, err = s.userDao.GetByPhone(account)
+		case utils.LoginIdentifierEmail:
+			user, err = s.userDao.GetByEmail(account)
+		default:
+			user, err = s.userDao.GetByUsername(account)
+		}
 	}
 	if err != nil {
+		if customIdentifier {
+			return nil, fmt.Errorf("用户名或密码错误")
+		}
 		// 本地查无此人：尝试旧系统迁移登录（渐进式过渡 / 一次性导入的旧用户）。
 		// 校验通过会即时迁移进主 users 表并返回；不匹配则维持原错误。
 		// 用户名 / 手机号 / 邮箱三类标识符均支持旧系统迁移登录。
-		if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(account, password); legacyErr == nil {
+		if resp, legacyErr := NewLegacyLoginService(s.database).TryLegacyLogin(account, password); !customIdentifier && legacyErr == nil {
 			return resp, nil
 		}
 		return nil, fmt.Errorf("用户名或密码错误")

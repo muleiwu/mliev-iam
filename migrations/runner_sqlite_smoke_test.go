@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
-	_ "github.com/glebarez/go-sqlite"
 	"github.com/pressly/goose/v3"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	_ "modernc.org/sqlite"
 )
 
 func TestSqliteSmoke(t *testing.T) {

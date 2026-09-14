@@ -9,6 +9,8 @@ server:
 
 # 数据库配置
 database:
+  tls: false
+  prefer_simple_protocol: true
   driver: mysql  # 数据库驱动类型: mysql, postgresql, sqlite
   halt_on_migration_failure: true
   # MySQL / PostgreSQL 配置
@@ -37,6 +39,8 @@ database:
 
 # Redis 配置
 redis:
+  username: ""
+  tls: false
   host: localhost
   port: 6379
   password: ""

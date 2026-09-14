@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"cnb.cool/mliev/iam/mliev-iam/pkg/firstparty"
 	"errors"
 	"fmt"
 	"net/url"
@@ -264,8 +265,8 @@ func (h *OIDCProtocolHandler) ValidateRedirectURI(app *model.Application, redire
 	if err != nil {
 		return err
 	}
-	if app.UUID == model.BuiltinAdminConsoleApplicationUUID && app.IsProtected {
-		if incoming.Path != model.BuiltinAdminConsoleCallbackPath || incoming.RawQuery != "" {
+	if client, builtin := firstparty.Lookup(app.UUID); builtin && app.IsProtected {
+		if incoming.Path != client.CallbackPath || incoming.RawQuery != "" {
 			return errors.New("内置管理后台重定向URI无效")
 		}
 		if len(trustedIssuer) > 0 && trustedIssuer[0] != "" {

@@ -1,23 +1,13 @@
 package service
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/passhash"
-	"cnb.cool/mliev/iam/mliev-iam/pkg/installation"
-	dbConfig "cnb.cool/mliev/open/go-web/pkg/server/database/config"
-	"github.com/glebarez/sqlite"
-	"github.com/redis/go-redis/v9"
-	"github.com/spf13/viper"
 	"gorm.io/datatypes"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -29,131 +19,6 @@ type InstallService struct {
 // NewInstallService 创建安装服务实例
 func NewInstallService(db *gorm.DB) *InstallService {
 	return &InstallService{db: db}
-}
-
-// CheckInstallStatus 检查安装状态
-func (s *InstallService) CheckInstallStatus() *dto.InstallCheckResponse {
-	// 读取配置文件中的 installed 标记
-	installed := viper.GetBool("app.installed")
-
-	response := &dto.InstallCheckResponse{
-		Installed:          installed,
-		DatabaseConnected:  false,
-		DatabaseConfigured: false,
-	}
-
-	// 检查数据库配置是否存在
-	dbHost := viper.GetString("database.host")
-	dbName := viper.GetString("database.database")
-	if (dbHost != "" && dbName != "") || (viper.GetString("database.driver") == "sqlite" && viper.GetString("database.filepath") != "") {
-		response.DatabaseConfigured = true
-		response.CurrentDatabase = dbName
-	}
-
-	// 检查数据库连接状态
-	if s.db != nil {
-		sqlDB, err := s.db.DB()
-		if err == nil {
-			if err := sqlDB.Ping(); err == nil {
-				response.DatabaseConnected = true
-			}
-		}
-	}
-
-	if installed {
-		response.Message = "系统已安装，无法重复安装"
-	} else if !response.DatabaseConfigured {
-		response.Message = "请配置数据库连接信息"
-	} else if !response.DatabaseConnected {
-		response.Message = "数据库连接失败，请检查配置"
-	} else {
-		response.Message = "系统未安装，可以开始安装"
-	}
-
-	return response
-}
-
-// TestDatabaseConnection 测试数据库连接
-func (s *InstallService) TestDatabaseConnection(config dto.DatabaseConfig) (*gorm.DB, error) {
-	if err := validateDatabase(config); err != nil {
-		return nil, err
-	}
-	var dialector gorm.Dialector
-	driver := config.Driver
-	if driver == "" {
-		driver = "mysql" // 默认使用 MySQL
-	}
-
-	switch driver {
-	case "mysql":
-		cfg := dbConfig.DatabaseConfig{Driver: "mysql", Host: config.Host, Port: config.Port, Username: config.Username, Password: config.Password, DBName: config.Database}
-		dsn := cfg.GetMySQLDSN()
-		if dsn == "" {
-			return nil, fmt.Errorf("MySQL 连接参数无效")
-		}
-		dialector = mysql.Open(dsn)
-
-	case "postgresql":
-		cfg := dbConfig.DatabaseConfig{Driver: "postgresql", Host: config.Host, Port: config.Port, Username: config.Username, Password: config.Password, DBName: config.Database}
-		dsn := cfg.GetPostgreSQLDSN()
-		if dsn == "" {
-			return nil, fmt.Errorf("PostgreSQL 连接参数无效")
-		}
-		dialector = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
-
-	case "sqlite":
-		// SQLite 使用文件路径
-		filePath := config.FilePath
-		if filePath == "" {
-			filePath = "mliev_iam.db"
-		}
-		if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
-			return nil, err
-		}
-		dialector = sqlite.Open(filePath)
-
-	default:
-		return nil, fmt.Errorf("不支持的数据库驱动: %s", driver)
-	}
-
-	// 尝试连接数据库
-	db, err := gorm.Open(dialector, &gorm.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("数据库连接失败: %w", err)
-	}
-
-	// 测试连接
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("获取数据库实例失败: %w", err)
-	}
-
-	if err := sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("数据库ping失败: %w", err)
-	}
-
-	// 返回数据库连接供后续使用
-	return db, nil
-}
-
-// TestRedisConnection 测试Redis连接
-func (s *InstallService) TestRedisConnection(config dto.RedisConfig) (*redis.Client, error) {
-	if config.Host == "" || config.Port < 1 || config.Port > 65535 || config.DB < 0 {
-		return nil, fmt.Errorf("Redis 配置无效")
-	}
-	client := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", config.Host, config.Port),
-		Password: config.Password,
-		DB:       config.DB,
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("Redis连接失败: %w", err)
-	}
-
-	return client, nil
 }
 
 // CreateInitialData 创建初始数据（部门、角色、权限、管理员）
@@ -454,17 +319,4 @@ func (s *InstallService) generatePasswordHash(password string) (salt, hash strin
 		return "", "", fmt.Errorf("生成密码哈希失败: %w", err)
 	}
 	return "", h, nil
-}
-
-// UpdateDatabaseConfig 更新数据库配置到配置文件
-func (s *InstallService) UpdateDatabaseConfig(config dto.DatabaseConfig) error {
-	return installation.PersistSettings(databaseSettings(config))
-}
-
-func (s *InstallService) UpdateRedisConfig(config dto.RedisConfig) error {
-	return installation.PersistSettings(map[string]any{"redis.host": config.Host, "redis.port": config.Port, "redis.password": config.Password, "redis.db": config.DB})
-}
-
-func (s *InstallService) MarkAsInstalled() error {
-	return installation.PersistSettings(map[string]any{"app.installed": true})
 }

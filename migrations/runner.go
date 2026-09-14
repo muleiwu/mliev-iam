@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,7 @@ import (
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/internal/pkg/credentialcrypto"
-	glebarezsqlite "github.com/glebarez/sqlite"
+	sqlitedialect "cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	"github.com/pressly/goose/v3"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -89,6 +90,17 @@ func RunGooseMigrations(db *sql.DB, driver string, logger Logger) error {
 // RunGooseMigrationsWithGorm 是完整版本：gormDB 非空时可做"遗留 schema 感知"的 baseline。
 // install_controller 会传 gormDB，以便识别老 MySQL 部署避免撞库。
 func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logger Logger) error {
+	return RunGooseMigrationsWithGormContext(context.Background(), db, gormDB, driver, logger)
+}
+
+// RunGooseMigrationsWithGormContext supports cancellable installation actions.
+func RunGooseMigrationsWithGormContext(ctx context.Context, db *sql.DB, gormDB *gorm.DB, driver string, logger Logger) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if gormDB != nil {
+		gormDB = gormDB.WithContext(ctx)
+	}
 	if logger == nil {
 		logger = stdoutLogger{}
 	}
@@ -122,12 +134,12 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 		}
 	}
 
-	currentVersion, _ := goose.GetDBVersion(db)
+	currentVersion, _ := goose.GetDBVersionContext(ctx, db)
 	if currentVersion < identityConnectionCreateVersion {
-		if err := goose.UpTo(db, dir, identityConnectionCreateVersion); err != nil {
+		if err := goose.UpToContext(ctx, db, dir, identityConnectionCreateVersion); err != nil {
 			return fmt.Errorf("创建统一身份连接表失败: %w", err)
 		}
-		currentVersion, _ = goose.GetDBVersion(db)
+		currentVersion, _ = goose.GetDBVersionContext(ctx, db)
 	}
 
 	if currentVersion >= identityConnectionCreateVersion && currentVersion < identityConnectionCutoverVersion {
@@ -142,12 +154,12 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 		if err := migrateLegacyIdentityData(migrationDB); err != nil {
 			return fmt.Errorf("统一身份连接数据迁移失败（旧表已保留）: %w", err)
 		}
-		if err := goose.UpTo(db, dir, identityConnectionCutoverVersion); err != nil {
+		if err := goose.UpToContext(ctx, db, dir, identityConnectionCutoverVersion); err != nil {
 			return fmt.Errorf("删除旧身份连接表失败: %w", err)
 		}
 	}
 
-	if err := goose.Up(db, dir); err != nil {
+	if err := goose.UpContext(ctx, db, dir); err != nil {
 		return fmt.Errorf("goose 迁移失败: %w", err)
 	}
 	validationDB := gormDB
@@ -156,12 +168,12 @@ func RunGooseMigrationsWithGorm(db *sql.DB, gormDB *gorm.DB, driver string, logg
 		if openErr != nil {
 			return fmt.Errorf("初始化凭据验证数据库失败: %w", openErr)
 		}
-		validationDB = openedDB
+		validationDB = openedDB.WithContext(ctx)
 	}
 	if err := validateAllIdentityCredentials(validationDB); err != nil {
 		return fmt.Errorf("启动前身份连接凭据解密验证失败: %w", err)
 	}
-	newVersion, _ := goose.GetDBVersion(db)
+	newVersion, _ := goose.GetDBVersionContext(ctx, db)
 	if newVersion != currentVersion {
 		logger.Info(fmt.Sprintf("[db migration] goose 迁移完成: %d -> %d (driver=%s)", currentVersion, newVersion, driver))
 	} else {
@@ -219,7 +231,7 @@ func openGormOnSQLDB(db *sql.DB, driver string) (*gorm.DB, error) {
 	case "postgres", "postgresql":
 		return gorm.Open(postgres.New(postgres.Config{Conn: db}), config)
 	case "sqlite", "sqlite3":
-		return gorm.Open(&glebarezsqlite.Dialector{Conn: db}, config)
+		return gorm.Open(&sqlitedialect.Dialector{Conn: db}, config)
 	default:
 		return nil, fmt.Errorf("不支持的数据库驱动: %s", driver)
 	}
@@ -228,11 +240,12 @@ func openGormOnSQLDB(db *sql.DB, driver string) (*gorm.DB, error) {
 // reconcileKnownMySQLSchemaDrift 修复"字段已存在但 goose 版本未记录"的历史漂移。
 // 这类库不能直接重跑 ADD COLUMN，也不能直接把最高版本写入，否则会跳过中间迁移。
 func reconcileKnownMySQLSchemaDrift(db *sql.DB, gormDB *gorm.DB, dir string, logger Logger) error {
+	ctx := gormDB.Statement.Context
 	if !gormDB.Migrator().HasColumn(legacySchemaSentinelTable, userFailureCountColumn) {
 		return nil
 	}
 
-	currentVersion, err := goose.GetDBVersion(db)
+	currentVersion, err := goose.GetDBVersionContext(ctx, db)
 	if err != nil {
 		return fmt.Errorf("检查 goose 当前版本失败: %w", err)
 	}
@@ -241,7 +254,7 @@ func reconcileKnownMySQLSchemaDrift(db *sql.DB, gormDB *gorm.DB, dir string, log
 	}
 
 	if currentVersion < userFailureCountPreviousMigrationVersion {
-		if err := goose.UpTo(db, dir, userFailureCountPreviousMigrationVersion); err != nil {
+		if err := goose.UpToContext(ctx, db, dir, userFailureCountPreviousMigrationVersion); err != nil {
 			return fmt.Errorf("补跑 %s 前置迁移失败: %w", userFailureCountColumn, err)
 		}
 	}
@@ -286,7 +299,8 @@ func markGooseVersionAppliedIfMissing(gormDB *gorm.DB, version int64, reason str
 // fresh install 时条件 2 为假，直接让 goose.Up 跑全套 SQL 建表。
 // 正常管理中的 MySQL 库条件 1 为假（currentVersion 已是最近那个版本），跳过。
 func baselineIfLegacyMySQL(db *sql.DB, gormDB *gorm.DB, logger Logger) error {
-	currentVersion, err := goose.EnsureDBVersion(db)
+	ctx := gormDB.Statement.Context
+	currentVersion, err := goose.EnsureDBVersionContext(ctx, db)
 	if err != nil && !errors.Is(err, goose.ErrNoNextVersion) {
 		return fmt.Errorf("EnsureDBVersion: %w", err)
 	}

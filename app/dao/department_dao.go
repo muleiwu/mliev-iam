@@ -94,7 +94,7 @@ func (dao *DepartmentDao) Delete(id uint) error {
 
 	// 检查是否有用户关联
 	var userCount int64
-	if err := dao.database.Model(&model.User{}).Where("department_id = ?", id).Count(&userCount).Error; err != nil {
+	if err := dao.database.Model(&model.UserDepartment{}).Where("department_id = ? AND is_active = ?", id, true).Count(&userCount).Error; err != nil {
 		return fmt.Errorf("检查关联用户失败: %w", err)
 	}
 	if userCount > 0 {
@@ -126,7 +126,7 @@ func (dao *DepartmentDao) BatchDelete(ids []uint) error {
 
 		// 检查是否有用户关联
 		var userCount int64
-		if err := dao.database.Model(&model.User{}).Where("department_id = ?", id).Count(&userCount).Error; err != nil {
+		if err := dao.database.Model(&model.UserDepartment{}).Where("department_id = ? AND is_active = ?", id, true).Count(&userCount).Error; err != nil {
 			return fmt.Errorf("检查关联用户失败: %w", err)
 		}
 		if userCount > 0 {
@@ -358,12 +358,25 @@ func (dao *DepartmentDao) MoveDepartment(id uint, targetParentID *uint, sort int
 				return fmt.Errorf("查询目标父部门失败: %w", err)
 			}
 
-			// 检查目标父部门是否是当前部门的后代
-			if targetParent.Path != "" && department.Path != "" {
-				if len(targetParent.Path) > len(department.Path) &&
-					targetParent.Path[:len(department.Path)] == department.Path {
-					return fmt.Errorf("不能移动到子部门下")
+			// Walk parent IDs rather than trusting mutable/materialized paths.
+			seen := map[uint]bool{}
+			current := &targetParent
+			for {
+				if current.ID == id {
+					return fmt.Errorf("不能移动到自身或子部门下")
 				}
+				if seen[current.ID] {
+					return fmt.Errorf("组织结构存在循环")
+				}
+				seen[current.ID] = true
+				if current.ParentID == nil {
+					break
+				}
+				var parent model.Department
+				if err := tx.First(&parent, *current.ParentID).Error; err != nil {
+					return err
+				}
+				current = &parent
 			}
 
 			// 检查名称是否冲突

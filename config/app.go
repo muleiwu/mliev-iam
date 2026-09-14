@@ -3,6 +3,7 @@ package config
 import (
 	appService "cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/pkg/extension"
+	"cnb.cool/mliev/open/go-web/pkg/container"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"cnb.cool/mliev/open/go-web/pkg/interfaces"
 	cacheAssembly "cnb.cool/mliev/open/go-web/pkg/server/cache/assembly"
@@ -31,6 +32,7 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 		&bootstrapRedis{},
 		&cacheAssembly.Cache{},
 		&startupChecks{modules: a.Modules},
+		&setupAssembly{edition: a.Edition},
 	}
 }
 
@@ -38,9 +40,10 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 // the final assembly has already completed migrations and extension checks.
 func (a App) Servers() []interfaces.ServerInterface {
 	if !helper.GetConfig().GetBool("app.installed", false) {
-		return []interfaces.ServerInterface{&service.HttpServer{}}
+		return []interfaces.ServerInterface{container.MustGet[*appService.SetupInstaller](), &service.HttpServer{}}
 	}
 	return []interfaces.ServerInterface{
+		container.MustGet[*appService.SetupInstaller](),
 		&appService.SyncWorkerServer{},
 		&appService.LoginSessionCleanupServer{},
 		&service.HttpServer{},

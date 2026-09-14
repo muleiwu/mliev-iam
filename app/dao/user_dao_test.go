@@ -5,7 +5,7 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
-	"github.com/glebarez/sqlite"
+	"cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )

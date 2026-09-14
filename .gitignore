@@ -17,3 +17,7 @@ config/config.yaml
 /config/mliev_iam.db
 /scripts/reload-config.sh
 /admin-web/git_update.sh
+
+/config/*.setup-state.json
+/config/identity-credentials.key
+/config/installation-id
