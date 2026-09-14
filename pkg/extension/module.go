@@ -22,7 +22,6 @@ type Capabilities struct {
 // before workers or HTTP can accept requests. Module functions must be safe
 // for concurrent HTTP requests after Startup completes.
 type Module struct {
-	LoginIdentifiers  []LoginIdentifier
 	StaticDirs        []string
 	FirstPartyClients []firstparty.Client
 	Name              string

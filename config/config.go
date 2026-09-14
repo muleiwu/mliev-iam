@@ -22,9 +22,7 @@ func (receiver Config) Get() []interfaces.InitConfig {
 	var routes []func(http.RouterInterface)
 	var middleware []http.HandlerFunc
 	var staticDirs []string
-	var identifiers []extension.LoginIdentifier
 	for _, module := range receiver.Modules {
-		identifiers = append(identifiers, module.LoginIdentifiers...)
 		staticDirs = append(staticDirs, module.StaticDirs...)
 		for _, client := range module.FirstPartyClients {
 			firstparty.Register(client)
@@ -34,7 +32,6 @@ func (receiver Config) Get() []interfaces.InitConfig {
 		}
 		middleware = append(middleware, module.Middleware...)
 	}
-	extension.ConfigureLoginIdentifiers(identifiers)
 	capabilities := func(ctx context.Context) extension.Capabilities {
 		edition, version := receiver.Edition, receiver.Version
 		if edition == "" {
