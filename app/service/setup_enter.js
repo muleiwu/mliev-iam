@@ -1,5 +1,6 @@
 const status = document.getElementById('status');
 const retry = document.getElementById('retry');
+const entryPath = document.querySelector('meta[name="iam-setup-entry"]').content;
 let active = true;
 window.addEventListener('pagehide', () => { active = false; });
 async function waitForReady() {
@@ -11,7 +12,7 @@ async function waitForReady() {
       const response = await fetch('/api/install/check', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
       const result = await response.json();
       if (response.ok && result.code === 0 && result.data.ready) {
-        window.location.replace('/admin/');
+        window.location.replace(entryPath);
         return;
       }
     } catch { /* The process briefly disconnects while restarting. */ }

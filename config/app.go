@@ -20,6 +20,10 @@ type App struct {
 	Edition         string
 	Version         string
 	DefaultHTTPAddr string
+	// Optional installation branding and final destination. Empty values retain
+	// the edition's standard name and the /admin/ destination.
+	SetupName      string
+	SetupEntryPath string
 }
 
 // Assemblies 声明装配顺序 env → config → logger → database → redis → cache。
@@ -32,7 +36,7 @@ func (a App) Assemblies() []interfaces.AssemblyInterface {
 		&bootstrapRedis{},
 		&cacheAssembly.Cache{},
 		&startupChecks{modules: a.Modules},
-		&setupAssembly{edition: a.Edition},
+		&setupAssembly{edition: a.Edition, options: appService.SetupOptions{Name: a.SetupName, EntryPath: a.SetupEntryPath}},
 	}
 }
 

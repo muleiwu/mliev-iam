@@ -361,3 +361,8 @@ mliev-iam/
 `checks/:id`、`submit`，JSON 请求格式为 `{"values":{...}}`，并携带
 `X-Setup-Kit: 1`。只读 `/api/install/check` 继续提供 installed/ready 状态。
 代理应保留 Host 和正确的协议，必要时通过 `install.allowed_origins` 配置明确的外部来源。
+
+
+衍生发行版可以通过 `config.App.SetupName` 设置安装器名称，通过 `SetupEntryPath`
+设置安装完成后的站内入口。留空时保留原发行版名称及 `/admin/`；完成页的
+`/install/enter` 在等待就绪和直接跳转时都使用相同的入口配置。

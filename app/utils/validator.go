@@ -15,9 +15,12 @@ import (
 //   - 含 "@" → 邮箱
 //   - 其余 → 用户名
 
+// UsernamePattern is shared by account validation and the installation schema.
+const UsernamePattern = `^[a-zA-Z0-9_]+$`
+
 var (
 	// usernameCharsetRegex 用户名允许的字符集：字母、数字、下划线（天然排除 "@"）。
-	usernameCharsetRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+	usernameCharsetRegex = regexp.MustCompile(UsernamePattern)
 	// allDigitsRegex 纯数字。
 	allDigitsRegex = regexp.MustCompile(`^[0-9]+$`)
 	// e164Regex E.164 国际手机号格式：以 "+" 开头，首位非 0，总长 7-15 位数字。
