@@ -342,8 +342,16 @@ mliev-iam/
 
 ### 首次安装引导
 
-首次启动不要求数据库和 Redis 已连接，访问 `/install/`，按数据库、Redis、
-管理员和确认步骤完成安装。安装页面由 setup-kit v0.1.0 内嵌提供，不再构建独立前端。
+首次启动不要求数据库和 Redis 已连接，访问 `/install/`。开源版首先展示完整的
+[MIT 授权协议](LICENSE)，主动勾选同意后，按数据库、Redis、管理员和确认步骤完成安装。
+协议随程序内嵌，支持离线阅读；默认不勾选，无需滚动到底，刷新页面后需重新确认。
+企业版、高校版及其他版本直接进入数据库配置；已安装实例升级后无需补签。
+安装页面由 setup-kit v0.1.0 内嵌提供，不再构建独立前端。
+
+通过 API 安装开源版时，先读取 `/install/api/schema` 返回的 `agreements`，
+确认协议后在提交的 `values` 中设置 `setupkit.agreements.mit-license` 为当前协议的 `digest`。
+缺失、布尔值或过期摘要会被后端拒绝；同意信息不写入配置或安装状态。
+
 支持 MySQL、PostgreSQL、SQLite；Redis 必选。管理员密码至少 12 个字符，
 保留姓名与可选手机号，使用系统现有 Argon2id 哈希。
 

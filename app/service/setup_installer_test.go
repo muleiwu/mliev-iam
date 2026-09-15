@@ -52,6 +52,7 @@ func TestSetupPresentationAndEntryAcrossReadinessStates(t *testing.T) {
 		options     SetupOptions
 		name, entry string
 	}{
+		{"", SetupOptions{}, "MLiev IAM", "/admin/"},
 		{"community", SetupOptions{}, "MLiev IAM", "/admin/"},
 		{"enterprise", SetupOptions{}, "MLiev IAM Enterprise", "/admin/"},
 		{"education", SetupOptions{Name: "MLiev IAM 高校版", EntryPath: "/education/"}, "MLiev IAM 高校版", "/education/"},
@@ -95,10 +96,15 @@ func TestSetupEntryRejectsExternalDestinations(t *testing.T) {
 
 func setupTestInstaller(t *testing.T) *SetupInstaller {
 	t.Helper()
+	return setupTestInstallerForEdition(t, "enterprise")
+}
+
+func setupTestInstallerForEdition(t *testing.T, edition string) *SetupInstaller {
+	t.Helper()
 	t.Chdir(t.TempDir())
 	viper.Reset()
 	t.Cleanup(viper.Reset)
-	installer, err := NewSetupInstaller("enterprise", false, func() bool { return false })
+	installer, err := NewSetupInstaller(edition, false, func() bool { return false })
 	if err != nil {
 		t.Fatal(err)
 	}
