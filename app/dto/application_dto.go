@@ -106,6 +106,7 @@ type ResetClientSecretResponse struct {
 
 // ApplicationAccessScopeRequest 应用授权范围请求
 type ApplicationAccessScopeRequest struct {
+	IsPublic              *bool  `json:"isPublic"`
 	UserIDs               []uint `json:"userIds"`
 	DepartmentIDs         []uint `json:"departmentIds"`
 	RoleIDs               []uint `json:"roleIds"`
@@ -120,6 +121,7 @@ type ApplicationAccessScopeQuery struct {
 
 // ApplicationAccessScopeResponse 应用授权范围响应
 type ApplicationAccessScopeResponse struct {
+	IsPublic              bool                  `json:"isPublic"`
 	UserIDs               []uint                `json:"userIds"`
 	DepartmentIDs         []uint                `json:"departmentIds"`
 	RoleIDs               []uint                `json:"roleIds"`

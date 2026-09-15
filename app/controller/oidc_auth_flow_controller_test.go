@@ -199,6 +199,41 @@ func TestCheckOIDCUserAccessReturnsTerminalFailure(t *testing.T) {
 	}
 }
 
+func TestCheckOIDCUserAccessAfterMakingApplicationPublic(t *testing.T) {
+	db := registerControllerTestDatabase(t)
+	app := &model.Application{
+		UUID: "public-client", Name: "公开应用", ProtocolType: string(model.ProtocolTypeOIDC),
+		ProtocolConfig: map[string]interface{}{
+			"clientId":     "public-client",
+			"redirectUris": []interface{}{"https://client.example/callback"},
+		},
+		AccessScope: &model.ApplicationAccessScope{UserIDs: []uint{42}},
+		IsActive:    true,
+	}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := &service.OIDCSession{
+		ClientID: app.UUID, RedirectURI: "https://client.example/callback", State: "original-state",
+	}
+	if _, failure, err := checkOIDCUserAccess(session, 99); err != nil || failure == nil {
+		t.Fatalf("restricted application should reject new users: failure=%+v err=%v", failure, err)
+	}
+	public := true
+	if err := service.NewApplicationService(db).UpdateAccessScope(app.ID, &dto.ApplicationAccessScopeRequest{
+		IsPublic: &public, UserIDs: []uint{42},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, failure, err := checkOIDCUserAccess(session, 99); err != nil || failure != nil {
+		t.Fatalf("public application rejected new user: failure=%+v err=%v", failure, err)
+	}
+	session.RedirectURI = "https://unregistered.example/callback"
+	if _, _, err := checkOIDCUserAccess(session, 99); err == nil {
+		t.Fatal("public application accepted an unregistered redirect URI")
+	}
+}
+
 func TestGetClientConfigReturnsEnabledAgreementLinks(t *testing.T) {
 	db := registerControllerTestDatabase(t)
 	app := &model.Application{

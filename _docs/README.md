@@ -4,6 +4,10 @@
 
 ## 文档列表
 
+### 应用访问权限 - [`APPLICATION_ACCESS_SCOPE.md`](APPLICATION_ACCESS_SCOPE.md)
+
+公开应用配置、授权范围规则、历史配置兼容方式，以及清除范围后残留授权 ID 的修复说明。
+
 ### 品牌 Logo - [`brand/README.md`](brand/README.md)
 
 MLiev IAM 正式品牌 Logo 源文件、设计含义、标准色和使用规则。
