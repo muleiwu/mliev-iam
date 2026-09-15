@@ -117,15 +117,24 @@ const (
 
 // ApplicationAccessScope 应用访问授权范围
 // 用于控制哪些用户可以访问应用
-// 默认为空表示所有用户都可以访问
+// 未显式设置 IsPublic 的历史配置沿用空范围允许所有用户访问的规则。
 type ApplicationAccessScope struct {
+	IsPublic              *bool  `json:"isPublic,omitempty"`    // 公开应用：所有已登录用户可访问
 	UserIDs               []uint `json:"userIds"`               // 授权用户ID列表
 	DepartmentIDs         []uint `json:"departmentIds"`         // 授权部门ID列表
 	RoleIDs               []uint `json:"roleIds"`               // 授权角色ID列表
 	IncludeSubDepartments bool   `json:"includeSubDepartments"` // 是否包含子部门
 }
 
-// IsEmpty 检查授权范围是否为空（即允许所有用户访问）
+// AllowsEveryone 检查是否公开，兼容未设置公开标记的历史配置。
+func (a *ApplicationAccessScope) AllowsEveryone() bool {
+	if a != nil && a.IsPublic != nil {
+		return *a.IsPublic
+	}
+	return a.IsEmpty()
+}
+
+// IsEmpty 检查是否未选择任何用户、部门或角色。
 func (a *ApplicationAccessScope) IsEmpty() bool {
 	if a == nil {
 		return true

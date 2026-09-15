@@ -420,6 +420,7 @@ func (s *ApplicationService) GetAccessScope(appID uint, query *dto.ApplicationAc
 
 	// 2. 准备响应
 	response := &dto.ApplicationAccessScopeResponse{
+		IsPublic:              app.AccessScope.AllowsEveryone(),
 		UserIDs:               []uint{},
 		DepartmentIDs:         []uint{},
 		RoleIDs:               []uint{},
@@ -595,6 +596,7 @@ func (s *ApplicationService) UpdateAccessScope(appID uint, req *dto.ApplicationA
 	}
 
 	app.AccessScope = &model.ApplicationAccessScope{
+		IsPublic:              req.IsPublic,
 		UserIDs:               req.UserIDs,
 		DepartmentIDs:         req.DepartmentIDs,
 		RoleIDs:               req.RoleIDs,
@@ -637,12 +639,14 @@ func (s *ApplicationService) CheckUserAccess(appID uint, userID uint) bool {
 	return UserMatchesAccessScope(s.db, userID, app.AccessScope)
 }
 
-// UserMatchesAccessScope shares the existing application audience semantics.
-// Callers must explicitly handle restricted-empty scopes before calling.
+// UserMatchesAccessScope checks public access first, then matches restricted grants.
 func UserMatchesAccessScope(db *gorm.DB, userID uint, scope *model.ApplicationAccessScope) bool {
-	// 2. 如果未设置授权范围，允许所有用户访问
-	if scope == nil || scope.IsEmpty() {
+	// 2. 公开应用允许所有用户访问；历史空范围保持原有行为。
+	if scope.AllowsEveryone() {
 		return true
+	}
+	if scope.IsEmpty() {
+		return false
 	}
 
 	// 3. 检查用户是否在授权列表中

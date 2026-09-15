@@ -1,15 +1,110 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
+func TestApplicationPublicAccessTransitions(t *testing.T) {
+	db := newApplicationAccessTestDB(t)
+	app := &model.Application{
+		UUID: "public-access", Name: "public-access", ProtocolType: "oidc",
+		ProtocolConfig: map[string]interface{}{"clientId": "public-access"},
+		AccessScope:    &model.ApplicationAccessScope{UserIDs: []uint{42}},
+		IsActive:       true,
+	}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewApplicationService(db)
+	for _, step := range []struct {
+		name        string
+		body        string
+		allowListed bool
+		allowNew    bool
+	}{
+		{"public overrides old grants", `{"isPublic":true,"userIds":[42],"departmentIds":[10],"roleIds":[30]}`, true, true},
+		{"unchecking restores restricted access", `{"isPublic":false,"userIds":[42]}`, true, false},
+		{"explicit restricted empty denies everyone", `{"isPublic":false,"userIds":[],"departmentIds":[],"roleIds":[]}`, false, false},
+		{"public without grants allows new users", `{"isPublic":true}`, true, true},
+		{"legacy restricted update remains supported", `{"userIds":[42]}`, true, false},
+		{"legacy clearing still allows everyone", `{}`, true, true},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			var request dto.ApplicationAccessScopeRequest
+			if err := json.Unmarshal([]byte(step.body), &request); err != nil {
+				t.Fatal(err)
+			}
+			if err := service.UpdateAccessScope(app.ID, &request); err != nil {
+				t.Fatal(err)
+			}
+			response, err := service.GetAccessScope(app.ID, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.IsPublic != step.allowNew {
+				t.Errorf("returned isPublic = %v, want %v", response.IsPublic, step.allowNew)
+			}
+			if len(response.UserIDs) != len(request.UserIDs) ||
+				len(response.DepartmentIDs) != len(request.DepartmentIDs) ||
+				len(response.RoleIDs) != len(request.RoleIDs) {
+				t.Errorf("saved grants were lost: %+v", response)
+			}
+			for _, check := range []struct {
+				userID  uint
+				allowed bool
+			}{{42, step.allowListed}, {99, step.allowNew}} {
+				if actual := NewApplicationService(db).CheckUserAccess(app.ID, check.userID); actual != check.allowed {
+					t.Errorf("user %d access = %v, want %v", check.userID, actual, check.allowed)
+				}
+			}
+		})
+	}
+}
+
+func TestApplicationAccessAfterClearingScope(t *testing.T) {
+	for _, request := range []struct {
+		name  string
+		scope dto.ApplicationAccessScopeRequest
+	}{
+		{name: "omitted lists"},
+		{name: "empty lists", scope: dto.ApplicationAccessScopeRequest{
+			UserIDs: []uint{}, DepartmentIDs: []uint{}, RoleIDs: []uint{}, IncludeSubDepartments: true,
+		}},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			db := newApplicationAccessTestDB(t)
+			app := &model.Application{
+				UUID: "clear-scope", Name: "clear-scope", ProtocolType: "oidc",
+				ProtocolConfig: map[string]interface{}{"clientId": "clear-scope"},
+				AccessScope:    &model.ApplicationAccessScope{UserIDs: []uint{42}},
+				IsActive:       true,
+			}
+			if err := db.Create(app).Error; err != nil {
+				t.Fatal(err)
+			}
+			service := NewApplicationService(db)
+			if service.CheckUserAccess(app.ID, 99) {
+				t.Fatal("unlisted user can access restricted application")
+			}
+			if err := service.UpdateAccessScope(app.ID, &request.scope); err != nil {
+				t.Fatal(err)
+			}
+			if !NewApplicationService(db).CheckUserAccess(app.ID, 99) {
+				t.Fatal("new user cannot access application after clearing its scope")
+			}
+		})
+	}
+}
+
 func TestApplicationAccessScopeModes(t *testing.T) {
+	public, restricted := true, false
 	tests := []struct {
 		name         string
 		scope        *model.ApplicationAccessScope
@@ -17,6 +112,18 @@ func TestApplicationAccessScopeModes(t *testing.T) {
 		seed         func(*testing.T, *gorm.DB)
 		shouldAccess bool
 	}{
+		{
+			name:         "explicit public overrides restricted scope",
+			scope:        &model.ApplicationAccessScope{IsPublic: &public, UserIDs: []uint{99}},
+			userID:       6,
+			shouldAccess: true,
+		},
+		{
+			name:         "explicit restricted empty denies access",
+			scope:        &model.ApplicationAccessScope{IsPublic: &restricted},
+			userID:       6,
+			shouldAccess: false,
+		},
 		{
 			name:         "empty scope allows access",
 			userID:       1,

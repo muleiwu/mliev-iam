@@ -121,6 +121,10 @@ func TestProtectedApplicationAllowsCosmeticsAndRejectsCriticalChanges(t *testing
 	if err := applicationService.UpdateAccessScope(app.ID, &dto.ApplicationAccessScopeRequest{}); !errors.Is(err, ErrApplicationProtected) {
 		t.Fatalf("scope update error=%v, want protected", err)
 	}
+	public := true
+	if err := applicationService.UpdateAccessScope(app.ID, &dto.ApplicationAccessScopeRequest{IsPublic: &public}); !errors.Is(err, ErrApplicationProtected) {
+		t.Fatalf("public access update error=%v, want protected", err)
+	}
 	if err := applicationService.ValidateBatchOperation("disable", []uint{app.ID}); !errors.Is(err, ErrApplicationProtected) {
 		t.Fatalf("batch validation error=%v, want protected", err)
 	}
