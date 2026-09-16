@@ -26,9 +26,9 @@ const UserCookieName = "user_access_token"
 
 // extractTokenCandidates 按优先级返回待校验的凭据候选：
 // Authorization 头存在时仅使用该头（严格校验，不回退 Cookie，保持 API 语义）；
-// 否则依次尝试 admin_access_token、user_access_token Cookie，
-// 由调用方逐个校验，第一个有效者生效（过期的 admin Cookie 可落到 user Cookie）。
-func extractTokenCandidates(c httpInterfaces.RouterContextInterface) []string {
+// 否则按调用方指定的 Cookie 顺序校验；未指定时保留通用认证的回退行为。
+// 管理接口只接受 admin_access_token，不能回退到个人中心会话。
+func extractTokenCandidates(c httpInterfaces.RouterContextInterface, cookieNames ...string) []string {
 	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) == 2 && parts[0] == "Bearer" {
@@ -37,11 +37,13 @@ func extractTokenCandidates(c httpInterfaces.RouterContextInterface) []string {
 		return nil
 	}
 	var candidates []string
-	names := []string{AdminCookieName, UserCookieName}
-	if c.Get("prefer_user_cookie") == true {
-		names = []string{UserCookieName, AdminCookieName}
+	if len(cookieNames) == 0 {
+		cookieNames = []string{AdminCookieName, UserCookieName}
+		if c.Get("prefer_user_cookie") == true {
+			cookieNames = []string{UserCookieName, AdminCookieName}
+		}
 	}
-	for _, name := range names {
+	for _, name := range cookieNames {
 		if cookie, err := c.Cookie(name); err == nil && cookie != "" {
 			candidates = append(candidates, cookie)
 		}
@@ -120,8 +122,8 @@ func validateUserSessionWithDB(database *gorm.DB, claims *jwt.Claims) error {
 
 // authenticate 校验请求凭据并写入用户上下文（不推进 handler 链）。
 // 返回 false 表示已写入错误响应并中止。
-func authenticate(c httpInterfaces.RouterContextInterface) bool {
-	candidates := extractTokenCandidates(c)
+func authenticate(c httpInterfaces.RouterContextInterface, cookieNames ...string) bool {
+	candidates := extractTokenCandidates(c, cookieNames...)
 	if len(candidates) == 0 {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, dto.Response{
 			Code:    constants.ErrCodeUnauthorized,
@@ -173,7 +175,9 @@ func AuthMiddleware() httpInterfaces.HandlerFunc {
 // 其内部的 c.Next() 会先把业务 handler 跑完，403 就形同虚设。
 func AdminAuthMiddleware() httpInterfaces.HandlerFunc {
 	return func(c httpInterfaces.RouterContextInterface) {
-		if !authenticate(c) {
+		// 切换账号会撤销原后台会话。此时应返回 401 重新认证，
+		// 不能用 role=user 的个人 Cookie 冒充后台会话后再返回 403。
+		if !authenticate(c, AdminCookieName) {
 			return
 		}
 
