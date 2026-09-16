@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
@@ -22,7 +23,7 @@ var ErrLegacyLoginNotMatched = errors.New("no legacy source matched")
 //   - api 模式：脚本调用旧系统 API 校验。
 //   - database 模式：先查 legacy_users 未迁移记录，脚本校验其旧密码哈希。
 //
-// 任一源校验通过即把用户迁移进主 users 表（用本次明文密码以 bcrypt 重哈希），
+// 任一源校验通过即把用户迁移进主 users 表（用本次明文密码以 argon2id 重哈希），
 // 旧哈希永不进主表。
 type LegacyLoginService struct {
 	db          *gorm.DB
@@ -109,8 +110,18 @@ func (s *LegacyLoginService) trySource(source *model.MigrationSource, identifier
 }
 
 // promoteUser 把通过校验的旧用户写入主 users 表，并回填 legacy_users 迁移状态。
-// 用本次明文密码生成 bcrypt 哈希，旧哈希不进主表。
+// 联系方式验证状态由登录脚本显式声明，与建号、迁移状态在同一事务内写入。
+// 用本次明文密码生成 argon2id 哈希，旧哈希不进主表。
 func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUser *model.LegacyUser, identifier, password string, scriptUser map[string]any) (*dto.UserResponse, error) {
+	emailVerified, err := migrationContactVerified(scriptUser, "email")
+	if err != nil {
+		return nil, err
+	}
+	phoneVerified, err := migrationContactVerified(scriptUser, "phone")
+	if err != nil {
+		return nil, err
+	}
+
 	candidate := mapString(scriptUser, "username")
 	if candidate == "" && legacyUser != nil {
 		candidate = legacyUser.Username
@@ -150,15 +161,45 @@ func (s *LegacyLoginService) promoteUser(source *model.MigrationSource, legacyUs
 		}
 	}
 
-	resp, err := s.userService.CreateUser(req)
+	var resp *dto.UserResponse
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		userService := NewUserService(tx)
+		created, err := userService.CreateUser(req)
+		if err != nil {
+			return fmt.Errorf("迁移用户落库失败: %w", err)
+		}
+		if err := userService.MarkContactVerified(created.ID, emailVerified, phoneVerified); err != nil {
+			return fmt.Errorf("迁移联系方式验证状态写入失败: %w", err)
+		}
+		if legacyUser != nil {
+			if err := markLegacyMigrated(dao.NewLegacyUserDao(tx), legacyUser.ID, created.ID); err != nil {
+				return fmt.Errorf("迁移状态更新失败: %w", err)
+			}
+		}
+		resp, err = userService.GetUserByID(created.ID)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("迁移用户落库失败: %w", err)
-	}
-
-	if legacyUser != nil {
-		_ = markLegacyMigrated(s.legacyDao, legacyUser.ID, resp.ID)
+		return nil, err
 	}
 	return resp, nil
+}
+
+// migrationContactVerified 仅接受显式布尔标记，且不得验证从旧记录兜底补入的值。
+func migrationContactVerified(scriptUser map[string]any, contact string) (bool, error) {
+	field := contact + "Verified"
+	value := scriptUser[field]
+	if value == nil {
+		return false, nil
+	}
+	verified, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("登录脚本 user.%s 必须为布尔值", field)
+	}
+	if verified && strings.TrimSpace(mapString(scriptUser, contact)) == "" {
+		return false, fmt.Errorf("登录脚本 user.%s 为 true 时必须提供非空 user.%s", field, contact)
+	}
+	return verified, nil
 }
 
 // resolveMigrationUsername 为迁移用户确定主表账户名。
