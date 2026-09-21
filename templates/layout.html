@@ -4,37 +4,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Title}} - Mliev IAM 身份认证管理系统</title>
-    <meta name="description" content="企业级身份认证和访问管理系统，支持OIDC、OAuth2、SAML等标准协议">
-    <meta name="keywords" content="IAM,身份认证,OAuth2,OIDC,SAML,单点登录,企业安全">
-    
-    <!-- Bootstrap CSS -->
-    <link href="/static/css/bootstrap@5.3.0.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link href="/static/css/font-awesome_6.4.0_css_all.css" rel="stylesheet">
-    <!-- Custom CSS -->
-    <link href="/static/css/style.css" rel="stylesheet">
-    
-    {{block "head" .}}{{end}}
+    <meta name="color-scheme" content="light">
+    <title>{{.Title}} - MLiev IAM</title>
+    <meta name="description" content="MLiev IAM 提供基于 OIDC、OAuth2 等标准协议的统一身份认证解决方案，助力企业构建安全的访问控制体系，实现用户身份的集中化管理。">
+    <link rel="icon" href="/static/images/home/mark.svg" type="image/svg+xml">
+    <link rel="preload" href="/static/webfonts/iam-puhuiti-bold.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preload" href="/static/images/home/hero.webp" as="image" fetchpriority="high">
 </head>
 <body>
-    <!-- Navigation -->
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
     {{template "navbar" .}}
-    
-    <!-- Main Content -->
-    <main>
+    <main id="main-content" tabindex="-1">
         {{block "content" .}}{{end}}
     </main>
-    
-    <!-- Footer -->
     {{template "footer" .}}
-    
-    <!-- Bootstrap JS -->
-    <script src="/static/js/bootstrap@5.3.0.bundle.js"></script>
-    <!-- Custom JS -->
-    <script src="/static/js/main.js"></script>
-    
-    {{block "scripts" .}}{{end}}
+    <script src="/static/js/main.js" defer></script>
 </body>
 </html>
 {{end}}
