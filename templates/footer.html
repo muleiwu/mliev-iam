@@ -1,116 +1,43 @@
 {{define "footer"}}
-<style>
-    .footer-section {
-        background: #0f172a;
-        color: #94a3b8;
-        font-size: 0.9rem;
-    }
-
-    .footer-title {
-        color: white;
-        font-weight: 700;
-        margin-bottom: 1.5rem;
-        font-size: 1.1rem;
-    }
-
-    .footer-link {
-        color: #94a3b8;
-        text-decoration: none;
-        transition: color 0.2s ease;
-        display: block;
-        margin-bottom: 0.75rem;
-    }
-
-    .footer-link:hover {
-        color: white;
-    }
-
-    .social-icon {
-        width: 36px;
-        height: 36px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
-        margin-right: 0.75rem;
-        transition: all 0.3s ease;
-        text-decoration: none;
-    }
-
-    .social-icon:hover {
-        background: var(--primary-gradient);
-        transform: translateY(-3px);
-        color: white;
-    }
-</style>
-
-<footer class="footer-section pt-5 pb-4">
-    <div class="container">
-        <div class="row gy-4">
-            <div class="col-lg-4 text-center text-lg-start">
-                <h5 class="text-white fw-bold mb-3">
-                    <i class="fas fa-shield-alt me-2 text-primary"></i>Mliev IAM
-                </h5>
-                <p class="mb-4 mx-auto ms-lg-0" style="max-width: 300px;">
-                    企业级身份认证和访问管理系统，提供安全、可靠、标准化的身份认证解决方案。
-                </p>
-                <div class="d-flex justify-content-center justify-content-lg-start">
-                    <a href="#" class="social-icon"><i class="fab fa-github"></i></a>
-                    <a href="#" class="social-icon"><i class="fab fa-twitter"></i></a>
-                    <a href="#" class="social-icon"><i class="fab fa-linkedin-in"></i></a>
+<footer class="site-footer">
+    <div class="page-container">
+        <div class="footer-main">
+            <div class="footer-brand">
+                <a href="/" aria-label="MLiev IAM 首页"><img src="/static/images/home/logo-light.svg" alt="MLiev IAM" width="210" height="50" loading="lazy"></a>
+                <p>企业级身份认证和访问管理系统，提供安全、可靠、标准化的身份认证解决方案。</p>
+            </div>
+            <nav class="footer-links" aria-label="页脚导航">
+                <div>
+                    <h2>产品</h2>
+                    <a href="#features">功能特性</a>
+                    <a href="#security">安全认证</a>
+                    <a href="#scenarios">应用场景</a>
+                    <a href="{{.DocsURL}}" target="_blank" rel="noopener noreferrer">API 文档</a>
                 </div>
-            </div>
-
-            <div class="col-lg-2 col-6">
-                <h6 class="footer-title">产品</h6>
-                <a href="#features" class="footer-link">功能特性</a>
-                <a href="#security" class="footer-link">安全认证</a>
-                <a href="#scenarios" class="footer-link">应用场景</a>
-                <a href="/api/docs" class="footer-link">API文档</a>
-            </div>
-
-            <div class="col-lg-2 col-6">
-                <h6 class="footer-title">开发者</h6>
-                <a href="/api/docs" class="footer-link">API参考</a>
-                <a href="/oidc/.well-known/openid-configuration" class="footer-link">OIDC配置</a>
-                <a href="/health" class="footer-link">系统状态</a>
-                <a href="#" class="footer-link">SDK下载</a>
-            </div>
-
-            <div class="col-lg-2 col-6">
-                <h6 class="footer-title">支持</h6>
-                <a href="#" class="footer-link">帮助中心</a>
-                <a href="#" class="footer-link">技术支持</a>
-                <a href="#" class="footer-link">社区论坛</a>
-                <a href="#" class="footer-link">联系我们</a>
-            </div>
-
-            <div class="col-lg-2 col-6">
-                <h6 class="footer-title">关于</h6>
-                <a href="#" class="footer-link">关于我们</a>
-                <a href="/auth/#/agreements/privacy" class="footer-link">隐私政策</a>
-                <a href="/auth/#/agreements/terms" class="footer-link">服务条款</a>
-                <a href="#" class="footer-link">安全公告</a>
-            </div>
+                <div>
+                    <h2>开发者</h2>
+                    <a href="{{.DocsURL}}" target="_blank" rel="noopener noreferrer">API 参考</a>
+                    <a href="{{.DocsURL}}" target="_blank" rel="noopener noreferrer">OIDC 配置</a>
+                    <a href="/health">系统状态</a>
+                    <span>SDK 下载</span>
+                </div>
+                <div>
+                    <h2>支持</h2>
+                    <a href="{{.DocsURL}}" target="_blank" rel="noopener noreferrer">帮助中心</a>
+                    <span>技术支持</span><span>社区论坛</span><span>联系我们</span>
+                </div>
+                <div>
+                    <h2>关于</h2>
+                    <a href="{{.ProductURL}}" target="_blank" rel="noopener noreferrer">产品官网</a>
+                    <a href="/auth/#/agreements/privacy">隐私政策</a>
+                    <a href="/auth/#/agreements/terms">服务条款</a>
+                    <span>安全公告</span>
+                </div>
+            </nav>
         </div>
-
-        <hr class="border-secondary opacity-25 my-5">
-
-        <div class="row align-items-center">
-            <div class="col-md-6 text-center text-md-start mb-3 mb-md-0">
-                <p class="mb-0">
-                    &copy; 2024 Mliev IAM. All rights reserved.
-                </p>
-            </div>
-            <div class="col-md-6 text-center text-md-end">
-                <p class="mb-0">
-                    Version {{.Version}} |
-                    <a href="/health" class="text-decoration-none text-secondary hover-white ms-2">系统状态</a> |
-                    <a href="#" class="text-decoration-none text-secondary hover-white ms-2">反馈建议</a>
-                </p>
-            </div>
+        <div class="footer-bottom">
+            <p>Copyright &copy; {{.Now.Year}} <a href="{{.ProductURL}}" target="_blank" rel="noopener noreferrer">合肥木雷坞信息技术有限公司</a>. All rights reserved.</p>
+            <div><a href="{{.ProductURL}}" target="_blank" rel="noopener noreferrer">产品官网</a><span>SDK 下载</span><span>安全合规</span></div>
         </div>
     </div>
 </footer>

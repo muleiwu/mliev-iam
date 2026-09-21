@@ -1,108 +1,28 @@
 {{define "navbar"}}
-<style>
-    .navbar-glass {
-        background: rgba(15, 23, 42, 0.8);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        padding: 1rem 0;
-        transition: all 0.3s ease;
-    }
-
-    .navbar-brand {
-        font-size: 1.5rem;
-        background: linear-gradient(to right, #fff, #cbd5e1);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-
-    .nav-link {
-        font-weight: 500;
-        color: rgba(255, 255, 255, 0.7) !important;
-        transition: color 0.3s ease;
-    }
-
-    .nav-link:hover,
-    .nav-link.active {
-        color: white !important;
-    }
-
-    .btn-nav {
-        border-radius: 50px;
-        padding: 0.5rem 1.5rem;
-        font-weight: 600;
-    }
-
-    @media (max-width: 991.98px) {
-        .navbar-collapse {
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            padding: 1rem;
-            border-radius: 1rem;
-            margin-top: 1rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .navbar-nav .nav-link {
-            padding: 0.75rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .navbar-nav .nav-item:last-child .nav-link {
-            border-bottom: none;
-        }
-
-        .d-flex.gap-2 {
-            flex-direction: column;
-            margin-top: 1rem;
-        }
-
-        .btn-nav {
-            width: 100%;
-            text-align: center;
-        }
-    }
-</style>
-
-<nav class="navbar navbar-expand-lg navbar-dark fixed-top navbar-glass">
-    <div class="container">
-        <a class="navbar-brand fw-bold" href="/">
-            <i class="fas fa-shield-alt me-2 text-primary"></i>Mliev IAM
+<header class="site-header">
+    <div class="page-container header-inner">
+        <a class="brand" href="/" aria-label="MLiev IAM 首页">
+            <img src="/static/images/home/logo.svg" alt="MLiev IAM" width="210" height="50">
         </a>
-
-        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-            <span class="navbar-toggler-icon"></span>
+        <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-navigation" aria-label="打开导航菜单" hidden>
+            <span></span><span></span><span></span>
         </button>
-
-        <div class="collapse navbar-collapse" id="navbarNav">
-            <ul class="navbar-nav me-auto ms-lg-4">
-                <li class="nav-item">
-                    <a class="nav-link active" href="/">首页</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="#features">功能特性</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="#security">安全认证</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="#scenarios">应用场景</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="#advantages">技术优势</a>
-                </li>
-            </ul>
-
-            <div class="d-flex gap-2">
-                <a href="/admin/" class="btn btn-outline-light btn-nav btn-sm">
-                    <i class="fas fa-cog me-1"></i>控制台
+        <nav class="site-navigation" id="site-navigation" aria-label="主导航">
+            <div class="nav-links">
+                <a href="#features">功能特性</a>
+                <a href="#security">安全认证</a>
+                <a href="#scenarios">应用场景</a>
+                <a href="#advantages">技术优势</a>
+            </div>
+            <div class="nav-actions">
+                <a class="button button-header-primary" href="/admin/">
+                    <svg aria-hidden="true"><use href="/static/images/home/ui-icons.svg#console"></use></svg>控制台
                 </a>
-                <a href="/api/docs/" class="btn btn-primary btn-nav btn-sm">
-                    <i class="fas fa-book me-1"></i>文档
+                <a class="button button-header-secondary" href="{{.DocsURL}}" target="_blank" rel="noopener noreferrer">
+                    <svg aria-hidden="true"><use href="/static/images/home/ui-icons.svg#document"></use></svg>文档
                 </a>
             </div>
-        </div>
+        </nav>
     </div>
-</nav>
+</header>
 {{end}}
