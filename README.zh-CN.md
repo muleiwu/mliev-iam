@@ -27,7 +27,7 @@ OIDC / OAuth2 服务提供方，内嵌管理控制台与登录界面、细粒度
 交互式架构图由 [Archify](https://github.com/tt-a1i/archify) 生成，提供中英文双语版本，
 支持深/浅主题、缩放、搜索与 PNG/SVG 导出。索引见 [docs/archify](docs/archify/README.md)。
 
-[![系统总体架构](docs/archify/images/system-architecture.zh-CN.png)](docs/archify/zh-CN/system-architecture.html)
+![系统总体架构](docs/archify/images/system-architecture.zh-CN.png)
 
 | 图表 | 中文 | English |
 |---|---|---|

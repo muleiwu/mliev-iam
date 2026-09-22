@@ -26,7 +26,7 @@ fine-grained RBAC, and enterprise directory integration in a single binary.
 
 Interactive architecture diagrams — generated with [Archify](https://github.com/tt-a1i/archify), available in Chinese and English, with dark/light themes, zoom, search, and PNG/SVG export. Index: [docs/archify](docs/archify/README.md).
 
-[![System architecture](docs/archify/images/system-architecture.en.png)](docs/archify/en/system-architecture.html)
+![System architecture](docs/archify/images/system-architecture.en.png)
 
 | Diagram | 中文 | English |
 |---|---|---|
