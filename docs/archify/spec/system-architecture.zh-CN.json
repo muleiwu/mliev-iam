@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "MLiev IAM 系统总体架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1190,
+      610
+    ],
+    "views": [
+      {
+        "id": "admin-path",
+        "label": "管理链路",
+        "focus": [
+          "browser",
+          "admin-web",
+          "http-server",
+          "biz-layers",
+          "mysql-db"
+        ],
+        "note": "管理员请求从浏览器到数据库的主路径。"
+      },
+      {
+        "id": "oidc-path",
+        "label": "OIDC 接入",
+        "focus": [
+          "thirdparty-app",
+          "http-server",
+          "biz-layers",
+          "redis-store",
+          "auth-web"
+        ],
+        "note": "三方应用经 OIDC 端点完成认证与授权。"
+      },
+      {
+        "id": "idp-integration",
+        "label": "身份源集成",
+        "focus": [
+          "idp-sources",
+          "protocol-factory",
+          "background-workers"
+        ],
+        "note": "企业目录同步与社交登录适配。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "thirdparty-app",
+      "type": "external",
+      "label": "三方应用",
+      "sublabel": "OAuth2 / OIDC 客户端",
+      "pos": [
+        40,
+        70
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "用户浏览器",
+      "sublabel": "管理员 / 终端用户",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "idp-sources",
+      "type": "external",
+      "label": "企业身份源",
+      "sublabel": "飞书 · 企微 · 钉钉 · 社交登录",
+      "pos": [
+        40,
+        470
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "admin-web",
+      "type": "frontend",
+      "label": "管理台前端",
+      "sublabel": "web-antd · /admin",
+      "pos": [
+        270,
+        250
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "auth-web",
+      "type": "frontend",
+      "label": "OIDC 登录前端",
+      "sublabel": "frontend-oidc · /auth",
+      "pos": [
+        270,
+        360
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "http-server",
+      "type": "backend",
+      "label": "Gin HTTP Server",
+      "sublabel": "go-web · traceId → CORS → 安装门禁",
+      "tag": "WrapHandler",
+      "pos": [
+        510,
+        290
+      ],
+      "size": [
+        170,
+        80
+      ]
+    },
+    {
+      "id": "background-workers",
+      "type": "backend",
+      "label": "后台服务",
+      "sublabel": "SyncWorker · 会话清理",
+      "pos": [
+        770,
+        90
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "biz-layers",
+      "type": "backend",
+      "label": "业务分层",
+      "sublabel": "Controller → Service → DAO",
+      "tag": "app/",
+      "pos": [
+        770,
+        290
+      ],
+      "size": [
+        160,
+        80
+      ]
+    },
+    {
+      "id": "protocol-factory",
+      "type": "backend",
+      "label": "协议处理器",
+      "sublabel": "OIDC · SAML · CAS · OAuth2",
+      "pos": [
+        770,
+        470
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "mysql-db",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "goose 版本化迁移",
+      "tag": "PG · SQLite 可选",
+      "pos": [
+        1010,
+        90
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "redis-store",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "OIDC 会话 · 缓存",
+      "pos": [
+        1010,
+        290
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "object-storage",
+      "type": "cloud",
+      "label": "对象存储",
+      "sublabel": "S3 兼容 · 附件",
+      "pos": [
+        1010,
+        470
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "MLiev IAM 单体进程 · go:embed",
+      "wraps": [
+        "admin-web",
+        "auth-web",
+        "http-server",
+        "biz-layers",
+        "protocol-factory",
+        "background-workers"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "数据与基础设施",
+      "wraps": [
+        "mysql-db",
+        "redis-store",
+        "object-storage"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-to-admin",
+      "from": "browser",
+      "to": "admin-web",
+      "label": "HTTPS /admin",
+      "variant": "emphasis"
+    },
+    {
+      "id": "browser-to-auth",
+      "from": "browser",
+      "to": "auth-web",
+      "label": "HTTPS /auth"
+    },
+    {
+      "id": "thirdparty-to-server",
+      "from": "thirdparty-app",
+      "to": "http-server",
+      "label": "OAuth2/OIDC",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "admin-to-server",
+      "from": "admin-web",
+      "to": "http-server",
+      "label": "/api/admin"
+    },
+    {
+      "id": "auth-to-server",
+      "from": "auth-web",
+      "to": "http-server",
+      "label": "/api/oidc"
+    },
+    {
+      "id": "server-to-biz",
+      "from": "http-server",
+      "to": "biz-layers",
+      "label": "路由分发"
+    },
+    {
+      "id": "workers-to-biz",
+      "from": "background-workers",
+      "to": "biz-layers",
+      "label": "定时任务",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "biz-to-mysql",
+      "from": "biz-layers",
+      "to": "mysql-db",
+      "label": "GORM"
+    },
+    {
+      "id": "biz-to-redis",
+      "from": "biz-layers",
+      "to": "redis-store",
+      "label": "会话/缓存",
+      "labelDy": 10
+    },
+    {
+      "id": "biz-to-storage",
+      "from": "biz-layers",
+      "to": "object-storage",
+      "label": "附件",
+      "variant": "dashed"
+    },
+    {
+      "id": "biz-to-protocol",
+      "from": "biz-layers",
+      "to": "protocol-factory",
+      "label": "协议适配",
+      "labelAt": [
+        850,
+        420
+      ]
+    },
+    {
+      "id": "protocol-to-idp",
+      "from": "protocol-factory",
+      "to": "idp-sources",
+      "label": "目录同步",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "前端与服务",
+      "items": [
+        "web-antd 管理台 → static/admin → /admin；frontend-oidc → static/auth → /auth",
+        "release 经 go:embed 嵌入二进制，debug 模式磁盘热加载",
+        "go-web 全局中间件：traceId → 访问日志 → Recovery → CORS → 安装门禁"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "协议与数据",
+      "items": [
+        "协议工厂支持 OIDC · SAML · CAS · OAuth2，适配目录同步与社交登录",
+        "MySQL 默认（PostgreSQL/SQLite 可选），goose 版本化迁移随启动执行",
+        "Redis 承载 OIDC 会话与缓存；S3 兼容对象存储附件"
+      ]
+    }
+  ]
+}

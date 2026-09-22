@@ -1,0 +1,278 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "启动装配流程",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "boot-main",
+        "label": "主启动路径",
+        "focus": [
+          "main",
+          "register",
+          "env-config",
+          "infra",
+          "checks",
+          "setup",
+          "servers"
+        ],
+        "note": "从进程入口到对外服务的完整装配链。"
+      },
+      {
+        "id": "migration",
+        "label": "检查与就绪",
+        "focus": [
+          "checks",
+          "setup",
+          "servers"
+        ],
+        "note": "goose 迁移与就绪标志的建立。"
+      },
+      {
+        "id": "hot-reload",
+        "label": "热重载",
+        "focus": [
+          "sighup",
+          "api-reload",
+          "softreload",
+          "register"
+        ],
+        "note": "SIGHUP 与 API 触发的同进程软重载。"
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "assembly",
+      "label": "装配链"
+    },
+    {
+      "id": "servers",
+      "label": "服务启动"
+    },
+    {
+      "id": "reload",
+      "label": "热重载",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "init",
+      "label": "引导",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "assemble",
+      "label": "组件装配",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "serve",
+      "label": "对外服务",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "assembly-chain",
+      "label": "按 DependsOn 拓扑排序",
+      "lane": "assembly",
+      "fromCol": 1,
+      "toCol": 4,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "main",
+    "register",
+    "env-config",
+    "infra",
+    "checks",
+    "setup",
+    "servers"
+  ],
+  "nodes": [
+    {
+      "id": "main",
+      "lane": "assembly",
+      "col": 0,
+      "type": "external",
+      "label": "进程启动",
+      "sublabel": "main.go · go:embed",
+      "width": 128
+    },
+    {
+      "id": "register",
+      "lane": "assembly",
+      "col": 1,
+      "type": "backend",
+      "label": "装配注册",
+      "sublabel": "RegisterAssemblies",
+      "tag": "拓扑排序",
+      "width": 128
+    },
+    {
+      "id": "env-config",
+      "lane": "assembly",
+      "col": 2,
+      "type": "backend",
+      "label": "Env · Config",
+      "sublabel": "autoload 提供者聚合",
+      "width": 128
+    },
+    {
+      "id": "infra",
+      "lane": "assembly",
+      "col": 3,
+      "type": "backend",
+      "label": "基础组件",
+      "sublabel": "Logger · DB · Redis · Cache",
+      "width": 128
+    },
+    {
+      "id": "checks",
+      "lane": "assembly",
+      "col": 4,
+      "type": "security",
+      "label": "启动检查",
+      "sublabel": "凭证密钥 · goose 迁移",
+      "tag": "startupChecks",
+      "width": 128
+    },
+    {
+      "id": "setup",
+      "lane": "servers",
+      "col": 4,
+      "type": "backend",
+      "label": "安装向导",
+      "sublabel": "SetupInstaller",
+      "width": 128
+    },
+    {
+      "id": "servers",
+      "lane": "servers",
+      "col": 5,
+      "type": "backend",
+      "label": "服务启动",
+      "sublabel": "HttpServer · Worker · app.ready",
+      "width": 128
+    },
+    {
+      "id": "sighup",
+      "lane": "reload",
+      "col": 2,
+      "type": "messagebus",
+      "label": "SIGHUP",
+      "sublabel": "信号",
+      "width": 128
+    },
+    {
+      "id": "api-reload",
+      "lane": "reload",
+      "col": 3,
+      "type": "external",
+      "label": "API 触发",
+      "sublabel": "/api/system/reload",
+      "width": 128
+    },
+    {
+      "id": "softreload",
+      "lane": "reload",
+      "col": 4,
+      "type": "security",
+      "label": "软重载",
+      "sublabel": "ReloadAssemblies · 同进程",
+      "width": 128
+    }
+  ],
+  "edges": [
+    {
+      "id": "main-register",
+      "from": "main",
+      "to": "register",
+      "variant": "default"
+    },
+    {
+      "id": "register-env",
+      "from": "register",
+      "to": "env-config",
+      "variant": "default"
+    },
+    {
+      "id": "env-infra",
+      "from": "env-config",
+      "to": "infra",
+      "variant": "default"
+    },
+    {
+      "id": "infra-checks",
+      "from": "infra",
+      "to": "checks",
+      "variant": "default"
+    },
+    {
+      "id": "checks-setup",
+      "from": "checks",
+      "to": "setup",
+      "variant": "default"
+    },
+    {
+      "id": "setup-servers",
+      "from": "setup",
+      "to": "servers",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sighup-soft",
+      "from": "sighup",
+      "to": "softreload",
+      "label": "触发",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "api-soft",
+      "from": "api-reload",
+      "to": "softreload",
+      "label": "触发",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "soft-rerun",
+      "from": "softreload",
+      "to": "register",
+      "label": "重跑装配",
+      "variant": "security",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "装配链",
+      "items": [
+        "AssemblyInterface 按 DependsOn 拓扑排序装配",
+        "Env → Config → Logger → Database → Redis → Cache",
+        "未安装时 Redis 为 nil、缓存退化为 memory"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "检查与重载",
+      "items": [
+        "goose 版本化迁移（每方言 24 个文件）后置 app.ready",
+        "SIGHUP / API 触发软重载：同进程 ReloadAssemblies",
+        "Restart() 经 syscall.Exec 自替换，PID 不变"
+      ]
+    }
+  ]
+}

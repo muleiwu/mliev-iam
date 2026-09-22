@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "MLiev IAM System Architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1190,
+      610
+    ],
+    "views": [
+      {
+        "id": "admin-path",
+        "label": "Admin Path",
+        "focus": [
+          "browser",
+          "admin-web",
+          "http-server",
+          "biz-layers",
+          "mysql-db"
+        ],
+        "note": "The primary admin request path from browser to database."
+      },
+      {
+        "id": "oidc-path",
+        "label": "OIDC Access",
+        "focus": [
+          "thirdparty-app",
+          "http-server",
+          "biz-layers",
+          "redis-store",
+          "auth-web"
+        ],
+        "note": "Third-party apps authenticate and authorize via the OIDC endpoints."
+      },
+      {
+        "id": "idp-integration",
+        "label": "Identity Integration",
+        "focus": [
+          "idp-sources",
+          "protocol-factory",
+          "background-workers"
+        ],
+        "note": "Enterprise directory sync and social login adapters."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "thirdparty-app",
+      "type": "external",
+      "label": "Third-party App",
+      "sublabel": "OAuth2 / OIDC Client",
+      "pos": [
+        40,
+        70
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "User Browser",
+      "sublabel": "Admins / End Users",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "idp-sources",
+      "type": "external",
+      "label": "Identity Sources",
+      "sublabel": "Feishu · WeCom · DingTalk",
+      "pos": [
+        40,
+        470
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "admin-web",
+      "type": "frontend",
+      "label": "Admin Console",
+      "sublabel": "web-antd · /admin",
+      "pos": [
+        270,
+        250
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "auth-web",
+      "type": "frontend",
+      "label": "OIDC Login UI",
+      "sublabel": "frontend-oidc · /auth",
+      "pos": [
+        270,
+        360
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "http-server",
+      "type": "backend",
+      "label": "Gin HTTP Server",
+      "sublabel": "go-web · global middleware",
+      "tag": "WrapHandler",
+      "pos": [
+        510,
+        290
+      ],
+      "size": [
+        170,
+        80
+      ]
+    },
+    {
+      "id": "background-workers",
+      "type": "backend",
+      "label": "Background Services",
+      "sublabel": "SyncWorker · cleanup",
+      "pos": [
+        770,
+        90
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "biz-layers",
+      "type": "backend",
+      "label": "Business Layers",
+      "sublabel": "Controller → Service → DAO",
+      "tag": "app/",
+      "pos": [
+        770,
+        290
+      ],
+      "size": [
+        160,
+        80
+      ]
+    },
+    {
+      "id": "protocol-factory",
+      "type": "backend",
+      "label": "Protocol Handlers",
+      "sublabel": "OIDC · SAML · CAS · OAuth2",
+      "pos": [
+        770,
+        470
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "mysql-db",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "goose migrations",
+      "tag": "PG · SQLite optional",
+      "pos": [
+        1010,
+        90
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "redis-store",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "OIDC sessions · cache",
+      "pos": [
+        1010,
+        290
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "object-storage",
+      "type": "cloud",
+      "label": "Object Storage",
+      "sublabel": "S3-compatible",
+      "pos": [
+        1010,
+        470
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "MLiev IAM single binary · go:embed",
+      "wraps": [
+        "admin-web",
+        "auth-web",
+        "http-server",
+        "biz-layers",
+        "protocol-factory",
+        "background-workers"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Data & Infrastructure",
+      "wraps": [
+        "mysql-db",
+        "redis-store",
+        "object-storage"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-to-admin",
+      "from": "browser",
+      "to": "admin-web",
+      "label": "HTTPS /admin",
+      "variant": "emphasis"
+    },
+    {
+      "id": "browser-to-auth",
+      "from": "browser",
+      "to": "auth-web",
+      "label": "HTTPS /auth"
+    },
+    {
+      "id": "thirdparty-to-server",
+      "from": "thirdparty-app",
+      "to": "http-server",
+      "label": "OAuth2/OIDC",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "admin-to-server",
+      "from": "admin-web",
+      "to": "http-server",
+      "label": "/api/admin"
+    },
+    {
+      "id": "auth-to-server",
+      "from": "auth-web",
+      "to": "http-server",
+      "label": "/api/oidc"
+    },
+    {
+      "id": "server-to-biz",
+      "from": "http-server",
+      "to": "biz-layers",
+      "label": "Routing"
+    },
+    {
+      "id": "workers-to-biz",
+      "from": "background-workers",
+      "to": "biz-layers",
+      "label": "Scheduled jobs",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "biz-to-mysql",
+      "from": "biz-layers",
+      "to": "mysql-db",
+      "label": "GORM"
+    },
+    {
+      "id": "biz-to-redis",
+      "from": "biz-layers",
+      "to": "redis-store",
+      "label": "Session/Cache",
+      "labelDy": 10
+    },
+    {
+      "id": "biz-to-storage",
+      "from": "biz-layers",
+      "to": "object-storage",
+      "label": "Attachments",
+      "variant": "dashed"
+    },
+    {
+      "id": "biz-to-protocol",
+      "from": "biz-layers",
+      "to": "protocol-factory",
+      "label": "Protocol adapters",
+      "labelAt": [
+        850,
+        420
+      ]
+    },
+    {
+      "id": "protocol-to-idp",
+      "from": "protocol-factory",
+      "to": "idp-sources",
+      "label": "Directory sync",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Frontends & Serving",
+      "items": [
+        "web-antd console → static/admin → /admin; frontend-oidc → static/auth → /auth",
+        "Embedded via go:embed in release; disk hot-reload in debug mode",
+        "go-web global middleware: traceId → access log → Recovery → CORS → install gate"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Protocols & Data",
+      "items": [
+        "Protocol factory supports OIDC · SAML · CAS · OAuth2 with directory-sync and social adapters",
+        "MySQL by default (PostgreSQL/SQLite optional); goose versioned migrations run at startup",
+        "Redis holds OIDC sessions and cache; S3-compatible storage for attachments"
+      ]
+    }
+  ]
+}

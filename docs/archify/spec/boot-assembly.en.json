@@ -1,0 +1,278 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Boot & Assembly Workflow",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "boot-main",
+        "label": "Main Boot Path",
+        "focus": [
+          "main",
+          "register",
+          "env-config",
+          "infra",
+          "checks",
+          "setup",
+          "servers"
+        ],
+        "note": "The full assembly chain from process entry to serving traffic."
+      },
+      {
+        "id": "migration",
+        "label": "Checks & Ready",
+        "focus": [
+          "checks",
+          "setup",
+          "servers"
+        ],
+        "note": "goose migrations and the readiness flag."
+      },
+      {
+        "id": "hot-reload",
+        "label": "Hot Reload",
+        "focus": [
+          "sighup",
+          "api-reload",
+          "softreload",
+          "register"
+        ],
+        "note": "SIGHUP- and API-triggered in-process soft reload."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "assembly",
+      "label": "Assembly Chain"
+    },
+    {
+      "id": "servers",
+      "label": "Server Startup"
+    },
+    {
+      "id": "reload",
+      "label": "Hot Reload",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "init",
+      "label": "Init",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "assemble",
+      "label": "Assemble",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "serve",
+      "label": "Serve",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "assembly-chain",
+      "label": "DependsOn order",
+      "lane": "assembly",
+      "fromCol": 1,
+      "toCol": 4,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "main",
+    "register",
+    "env-config",
+    "infra",
+    "checks",
+    "setup",
+    "servers"
+  ],
+  "nodes": [
+    {
+      "id": "main",
+      "lane": "assembly",
+      "col": 0,
+      "type": "external",
+      "label": "Process Start",
+      "sublabel": "main.go · go:embed",
+      "width": 128
+    },
+    {
+      "id": "register",
+      "lane": "assembly",
+      "col": 1,
+      "type": "backend",
+      "label": "Register",
+      "sublabel": "RegisterAssemblies",
+      "tag": "topo sort",
+      "width": 128
+    },
+    {
+      "id": "env-config",
+      "lane": "assembly",
+      "col": 2,
+      "type": "backend",
+      "label": "Env · Config",
+      "sublabel": "autoload providers",
+      "width": 128
+    },
+    {
+      "id": "infra",
+      "lane": "assembly",
+      "col": 3,
+      "type": "backend",
+      "label": "Infrastructure",
+      "sublabel": "Logger · DB · Redis · Cache",
+      "width": 128
+    },
+    {
+      "id": "checks",
+      "lane": "assembly",
+      "col": 4,
+      "type": "security",
+      "label": "Startup Checks",
+      "sublabel": "credential key · goose",
+      "tag": "startupChecks",
+      "width": 128
+    },
+    {
+      "id": "setup",
+      "lane": "servers",
+      "col": 4,
+      "type": "backend",
+      "label": "Setup Installer",
+      "sublabel": "SetupInstaller",
+      "width": 128
+    },
+    {
+      "id": "servers",
+      "lane": "servers",
+      "col": 5,
+      "type": "backend",
+      "label": "Start Servers",
+      "sublabel": "HttpServer · app.ready",
+      "width": 128
+    },
+    {
+      "id": "sighup",
+      "lane": "reload",
+      "col": 2,
+      "type": "messagebus",
+      "label": "SIGHUP",
+      "sublabel": "signal",
+      "width": 128
+    },
+    {
+      "id": "api-reload",
+      "lane": "reload",
+      "col": 3,
+      "type": "external",
+      "label": "API Trigger",
+      "sublabel": "/api/system/reload",
+      "width": 128
+    },
+    {
+      "id": "softreload",
+      "lane": "reload",
+      "col": 4,
+      "type": "security",
+      "label": "Soft Reload",
+      "sublabel": "ReloadAssemblies",
+      "width": 128
+    }
+  ],
+  "edges": [
+    {
+      "id": "main-register",
+      "from": "main",
+      "to": "register",
+      "variant": "default"
+    },
+    {
+      "id": "register-env",
+      "from": "register",
+      "to": "env-config",
+      "variant": "default"
+    },
+    {
+      "id": "env-infra",
+      "from": "env-config",
+      "to": "infra",
+      "variant": "default"
+    },
+    {
+      "id": "infra-checks",
+      "from": "infra",
+      "to": "checks",
+      "variant": "default"
+    },
+    {
+      "id": "checks-setup",
+      "from": "checks",
+      "to": "setup",
+      "variant": "default"
+    },
+    {
+      "id": "setup-servers",
+      "from": "setup",
+      "to": "servers",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sighup-soft",
+      "from": "sighup",
+      "to": "softreload",
+      "label": "trigger",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "api-soft",
+      "from": "api-reload",
+      "to": "softreload",
+      "label": "trigger",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "soft-rerun",
+      "from": "softreload",
+      "to": "register",
+      "label": "re-run assembly",
+      "variant": "security",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Assembly Chain",
+      "items": [
+        "AssemblyInterface wired in topological DependsOn order",
+        "Env → Config → Logger → Database → Redis → Cache",
+        "Before install Redis is nil and the cache falls back to memory"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Checks & Reload",
+      "items": [
+        "goose versioned migrations (24 files per dialect) then app.ready",
+        "SIGHUP / API trigger an in-process ReloadAssemblies",
+        "Restart() replaces the process via syscall.Exec, keeping the PID"
+      ]
+    }
+  ]
+}
