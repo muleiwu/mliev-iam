@@ -26,6 +26,8 @@ fine-grained RBAC, and enterprise directory integration in a single binary.
 
 Interactive architecture diagrams — generated with [Archify](https://github.com/tt-a1i/archify), available in Chinese and English, with dark/light themes, zoom, search, and PNG/SVG export. Index: [docs/archify](docs/archify/README.md).
 
+[![System architecture](docs/archify/images/system-architecture.en.png)](docs/archify/en/system-architecture.html)
+
 | Diagram | 中文 | English |
 |---|---|---|
 | System architecture | [中文](docs/archify/zh-CN/system-architecture.html) | [English](docs/archify/en/system-architecture.html) |
@@ -103,7 +105,6 @@ Details in the [configuration reload guide](_docs/CONFIG_RELOAD_GUIDE.md).
 
 - [Architecture diagrams](docs/archify/README.md) — interactive, bilingual
 - [OIDC protocol reference](OIDC_README.md)
-- [OAuth2 course guides](docs/oauth2/) (Chinese)
 - [Development standards](_docs/PROJECT_SPECIFICATION.md)
 - [JWT authentication guide](_docs/JWT_AUTHENTICATION_GUIDE.md)
 - [RBAC technical implementation](_docs/RBAC_TECHNICAL_IMPLEMENTATION.md)

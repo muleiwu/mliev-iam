@@ -20,3 +20,4 @@ config/config.yaml
 /config/*.setup-state.json
 /config/identity-credentials.key
 /config/installation-id
+/.playwright-cli/
