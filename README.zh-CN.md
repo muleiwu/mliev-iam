@@ -27,7 +27,7 @@ OIDC / OAuth2 服务提供方，内嵌管理控制台与登录界面、细粒度
 交互式架构图由 [Archify](https://github.com/tt-a1i/archify) 生成，提供中英文双语版本，
 支持深/浅主题、缩放、搜索与 PNG/SVG 导出。索引见 [docs/archify](docs/archify/README.md)。
 
-[![系统总体架构](docs/archify/images/system-architecture.zh-CN.png)](docs/archify/zh-CN/system-architecture.html)
+![系统总体架构](docs/archify/images/system-architecture.zh-CN.png)
 
 | 图表 | 中文 | English |
 |---|---|---|
@@ -64,7 +64,8 @@ cp config.yaml.example config.yaml    # 编辑数据库 / Redis 配置
 openssl genrsa -out keys/oidc_private_key.pem 2048
 openssl rsa -in keys/oidc_private_key.pem -pubout -out keys/oidc_public_key.pem
 
-go run .                              # 仅启动后端（debug 模式）
+go run . start                        # 启动后端（gomander 进程管理器：
+                                      # start | stop | restart | reload | status）
 ```
 
 其他常用工作流（完整清单见 `Makefile`）：

@@ -26,7 +26,7 @@ fine-grained RBAC, and enterprise directory integration in a single binary.
 
 Interactive architecture diagrams — generated with [Archify](https://github.com/tt-a1i/archify), available in Chinese and English, with dark/light themes, zoom, search, and PNG/SVG export. Index: [docs/archify](docs/archify/README.md).
 
-[![System architecture](docs/archify/images/system-architecture.en.png)](docs/archify/en/system-architecture.html)
+![System architecture](docs/archify/images/system-architecture.en.png)
 
 | Diagram | 中文 | English |
 |---|---|---|
@@ -64,7 +64,8 @@ cp config.yaml.example config.yaml    # edit database / Redis settings
 openssl genrsa -out keys/oidc_private_key.pem 2048
 openssl rsa -in keys/oidc_private_key.pem -pubout -out keys/oidc_public_key.pem
 
-go run .                              # backend only (debug mode)
+go run . start                        # start the backend (gomander process
+                                      # manager: start | stop | restart | reload | status)
 ```
 
 Other common workflows (see the `Makefile` for the full list):
