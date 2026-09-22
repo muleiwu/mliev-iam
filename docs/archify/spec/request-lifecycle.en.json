@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "HTTP Request Lifecycle",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      690
+    ]
+  },
+  "participants": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Client",
+      "sublabel": "Browser / App"
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Gin Engine",
+      "sublabel": "traceId · log"
+    },
+    {
+      "id": "globalmw",
+      "type": "security",
+      "label": "Global MW",
+      "sublabel": "CORS · install gate"
+    },
+    {
+      "id": "authmw",
+      "type": "security",
+      "label": "Auth MW",
+      "sublabel": "JWT · session"
+    },
+    {
+      "id": "controller",
+      "type": "backend",
+      "label": "Controller",
+      "sublabel": "WrapHandler"
+    },
+    {
+      "id": "service",
+      "type": "backend",
+      "label": "Service",
+      "sublabel": "business logic"
+    },
+    {
+      "id": "dao",
+      "type": "backend",
+      "label": "DAO · GORM",
+      "sublabel": "app/dao"
+    },
+    {
+      "id": "mysql",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "soft delete"
+    }
+  ],
+  "segments": [
+    {
+      "from": 158,
+      "to": 312,
+      "label": "Global middleware chain"
+    },
+    {
+      "from": 320,
+      "to": 549,
+      "label": "Business handling"
+    },
+    {
+      "from": 557,
+      "to": 626,
+      "label": "Error branches"
+    }
+  ],
+  "messages": [
+    {
+      "id": "request-in",
+      "from": "client",
+      "to": "engine",
+      "y": 172,
+      "label": "HTTPS request (Bearer)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engine-chain",
+      "from": "engine",
+      "to": "globalmw",
+      "y": 201,
+      "label": "Global chain",
+      "note": "traceId → access log → Recovery"
+    },
+    {
+      "id": "gate-pass",
+      "from": "globalmw",
+      "to": "authmw",
+      "y": 230,
+      "label": "CORS · install OK"
+    },
+    {
+      "id": "jwt-verify",
+      "from": "authmw",
+      "to": "service",
+      "y": 259,
+      "label": "JWT · session check"
+    },
+    {
+      "id": "auth-ok",
+      "from": "service",
+      "to": "authmw",
+      "y": 288,
+      "label": "Valid · user context",
+      "variant": "return"
+    },
+    {
+      "id": "route-match",
+      "from": "authmw",
+      "to": "controller",
+      "y": 330,
+      "label": "Route · RouterContext"
+    },
+    {
+      "id": "call-service",
+      "from": "controller",
+      "to": "service",
+      "y": 359,
+      "label": "Parse DTO · call service"
+    },
+    {
+      "id": "call-dao",
+      "from": "service",
+      "to": "dao",
+      "y": 388,
+      "label": "Query/write · DataScope"
+    },
+    {
+      "id": "exec-sql",
+      "from": "dao",
+      "to": "mysql",
+      "y": 417,
+      "label": "GORM SQL"
+    },
+    {
+      "id": "rows-back",
+      "from": "mysql",
+      "to": "dao",
+      "y": 446,
+      "label": "Result rows",
+      "variant": "return"
+    },
+    {
+      "id": "dao-back",
+      "from": "dao",
+      "to": "service",
+      "y": 475,
+      "label": "Models",
+      "variant": "return"
+    },
+    {
+      "id": "svc-back",
+      "from": "service",
+      "to": "controller",
+      "y": 504,
+      "label": "Business result",
+      "variant": "return"
+    },
+    {
+      "id": "response",
+      "from": "controller",
+      "to": "client",
+      "y": 533,
+      "label": "JSON response",
+      "variant": "return"
+    },
+    {
+      "id": "auth-fail",
+      "from": "authmw",
+      "to": "client",
+      "y": 575,
+      "label": "401 Unauthorized",
+      "variant": "dashed"
+    },
+    {
+      "id": "not-installed",
+      "from": "globalmw",
+      "to": "client",
+      "y": 604,
+      "label": "302 → install wizard",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "engine",
+      "from": 166,
+      "to": 209
+    },
+    {
+      "participant": "globalmw",
+      "from": 195,
+      "to": 238
+    },
+    {
+      "participant": "globalmw",
+      "from": 598,
+      "to": 612
+    },
+    {
+      "participant": "authmw",
+      "from": 224,
+      "to": 296
+    },
+    {
+      "participant": "authmw",
+      "from": 569,
+      "to": 583
+    },
+    {
+      "participant": "service",
+      "from": 253,
+      "to": 296
+    },
+    {
+      "participant": "service",
+      "from": 353,
+      "to": 512
+    },
+    {
+      "participant": "controller",
+      "from": 324,
+      "to": 541
+    },
+    {
+      "participant": "dao",
+      "from": 411,
+      "to": 452
+    },
+    {
+      "participant": "mysql",
+      "from": 434,
+      "to": 470
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Entry & Auth",
+      "items": [
+        "Global chain: traceId → access log → Recovery → CORS → install gate",
+        "Auth middleware checks JWT signature plus the DB session; RBAC/DataScope with 4 data-scope levels"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Business Layers",
+      "items": [
+        "Controller parses DTOs → Service logic → DAO/GORM persistence",
+        "All models use soft delete; Recovery returns a unified error structure"
+      ]
+    }
+  ]
+}

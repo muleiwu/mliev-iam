@@ -1,384 +1,154 @@
-# MLiev IAM - 企业级身份认证与访问管理系统
+# MLiev IAM
 
-## 项目介绍
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev)
 
-MLiev IAM 是一个基于 Go 语言开发的现代化企业级身份认证与访问管理（IAM）系统，集成了单点登录（SSO）功能。该系统采用分层架构设计，提供高性能、高可用、易扩展的身份认证和授权服务。
+English | [简体中文](README.zh-CN.md)
 
-### 核心特性
+Enterprise identity and access management (IAM) with single sign-on — a complete
+OIDC / OAuth2 provider built in Go, shipping an embedded admin console and login UI,
+fine-grained RBAC, and enterprise directory integration in a single binary.
 
-- **🔐 身份认证管理** - 多种认证方式支持，包括用户名密码、OAuth2.0、OIDC等
-- **🛡️ 访问控制** - 基于角色的访问控制（RBAC）和基于属性的访问控制（ABAC）
-- **🔗 单点登录** - 统一登录入口，支持多应用系统无缝切换
-- **👥 用户管理** - 完整的用户生命周期管理，包括注册、激活、禁用等
-- **🏢 组织架构** - 支持多层级组织架构和部门管理
-- **📊 审计日志** - 完整的操作审计和安全日志记录
-- **🔧 API优先** - RESTful API设计，易于集成和扩展
-- **🔄 配置热重载** - 支持通过信号或API重新加载配置，无需重启进程
+## Features
 
-### 技术栈
+- **OIDC / OAuth2 provider** — authorization-code flow with PKCE, token introspection and revocation, JWKS, and discovery; applications can also register as SAML, CAS, or plain OAuth2 clients
+- **Single sign-on** — one identity hub for all your applications, served under `/oidc/:client_id/*`
+- **Social login** — Google, GitHub, QQ, WeChat, WeChat Mini Program, and generic OAuth2/OIDC identity sources
+- **Enterprise directory sync** — Feishu (Lark), WeCom, and DingTalk directories with event callbacks and sync automation
+- **RBAC with data scope** — roles, menu/button/API permissions, and four-level row-level data scoping
+- **Embedded frontends** — a Vben + Ant Design Vue admin console at `/admin` and a dedicated Vue 3 login/consent app at `/auth`, both baked into the binary via `go:embed`
+- **Flexible storage** — MySQL (default), PostgreSQL, or SQLite with goose versioned SQL migrations that run automatically at startup; Redis for sessions and caching; S3-compatible object storage for attachments
+- **Hot reload** — reload configuration via `SIGHUP` or the admin API without restarting the process
+- **Guided installation** — a built-in setup wizard (license → database → Redis → admin) with no separate frontend to build
+- **Single-binary deployment** — templates and static assets are embedded; debug mode serves them from disk for hot reloading
 
-- **编程语言**: Go 1.25+
-- **Web框架**: Gin
-- **数据库**: MySQL/PostgreSQL/SQLite
-- **ORM**: GORM v1.31.0（支持软删除、钩子函数、关联关系）
-- **缓存**: Redis
-- **配置管理**: Viper
-- **日志**: Zap
-- **认证协议**: JWT、OAuth2.0、OIDC
-- **容器化**: Docker
-- **依赖注入**: 自研轻量级DI框架
-- **数据验证**: Go Validator（内置结构体验证）
-- **数据模型**: 完整的RBAC权限模型设计
+## Architecture
 
-### 架构特点
+Interactive architecture diagrams — generated with [Archify](https://github.com/tt-a1i/archify), available in Chinese and English, with dark/light themes, zoom, search, and PNG/SVG export. Index: [docs/archify](docs/archify/README.md).
 
-- **分层架构**: 采用 Controller-Service-DAO 分层设计，职责清晰
-- **RBAC权限模型**: 完整的基于角色的访问控制，支持层级权限和数据权限隔离
-- **依赖注入**: 基于接口的依赖注入，提高代码可测试性和可维护性
-- **ORM集成**: GORM软删除、钩子函数、关联关系自动管理
-- **数据模型**: 支持JSON扩展字段、枚举类型、状态管理
-- **中间件支持**: 丰富的中间件生态，支持认证、授权、日志、限流等
-- **配置化**: 支持多环境配置，易于部署和运维
-- **健康检查**: 内置健康检查机制，支持微服务架构
-- **静态资源**: 内嵌静态资源，单文件部署
+[![System architecture](docs/archify/images/system-architecture.en.png)](docs/archify/en/system-architecture.html)
 
-## 功能清单
+| Diagram | 中文 | English |
+|---|---|---|
+| System architecture | [中文](docs/archify/zh-CN/system-architecture.html) | [English](docs/archify/en/system-architecture.html) |
+| OIDC authorization-code flow | [中文](docs/archify/zh-CN/oidc-authorization-flow.html) | [English](docs/archify/en/oidc-authorization-flow.html) |
+| HTTP request lifecycle | [中文](docs/archify/zh-CN/request-lifecycle.html) | [English](docs/archify/en/request-lifecycle.html) |
+| Boot & assembly workflow | [中文](docs/archify/zh-CN/boot-assembly.html) | [English](docs/archify/en/boot-assembly.html) |
 
-### 🎯 核心功能
+In short: two frontend apps (`admin-web` → `/admin`, `frontend-oidc` → `/auth`) are served by a
+Gin server built on the [go-web](https://cnb.cool/mliev/open/go-web) framework. A global middleware
+chain (traceId → access log → recovery → CORS → install gate) fronts route groups guarded by JWT
+auth middleware; requests then flow through Controller → Service → DAO layers over GORM to the
+database, with Redis backing OIDC sessions and the settings cache. Protocol handlers for
+OIDC/SAML/CAS/OAuth2 plus directory, social, and event adapters live in `app/service/protocol/`.
+See [OIDC_README.md](OIDC_README.md) for protocol details.
 
-#### 用户管理
-- [x] 用户数据模型设计（包含基础信息、认证信息、状态管理）
-- [x] 用户状态枚举（未激活/激活/禁用/锁定）
-- [x] 用户多属性管理（JSON扩展字段）
-- [x] 用户-部门关联设计
-- [ ] 用户注册与激活接口
-- [ ] 用户信息管理（增删改查）接口
-- [ ] 密码策略配置
-- [ ] 批量用户导入/导出
+## Quick Start
 
-#### 身份认证
-- [ ] 用户名密码认证
-- [ ] 手机号/邮箱验证码登录
-- [ ] OAuth2.0 第三方登录
-- [ ] OIDC 协议支持
-- [ ] 多因子认证（MFA）
-- [ ] 登录设备管理
-- [ ] 会话管理
+### Prerequisites
 
-#### 权限管理
-- [x] 角色数据模型设计（支持层级结构和数据权限范围）
-- [x] 权限资源模型设计（菜单/按钮/API/数据权限）
-- [x] 基于角色的访问控制（RBAC）模型设计
-- [x] 角色权限关联表设计（支持权限约束和时效管理）
-- [x] 用户角色关联表设计（支持审批流程和范围控制）
-- [x] 权限继承机制设计（层级路径自动计算）
-- [ ] 角色管理接口开发
-- [ ] 权限管理接口开发
-- [ ] 基于属性的访问控制（ABAC）
-- [ ] 动态权限验证接口
+- Go 1.26+
+- MySQL 8+ / PostgreSQL 13+ / SQLite 3+
+- Redis 6+
 
-#### 组织架构
-- [x] 部门数据模型设计（支持多层级组织架构）
-- [x] 部门类型定义（公司/事业部/部门/团队）
-- [x] 用户-部门关联设计
-- [x] 组织层级权限模型（层级路径自动维护）
-- [x] 数据权限隔离设计（全部/本部门/本部门及下级/仅本人）
-- [ ] 部门管理接口开发
-- [ ] 组织架构树形接口
-- [ ] 部门负责人管理
+### Clone, configure, and run
 
-#### 单点登录（SSO）
-- [ ] 统一认证中心
-- [ ] 应用系统注册管理
-- [ ] 跨域认证支持
-- [ ] 退出登录同步
-- [ ] 令牌管理
-
-### 🔧 系统功能
-
-#### 安全特性
-- [x] 密码加密存储设计（密码哈希、盐值）
-- [x] 登录失败限制设计（失败计数、账户锁定）
-- [x] 用户状态安全控制（激活/禁用/锁定状态）
-- [x] 数据权限隔离设计（部门级、个人级权限）
-- [x] 软删除数据保护
-- [ ] 会话超时控制
-- [ ] IP白名单/黑名单
-- [ ] 操作日志审计接口
-- [ ] 安全事件告警
-
-#### 系统管理
-- [x] 健康检查接口
-- [x] 数据模型设计完成（用户、角色、权限、部门等）
-- [x] 数据库表结构设计（支持GORM自动迁移）
-- [ ] 系统配置管理接口
-- [ ] 字典数据管理
-- [ ] 系统监控
-- [ ] 性能指标
-- [ ] 日志管理
-
-#### API 接口
-- [x] RESTful API 设计
-- [ ] API 文档自动生成
-- [ ] API 限流控制
-- [ ] API 版本管理
-- [ ] Webhook 支持
-
-### 📊 数据统计
-- [ ] 用户登录统计
-- [ ] 权限使用分析
-- [ ] 系统访问报表
-- [ ] 安全事件统计
-- [ ] 性能监控数据
-
-### 🚀 扩展功能
-- [ ] 插件机制
-- [ ] 自定义认证流程
-- [ ] 多租户支持
-- [ ] 国际化支持
-- [ ] 主题定制
-- [ ] 移动端适配
-
-## 快速开始
-
-### 环境要求
-
-- Go 1.25+
-- MySQL 8.0+ / PostgreSQL 13+ / SQLite 3+
-- Redis 6.0+
-
-### 安装部署
-
-1. **克隆项目**
 ```bash
-git clone <repository-url>
+# frontends are git submodules
+git clone --recurse-submodules https://cnb.cool/mliev/iam/mliev-iam.git
 cd mliev-iam
+
+cp config.yaml.example config.yaml    # edit database / Redis settings
+
+# OIDC signing keys (skip if you manage keys another way)
+openssl genrsa -out keys/oidc_private_key.pem 2048
+openssl rsa -in keys/oidc_private_key.pem -pubout -out keys/oidc_public_key.pem
+
+go run .                              # backend only (debug mode)
 ```
 
-2. **配置环境**
+Other common workflows (see the `Makefile` for the full list):
+
 ```bash
-cp config.yaml.example config.yaml
-# 编辑 config.yaml 配置数据库和Redis连接
+make dev        # frontend watch + Go backend in debug mode
+make all        # build frontends + Go backend
+make build-go   # Go backend only
 ```
 
-3. **安装依赖**
-```bash
-go mod download
-```
+### Docker
 
-4. **运行项目**
-```bash
-go run main.go
-```
-
-5. **Docker 部署**
 ```bash
 docker build -t mliev-iam .
 docker run -p 8080:8080 mliev-iam
 ```
 
-### 配置重载
+### First-time install
 
-系统支持在运行时重新加载配置，无需重启进程：
+On first launch the app does not require a configured database or Redis: open `/install/` and
+follow the embedded wizard (license agreement → database → Redis → admin account). The wizard is
+provided by setup-kit inside the binary, so there is no separate installer frontend. For
+API-driven installation, TLS options, and backup notes, see the detailed guide:
+[docs/installation-guide.zh-CN.md](docs/installation-guide.zh-CN.md) (Chinese).
 
-**方法一：使用系统信号**
+## Configuration & Hot Reload
+
+Reload configuration at runtime without restarting the process:
+
 ```bash
-# 发送 SIGHUP 信号触发重载
-kill -HUP <PID>
-
-# 或使用脚本
-./scripts/reload-config.sh signal
+kill -HUP <PID>              # via signal
+./scripts/reload-config.sh   # via the admin API (requires an admin token)
 ```
 
-**方法二：使用 API 接口**
-```bash
-# 需要管理员权限
-curl -X POST http://localhost:8080/api/admin/system/reload \
-  -H "Authorization: Bearer <access_token>"
+Details in the [configuration reload guide](_docs/CONFIG_RELOAD_GUIDE.md).
 
-# 或使用脚本
-./scripts/reload-config.sh api
-```
+## Documentation
 
-详细说明请参考：[配置重载指南](_docs/CONFIG_RELOAD_GUIDE.md)
+- [Architecture diagrams](docs/archify/README.md) — interactive, bilingual
+- [OIDC protocol reference](OIDC_README.md)
+- [Development standards](_docs/PROJECT_SPECIFICATION.md)
+- [JWT authentication guide](_docs/JWT_AUTHENTICATION_GUIDE.md)
+- [RBAC technical implementation](_docs/RBAC_TECHNICAL_IMPLEMENTATION.md)
+- [Testing guide](_docs/TESTING_GUIDE.md)
+- [Docker deployment notes](_docs/docker/)
+- [First-time installation guide](docs/installation-guide.zh-CN.md) (Chinese)
 
-### API 文档
-
-启动服务后，访问以下端点：
-
-- 健康检查: `GET /health`
-- 简单健康检查: `GET /health/simple`
-- 首页: `GET /`
-- 系统信息: `GET /api/admin/system/info`
-- 配置重载: `POST /api/admin/system/reload`
-
-## 数据模型设计
-
-系统采用完整的RBAC权限控制模型，包含以下核心数据模型：
-
-### 📊 核心模型关系图
-
-```
-用户(User) ←→ 用户角色(UserRole) ←→ 角色(Role) ←→ 角色权限(RolePermission) ←→ 权限(Permission)
-     ↓                                        ↓                                                    ↓
- 部门(Department)                        层级结构                                            资源控制
-```
-
-### 🗃️ 数据模型详细设计
-
-#### 用户模型 (`User`)
-- **基础信息**: 用户名、邮箱、手机、昵称、真实姓名、头像
-- **认证安全**: 密码哈希、盐值、密码过期时间
-- **状态管理**: 用户状态（未激活/激活/禁用/锁定）、登录统计
-- **扩展属性**: JSON格式扩展字段，支持自定义用户属性
-
-#### 角色模型 (`Role`)
-- **角色类型**: 系统角色/自定义角色
-- **层级结构**: 支持父子角色关系，自动路径计算
-- **数据权限**: 支持4级数据权限范围控制
-- **状态管理**: 角色启用/禁用状态
-
-#### 权限模型 (`Permission`)
-- **权限类型**: 菜单权限/按钮权限/API权限/数据权限
-- **资源定义**: 支持资源标识符、HTTP方法、URL路径
-- **层级结构**: 权限树形结构，支持权限继承
-- **前端集成**: 组件路径、图标、重定向等前端特性
-
-#### 部门模型 (`Department`)
-- **组织类型**: 公司/事业部/部门/团队
-- **层级管理**: 自动维护父子关系和叶子节点
-- **组织信息**: 负责人、联系方式、成本中心等
-- **数据权限**: 部门级数据权限隔离
-
-#### 关联关系模型
-- **用户角色关联** (`UserRole`): 支持审批流程、范围控制、时效管理
-- **角色权限关联** (`RolePermission`): 支持权限约束、条件匹配
-
-### 🔐 权限控制特性
-
-- **多级数据权限**: 全部数据/本部门/本部门及下级/仅本人
-- **权限继承**: 基于层级路径的权限继承机制
-- **时效控制**: 支持角色和权限的有效期管理
-- **审批流程**: 用户角色分配支持审批机制
-- **条件约束**: 支持基于条件的权限验证
-
-### 📁 模型文件概览
-
-| 模型文件 | 说明 | 核心特性 |
-|---------|------|----------|
-| `user.go` | 用户模型 | 状态管理、多属性、认证安全、部门关联 |
-| `role.go` | 角色模型 | 层级结构、数据权限范围、系统/自定义角色 |
-| `permission.go` | 权限模型 | 多类型权限、资源控制、层级继承、前端集成 |
-| `department.go` | 部门模型 | 组织架构、层级管理、负责人、成本中心 |
-| `user_role.go` | 用户角色关联 | 审批流程、范围控制、时效管理、主要角色 |
-| `role_permission.go` | 角色权限关联 | 权限约束、条件匹配、RBAC实现 |
-
-所有模型均支持：
-- ✅ GORM ORM 集成
-- ✅ 软删除保护
-- ✅ 自动时间戳
-- ✅ JSON扩展字段
-- ✅ 数据验证标签
-- ✅ 业务方法封装
-
-## 开发指南
-
-项目遵循严格的代码规范和最佳实践，详细的开发规范请参考 [项目开发规范文档](_docs/PROJECT_SPECIFICATION.md)。
-
-### 项目结构
+## Project Structure
 
 ```
 mliev-iam/
-├── app/                    # 应用核心代码
-│   ├── controller/         # 控制器层
-│   ├── service/           # 服务层
-│   ├── dao/               # 数据访问层
-│   ├── model/             # 数据模型
-│   │   ├── user.go        # 用户模型（支持状态管理、多属性）
-│   │   ├── role.go        # 角色模型（支持层级结构、数据权限）
-│   │   ├── permission.go  # 权限模型（菜单/按钮/API/数据权限）
-│   │   ├── department.go  # 部门模型（组织架构、层级管理）
-│   │   ├── user_role.go   # 用户角色关联（审批流程、范围控制）
-│   │   └── role_permission.go # 角色权限关联（约束条件、时效管理）
-│   ├── dto/               # 数据传输对象
-│   └── middleware/        # 中间件
-├── config/                # 配置管理
-│   └── autoload/          # 自动加载配置
-├── internal/              # 内部包
-│   ├── interfaces/        # 接口定义
-│   └── pkg/               # 基础包
-├── static/                # 静态资源
-├── templates/             # 模板文件
-└── _docs/                 # 项目文档
-    ├── PROJECT_SPECIFICATION.md # 开发规范
-    └── TEMPLATE_INIT.md   # 模板初始化
+├── app/            # controllers, services, DAOs, models, DTOs, middleware
+├── config/         # app assembly and autoload config providers
+├── internal/       # JWT key management, credential crypto, password hashing
+├── pkg/            # extension modules, installation state, credentials
+├── migrations/     # goose versioned SQL migrations (mysql / postgresql / sqlite)
+├── admin-web/      # admin console frontend (submodule → static/admin → /admin)
+├── frontend-oidc/  # OIDC login UI frontend (submodule → static/auth → /auth)
+├── static/         # embedded static assets (populated by frontend builds)
+├── templates/      # embedded HTML templates
+├── docs/           # architecture diagrams and guides
+└── _docs/          # engineering docs (specs, guides, reports)
 ```
 
-## 贡献指南
+## Contributing
 
-我们欢迎社区贡献！请阅读贡献指南并遵循以下步骤：
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Open a pull request
 
-1. Fork 项目
-2. 创建功能分支
-3. 提交代码变更
-4. 创建 Pull Request
+Please follow the [development standards](_docs/PROJECT_SPECIFICATION.md).
 
-## 许可证
+## Upgrade Notes
 
-本项目采用 [MIT License](LICENSE)。
+Migration `20260922000001` lets `client_credentials` applications request access tokens
+repeatedly (the refresh token column is stored as `NULL` for machine tokens). Back up your
+database and stop old nodes before upgrading — the migration cannot be rolled back with
+`goose Down`. Details: [docs/oidc-machine-token-upgrade.zh-CN.md](docs/oidc-machine-token-upgrade.zh-CN.md) (Chinese).
 
-## 联系我们
+## License
 
-如有问题或建议，请通过以下方式联系：
-
-- 提交 Issue
-- 发送邮件至项目维护者
-- 加入我们的开发者社区
+Released under the [MIT License](LICENSE).
 
 ---
 
-© 2025 MLiev IAM. All rights reserved.
-
-
-### 首次安装引导
-
-首次启动不要求数据库和 Redis 已连接，访问 `/install/`。开源版首先展示完整的
-[MIT 授权协议](LICENSE)，主动勾选同意后，按数据库、Redis、管理员和确认步骤完成安装。
-协议随程序内嵌，支持离线阅读；默认不勾选，无需滚动到底，刷新页面后需重新确认。
-企业版、高校版及其他版本直接进入数据库配置；已安装实例升级后无需补签。
-安装页面由 setup-kit v0.1.0 内嵌提供，不再构建独立前端。
-
-通过 API 安装开源版时，先读取 `/install/api/schema` 返回的 `agreements`，
-确认协议后在提交的 `values` 中设置 `setupkit.agreements.mit-license` 为当前协议的 `digest`。
-缺失、布尔值或过期摘要会被后端拒绝；同意信息不写入配置或安装状态。
-
-支持 MySQL、PostgreSQL、SQLite；Redis 必选。管理员密码至少 12 个字符，
-保留姓名与可选手机号，使用系统现有 Argon2id 哈希。
-
-安装检查与正式运行均支持 `database.tls`、`database.charset`、`redis.username`、
-`redis.tls`。TLS 使用系统 CA 验证证书与主机名，不支持跳过验证。
-默认 SQLite 路径位于配置目录；自定义路径的父目录须已存在。
-
-配置及完成标记原子保存到实际读取的配置文件，首次默认 `config/config.yaml`，
-权限为 0600。进度记录在配置文件旁的 `.setup-state.json` 文件中，不记录密码。
-旧 `installation-id` 会被沿用，失败重试不会重复创建管理员或重置密码。
-请同时备份配置、数据库和 `identity-credentials.key`；已有环境变量密钥继续优先。
-
-保存成功后自动重启；在完成页点击“进入应用”，入口等待服务就绪后进入后台。
-旧安装提交和测试接口已经移除；自动化改用 `/install/api/schema`、`status`、
-`checks/:id`、`submit`，JSON 请求格式为 `{"values":{...}}`，并携带
-`X-Setup-Kit: 1`。只读 `/api/install/check` 继续提供 installed/ready 状态。
-代理应保留 Host 和正确的协议，必要时通过 `install.allowed_origins` 配置明确的外部来源。
-
-
-衍生发行版可以通过 `config.App.SetupName` 设置安装器名称，通过 `SetupEntryPath`
-设置安装完成后的站内入口。留空时保留原发行版名称及 `/admin/`；完成页的
-`/install/enter` 在等待就绪和直接跳转时都使用相同的入口配置。
-
-### OIDC 机器令牌升级
-
-迁移版本 `20260922000001` 将没有刷新令牌的 `client_credentials` 记录改为存储
-`NULL`，以支持后台应用反复申请访问令牌；真实刷新令牌仍保持唯一。
-升级时先备份数据库并停止旧版本节点，完成迁移后再启动新版本，避免新旧节点混跑。
-此迁移无法在已有多条机器令牌后无损恢复旧约束，因此 `goose Down` 会明确失败并保留
-迁移版本号。需要回退时，使用升级前的数据库备份及匹配的程序版本。
+© 2026 MLiev IAM

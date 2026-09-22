@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "HTTP 请求处理链路",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      690
+    ]
+  },
+  "participants": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "客户端",
+      "sublabel": "浏览器 / 应用"
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Gin 引擎",
+      "sublabel": "traceId · 日志"
+    },
+    {
+      "id": "globalmw",
+      "type": "security",
+      "label": "全局中间件",
+      "sublabel": "CORS · 安装门禁"
+    },
+    {
+      "id": "authmw",
+      "type": "security",
+      "label": "鉴权中间件",
+      "sublabel": "JWT · 会话"
+    },
+    {
+      "id": "controller",
+      "type": "backend",
+      "label": "控制器",
+      "sublabel": "WrapHandler"
+    },
+    {
+      "id": "service",
+      "type": "backend",
+      "label": "服务层",
+      "sublabel": "业务逻辑"
+    },
+    {
+      "id": "dao",
+      "type": "backend",
+      "label": "DAO · GORM",
+      "sublabel": "app/dao"
+    },
+    {
+      "id": "mysql",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "软删除 · 事务"
+    }
+  ],
+  "segments": [
+    {
+      "from": 158,
+      "to": 312,
+      "label": "全局中间件链"
+    },
+    {
+      "from": 320,
+      "to": 549,
+      "label": "业务处理"
+    },
+    {
+      "from": 557,
+      "to": 626,
+      "label": "异常分支"
+    }
+  ],
+  "messages": [
+    {
+      "id": "request-in",
+      "from": "client",
+      "to": "engine",
+      "y": 172,
+      "label": "HTTPS 请求（Bearer）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engine-chain",
+      "from": "engine",
+      "to": "globalmw",
+      "y": 201,
+      "label": "全局中间件链",
+      "note": "traceId → 访问日志 → Recovery"
+    },
+    {
+      "id": "gate-pass",
+      "from": "globalmw",
+      "to": "authmw",
+      "y": 230,
+      "label": "CORS · 安装通过"
+    },
+    {
+      "id": "jwt-verify",
+      "from": "authmw",
+      "to": "service",
+      "y": 259,
+      "label": "JWT · 会话校验"
+    },
+    {
+      "id": "auth-ok",
+      "from": "service",
+      "to": "authmw",
+      "y": 288,
+      "label": "有效 · 用户上下文",
+      "variant": "return"
+    },
+    {
+      "id": "route-match",
+      "from": "authmw",
+      "to": "controller",
+      "y": 330,
+      "label": "注入 RouterContext"
+    },
+    {
+      "id": "call-service",
+      "from": "controller",
+      "to": "service",
+      "y": 359,
+      "label": "DTO 解析 · 调用业务"
+    },
+    {
+      "id": "call-dao",
+      "from": "service",
+      "to": "dao",
+      "y": 388,
+      "label": "查询/写入 · DataScope"
+    },
+    {
+      "id": "exec-sql",
+      "from": "dao",
+      "to": "mysql",
+      "y": 417,
+      "label": "GORM SQL"
+    },
+    {
+      "id": "rows-back",
+      "from": "mysql",
+      "to": "dao",
+      "y": 446,
+      "label": "结果集",
+      "variant": "return"
+    },
+    {
+      "id": "dao-back",
+      "from": "dao",
+      "to": "service",
+      "y": 475,
+      "label": "模型数据",
+      "variant": "return"
+    },
+    {
+      "id": "svc-back",
+      "from": "service",
+      "to": "controller",
+      "y": 504,
+      "label": "业务结果",
+      "variant": "return"
+    },
+    {
+      "id": "response",
+      "from": "controller",
+      "to": "client",
+      "y": 533,
+      "label": "JSON 响应",
+      "variant": "return"
+    },
+    {
+      "id": "auth-fail",
+      "from": "authmw",
+      "to": "client",
+      "y": 575,
+      "label": "401 未授权",
+      "variant": "dashed"
+    },
+    {
+      "id": "not-installed",
+      "from": "globalmw",
+      "to": "client",
+      "y": 604,
+      "label": "302 → 安装向导",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "engine",
+      "from": 166,
+      "to": 209
+    },
+    {
+      "participant": "globalmw",
+      "from": 195,
+      "to": 238
+    },
+    {
+      "participant": "globalmw",
+      "from": 598,
+      "to": 612
+    },
+    {
+      "participant": "authmw",
+      "from": 224,
+      "to": 296
+    },
+    {
+      "participant": "authmw",
+      "from": 569,
+      "to": 583
+    },
+    {
+      "participant": "service",
+      "from": 253,
+      "to": 296
+    },
+    {
+      "participant": "service",
+      "from": 353,
+      "to": 512
+    },
+    {
+      "participant": "controller",
+      "from": 324,
+      "to": 541
+    },
+    {
+      "participant": "dao",
+      "from": 411,
+      "to": 452
+    },
+    {
+      "participant": "mysql",
+      "from": 434,
+      "to": 470
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "接入与鉴权",
+      "items": [
+        "全局链：traceId → 访问日志 → Recovery → CORS → 安装门禁",
+        "Auth 中间件双校验 JWT 签名 + 数据库登录会话；RBAC/DataScope 四级数据范围"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "业务分层",
+      "items": [
+        "Controller 解析 DTO → Service 业务 → DAO/GORM 持久化",
+        "全部模型软删除（DeletedAt 自动过滤）；Recovery 兜底统一错误"
+      ]
+    }
+  ]
+}

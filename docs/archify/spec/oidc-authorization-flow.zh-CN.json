@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "OIDC 授权码流程（PKCE）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      690
+    ]
+  },
+  "participants": [
+    {
+      "id": "client-app",
+      "type": "external",
+      "label": "三方应用",
+      "sublabel": "RP · OAuth2 客户端"
+    },
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "用户浏览器",
+      "sublabel": "资源所有者"
+    },
+    {
+      "id": "auth-ui",
+      "type": "frontend",
+      "label": "OIDC 登录前端",
+      "sublabel": "frontend-oidc · /auth"
+    },
+    {
+      "id": "iam",
+      "type": "backend",
+      "label": "IAM 后端",
+      "sublabel": "/oidc/:client_id"
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "oidc:session:*"
+    },
+    {
+      "id": "mysql",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "用户 · 应用 · 授权码"
+    }
+  ],
+  "segments": [
+    {
+      "from": 158,
+      "to": 458,
+      "label": "授权引导 · 登录 · 同意"
+    },
+    {
+      "from": 466,
+      "to": 550,
+      "label": "令牌颁发"
+    },
+    {
+      "from": 558,
+      "to": 628,
+      "label": "资源访问"
+    }
+  ],
+  "messages": [
+    {
+      "id": "redirect-authorize",
+      "from": "client-app",
+      "to": "browser",
+      "y": 172,
+      "label": "重定向 authorize（state · PKCE）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "get-authorize",
+      "from": "browser",
+      "to": "iam",
+      "y": 201,
+      "label": "GET /oidc/:client_id/authorize"
+    },
+    {
+      "id": "to-login",
+      "from": "iam",
+      "to": "browser",
+      "y": 230,
+      "label": "302 → /auth 登录页",
+      "variant": "return"
+    },
+    {
+      "id": "submit-login",
+      "from": "auth-ui",
+      "to": "iam",
+      "y": 259,
+      "label": "POST /api/oidc 登录"
+    },
+    {
+      "id": "create-session",
+      "from": "iam",
+      "to": "redis",
+      "y": 288,
+      "label": "写入 oidc:session:（TTL 10min）"
+    },
+    {
+      "id": "login-ok",
+      "from": "iam",
+      "to": "auth-ui",
+      "y": 317,
+      "label": "登录成功 → consent 页",
+      "variant": "return"
+    },
+    {
+      "id": "confirm-consent",
+      "from": "auth-ui",
+      "to": "iam",
+      "y": 346,
+      "label": "确认授权（consent · CSRF）"
+    },
+    {
+      "id": "issue-code",
+      "from": "iam",
+      "to": "mysql",
+      "y": 375,
+      "label": "校验用户 · 生成授权码"
+    },
+    {
+      "id": "redirect-back",
+      "from": "iam",
+      "to": "browser",
+      "y": 404,
+      "label": "302 redirect_uri?code&state",
+      "variant": "return"
+    },
+    {
+      "id": "callback",
+      "from": "browser",
+      "to": "client-app",
+      "y": 433,
+      "label": "回跳携带 code + state"
+    },
+    {
+      "id": "token-request",
+      "from": "client-app",
+      "to": "iam",
+      "y": 476,
+      "label": "POST /token（code · verifier）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "exchange-code",
+      "from": "iam",
+      "to": "mysql",
+      "y": 505,
+      "label": "校验会话 · 换取授权码"
+    },
+    {
+      "id": "token-response",
+      "from": "iam",
+      "to": "client-app",
+      "y": 534,
+      "label": "access_token · id_token · refresh_token",
+      "variant": "return"
+    },
+    {
+      "id": "userinfo-request",
+      "from": "client-app",
+      "to": "iam",
+      "y": 577,
+      "label": "GET /userinfo（Bearer）"
+    },
+    {
+      "id": "userinfo-response",
+      "from": "iam",
+      "to": "client-app",
+      "y": 606,
+      "label": "用户 claims",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "browser",
+      "from": 166,
+      "to": 447
+    },
+    {
+      "participant": "iam",
+      "from": 198,
+      "to": 412
+    },
+    {
+      "participant": "iam",
+      "from": 468,
+      "to": 540
+    },
+    {
+      "participant": "iam",
+      "from": 571,
+      "to": 614
+    },
+    {
+      "participant": "auth-ui",
+      "from": 262,
+      "to": 351
+    },
+    {
+      "participant": "redis",
+      "from": 282,
+      "to": 296
+    },
+    {
+      "participant": "mysql",
+      "from": 369,
+      "to": 389
+    },
+    {
+      "participant": "client-app",
+      "from": 468,
+      "to": 540
+    },
+    {
+      "participant": "client-app",
+      "from": 571,
+      "to": 614
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "授权与登录",
+      "items": [
+        "授权码流程支持 PKCE；state 防 CSRF，会话绑定浏览器",
+        "Redis 会话：oidc:session: 前缀 · 10 分钟 TTL · CSRF 轮换"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "令牌与端点",
+      "items": [
+        "POST /token 以 code + code_verifier 换取令牌；id_token RS256 签名",
+        "introspect / revoke / jwks / discovery 支持令牌生命周期与自动发现"
+      ]
+    }
+  ]
+}

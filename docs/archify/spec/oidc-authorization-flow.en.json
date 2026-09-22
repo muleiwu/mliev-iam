@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "OIDC Authorization Code Flow (PKCE)",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      690
+    ]
+  },
+  "participants": [
+    {
+      "id": "client-app",
+      "type": "external",
+      "label": "Third-party App",
+      "sublabel": "RP · OAuth2 Client"
+    },
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "User Browser",
+      "sublabel": "Resource Owner"
+    },
+    {
+      "id": "auth-ui",
+      "type": "frontend",
+      "label": "OIDC Login UI",
+      "sublabel": "frontend-oidc · /auth"
+    },
+    {
+      "id": "iam",
+      "type": "backend",
+      "label": "IAM Backend",
+      "sublabel": "/oidc/:client_id"
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "oidc:session:*"
+    },
+    {
+      "id": "mysql",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "Users · Apps · Codes"
+    }
+  ],
+  "segments": [
+    {
+      "from": 158,
+      "to": 458,
+      "label": "Authorize · Login · Consent"
+    },
+    {
+      "from": 466,
+      "to": 550,
+      "label": "Token Issuance"
+    },
+    {
+      "from": 558,
+      "to": 628,
+      "label": "Resource Access"
+    }
+  ],
+  "messages": [
+    {
+      "id": "redirect-authorize",
+      "from": "client-app",
+      "to": "browser",
+      "y": 172,
+      "label": "Redirect to authorize (state · PKCE)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "get-authorize",
+      "from": "browser",
+      "to": "iam",
+      "y": 201,
+      "label": "GET /oidc/:client_id/authorize"
+    },
+    {
+      "id": "to-login",
+      "from": "iam",
+      "to": "browser",
+      "y": 230,
+      "label": "302 → /auth login page",
+      "variant": "return"
+    },
+    {
+      "id": "submit-login",
+      "from": "auth-ui",
+      "to": "iam",
+      "y": 259,
+      "label": "POST /api/oidc login"
+    },
+    {
+      "id": "create-session",
+      "from": "iam",
+      "to": "redis",
+      "y": 288,
+      "label": "Write oidc:session: (10-min TTL)"
+    },
+    {
+      "id": "login-ok",
+      "from": "iam",
+      "to": "auth-ui",
+      "y": 317,
+      "label": "Login OK → consent page",
+      "variant": "return"
+    },
+    {
+      "id": "confirm-consent",
+      "from": "auth-ui",
+      "to": "iam",
+      "y": 346,
+      "label": "Confirm consent (CSRF)"
+    },
+    {
+      "id": "issue-code",
+      "from": "iam",
+      "to": "mysql",
+      "y": 375,
+      "label": "Validate user · create auth code"
+    },
+    {
+      "id": "redirect-back",
+      "from": "iam",
+      "to": "browser",
+      "y": 404,
+      "label": "302 redirect_uri?code&state",
+      "variant": "return"
+    },
+    {
+      "id": "callback",
+      "from": "browser",
+      "to": "client-app",
+      "y": 433,
+      "label": "Callback with code + state"
+    },
+    {
+      "id": "token-request",
+      "from": "client-app",
+      "to": "iam",
+      "y": 476,
+      "label": "POST /token (code · verifier)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "exchange-code",
+      "from": "iam",
+      "to": "mysql",
+      "y": 505,
+      "label": "Verify session · exchange code"
+    },
+    {
+      "id": "token-response",
+      "from": "iam",
+      "to": "client-app",
+      "y": 534,
+      "label": "access_token · id_token · refresh_token",
+      "variant": "return"
+    },
+    {
+      "id": "userinfo-request",
+      "from": "client-app",
+      "to": "iam",
+      "y": 577,
+      "label": "GET /userinfo (Bearer)"
+    },
+    {
+      "id": "userinfo-response",
+      "from": "iam",
+      "to": "client-app",
+      "y": 606,
+      "label": "User claims",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "browser",
+      "from": 166,
+      "to": 447
+    },
+    {
+      "participant": "iam",
+      "from": 198,
+      "to": 412
+    },
+    {
+      "participant": "iam",
+      "from": 468,
+      "to": 540
+    },
+    {
+      "participant": "iam",
+      "from": 571,
+      "to": 614
+    },
+    {
+      "participant": "auth-ui",
+      "from": 262,
+      "to": 351
+    },
+    {
+      "participant": "redis",
+      "from": 282,
+      "to": 296
+    },
+    {
+      "participant": "mysql",
+      "from": 369,
+      "to": 389
+    },
+    {
+      "participant": "client-app",
+      "from": 468,
+      "to": 540
+    },
+    {
+      "participant": "client-app",
+      "from": 571,
+      "to": 614
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Authorization & Login",
+      "items": [
+        "Authorization code flow with PKCE; state prevents CSRF and the session binds to the browser",
+        "Redis sessions: oidc:session: prefix · 10-min TTL · rotating CSRF"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Tokens & Endpoints",
+      "items": [
+        "POST /token exchanges code + code_verifier; id_token is RS256-signed",
+        "introspect / revoke / jwks / discovery cover token lifecycle and auto-discovery"
+      ]
+    }
+  ]
+}
