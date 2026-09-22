@@ -64,7 +64,8 @@ cp config.yaml.example config.yaml    # 编辑数据库 / Redis 配置
 openssl genrsa -out keys/oidc_private_key.pem 2048
 openssl rsa -in keys/oidc_private_key.pem -pubout -out keys/oidc_public_key.pem
 
-go run .                              # 仅启动后端（debug 模式）
+go run . start                        # 启动后端（gomander 进程管理器：
+                                      # start | stop | restart | reload | status）
 ```
 
 其他常用工作流（完整清单见 `Makefile`）：

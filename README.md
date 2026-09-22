@@ -64,7 +64,8 @@ cp config.yaml.example config.yaml    # edit database / Redis settings
 openssl genrsa -out keys/oidc_private_key.pem 2048
 openssl rsa -in keys/oidc_private_key.pem -pubout -out keys/oidc_public_key.pem
 
-go run .                              # backend only (debug mode)
+go run . start                        # start the backend (gomander process
+                                      # manager: start | stop | restart | reload | status)
 ```
 
 Other common workflows (see the `Makefile` for the full list):
