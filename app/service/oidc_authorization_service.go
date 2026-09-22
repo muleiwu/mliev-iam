@@ -374,9 +374,19 @@ func (s *OIDCAuthorizationService) RevokeToken(req *dto.RevocationRequest) error
 
 	// 2. 根据令牌类型处理
 	if req.TokenTypeHint == "refresh_token" || req.TokenTypeHint == "" {
-		// 尝试撤销刷新令牌
-		if err := s.tokenDAO.RevokeByRefreshToken(req.Token); err == nil {
-			return nil
+		// 撤销前校验令牌归属；没有匹配的刷新令牌时继续尝试访问令牌。
+		refreshToken, err := s.tokenDAO.GetByRefreshToken(req.Token)
+		if err == nil {
+			if refreshToken.ClientID != clientID {
+				return constants.ErrInvalidGrant
+			}
+			if err := s.tokenDAO.RevokeByRefreshToken(req.Token); err == nil {
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return constants.ErrServerError
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return constants.ErrServerError
 		}
 	}
 

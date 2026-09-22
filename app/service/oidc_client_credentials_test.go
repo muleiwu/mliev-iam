@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
@@ -64,11 +65,30 @@ func TestClientCredentialsCanIssueRepeatedlyAcrossClients(t *testing.T) {
 	}
 
 	first := issue(clientA, secretA)
-	issue(clientA, secretA)
+	second := issue(clientA, secretA)
 	issue(clientB, secretB)
+	introspect := func() bool {
+		response, err := svc.IntrospectToken(&dto.IntrospectionRequest{
+			Token:        first.AccessToken,
+			ClientID:     clientA,
+			ClientSecret: secretA,
+		})
+		require.NoError(t, err)
+		return response.Active
+	}
+	require.True(t, introspect())
+	require.NoError(t, svc.RevokeToken(&dto.RevocationRequest{
+		Token:        first.AccessToken,
+		ClientID:     clientA,
+		ClientSecret: secretA,
+	}))
+	require.False(t, introspect(), "撤销后的机器令牌应立即变为 inactive")
 
 	tokenDAO := dao.NewOIDCTokenDAO(db)
-	stored, err := tokenDAO.GetByAccessToken(first.AccessToken)
+	revokedToken, err := tokenDAO.GetByAccessToken(first.AccessToken)
+	require.NoError(t, err)
+	require.True(t, revokedToken.IsRevoked)
+	stored, err := tokenDAO.GetByAccessToken(second.AccessToken)
 	require.NoError(t, err)
 	require.Nil(t, stored.RefreshToken)
 	stored.IsRevoked = true
@@ -94,4 +114,19 @@ func TestClientCredentialsCanIssueRepeatedlyAcrossClients(t *testing.T) {
 			require.Error(t, err, "AutoMigrate must retain non-NULL refresh token uniqueness")
 		}
 	}
+	require.ErrorIs(t, svc.RevokeToken(&dto.RevocationRequest{
+		Token:        refresh,
+		ClientID:     clientB,
+		ClientSecret: secretB,
+	}), constants.ErrInvalidGrant)
+	var revoked bool
+	require.NoError(t, db.Model(&model.OIDCToken{}).Select("is_revoked").Where("refresh_token = ?", refresh).Scan(&revoked).Error)
+	require.False(t, revoked, "其他客户端不能撤销该刷新令牌")
+	require.NoError(t, svc.RevokeToken(&dto.RevocationRequest{
+		Token:        refresh,
+		ClientID:     clientA,
+		ClientSecret: secretA,
+	}))
+	require.NoError(t, db.Model(&model.OIDCToken{}).Select("is_revoked").Where("refresh_token = ?", refresh).Scan(&revoked).Error)
+	require.True(t, revoked)
 }
