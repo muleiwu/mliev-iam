@@ -56,9 +56,10 @@ func setupDisabledUserOIDCTest(t *testing.T) (*gorm.DB, *model.User, *model.Appl
 
 	application, err := NewApplicationService(db).GetApplicationByClientID(clientID)
 	require.NoError(t, err)
+	refreshToken := "disabled-user-refresh-token"
 	token := &model.OIDCToken{
 		AccessToken:  "disabled-user-access-token",
-		RefreshToken: "disabled-user-refresh-token",
+		RefreshToken: &refreshToken,
 		ClientID:     clientID,
 		UserID:       user.ID,
 		Scopes:       []string{"openid", "profile"},
@@ -79,7 +80,7 @@ func TestDisabledUserCannotUseHistoricalOIDCTokens(t *testing.T) {
 
 	_, err := authorizationService.RefreshToken(&dto.TokenRequest{
 		GrantType:    string(model.GrantTypeRefreshToken),
-		RefreshToken: token.RefreshToken,
+		RefreshToken: token.RefreshTokenValue(),
 		ClientID:     token.ClientID,
 		ClientSecret: clientSecret,
 	}, "https://issuer.example.com")

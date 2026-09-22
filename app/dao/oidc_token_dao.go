@@ -93,9 +93,16 @@ func (dao *OIDCTokenDAO) RevokeToken(accessToken string) error {
 
 // RevokeByRefreshToken 根据刷新令牌撤销
 func (dao *OIDCTokenDAO) RevokeByRefreshToken(refreshToken string) error {
-	return dao.db.Model(&model.OIDCToken{}).
+	result := dao.db.Model(&model.OIDCToken{}).
 		Where("refresh_token = ?", refreshToken).
-		Update("is_revoked", true).Error
+		Update("is_revoked", true)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 // RevokeByClient 撤销客户端的所有令牌

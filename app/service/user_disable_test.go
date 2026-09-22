@@ -35,9 +35,10 @@ func createUserWithOIDCToken(t *testing.T, db *gorm.DB, suffix string) (*model.U
 	}
 	require.NoError(t, db.Create(user).Error)
 
+	refreshToken := "refresh-" + suffix
 	token := &model.OIDCToken{
 		AccessToken:  "access-" + suffix,
-		RefreshToken: "refresh-" + suffix,
+		RefreshToken: &refreshToken,
 		ClientID:     "client-" + suffix,
 		UserID:       user.ID,
 		Scopes:       []string{"openid"},

@@ -99,9 +99,9 @@ func TestSqliteSmoke(t *testing.T) {
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const remediationSchemaVersion int64 = 20260907000000
-	if maxV != remediationSchemaVersion {
-		t.Fatalf("期望最大版本 %d，实际 %d", remediationSchemaVersion, maxV)
+	const latestSchemaVersion int64 = 20260922000001
+	if maxV != latestSchemaVersion {
+		t.Fatalf("期望最大版本 %d，实际 %d", latestSchemaVersion, maxV)
 	}
 	for _, table := range []string{"external_principal_conflicts", "identity_connection_health_checks", "directory_sync_snapshot_objects", "directory_operation_leases"} {
 		var count int

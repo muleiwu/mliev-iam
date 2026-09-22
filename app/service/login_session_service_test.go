@@ -166,11 +166,12 @@ func TestLoginSessionConcurrentRefreshCannotSurviveRevocation(t *testing.T) {
 
 func TestLoginSessionLegacyMachineAndCleanup(t *testing.T) {
 	db, user, _, current := sessionFixture(t)
-	legacy := &model.OIDCToken{AccessToken: "legacy-access", RefreshToken: "legacy-refresh", ClientID: "client", UserID: user.ID}
+	legacyRefresh := "legacy-refresh"
+	legacy := &model.OIDCToken{AccessToken: "legacy-access", RefreshToken: &legacyRefresh, ClientID: "client", UserID: user.ID}
 	require.NoError(t, db.Create(legacy).Error)
-	_, err := dao.NewOIDCTokenDAO(db).GetValidByRefreshToken(legacy.RefreshToken)
+	_, err := dao.NewOIDCTokenDAO(db).GetValidByRefreshToken(legacy.RefreshTokenValue())
 	require.Error(t, err)
-	machine := &model.OIDCToken{AccessToken: "machine-access", RefreshToken: "machine-unused", ClientID: "client", UserID: 0}
+	machine := &model.OIDCToken{AccessToken: "machine-access", ClientID: "client", UserID: 0}
 	require.NoError(t, db.Create(machine).Error)
 	_, err = dao.NewOIDCTokenDAO(db).GetValidByAccessToken(machine.AccessToken)
 	require.NoError(t, err)

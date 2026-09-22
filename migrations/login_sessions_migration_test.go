@@ -14,9 +14,11 @@ func TestLoginSessionMigrationCutsOnlyLegacyUserCredentials(t *testing.T) {
 	require.NoError(t, err)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, RunGooseMigrations(db, "sqlite", nil))
 	// Exercise the actual upgrade from the preceding schema, including Down
 	// compatibility, rather than relying only on GORM-created fixture tables.
+	require.NoError(t, goose.SetDialect("sqlite3"))
+	goose.SetBaseFS(FS)
+	require.NoError(t, goose.UpTo(db, "sqlite", 20260907000000))
 	require.NoError(t, goose.DownTo(db, "sqlite", 20260827000002))
 	_, err = db.Exec(`INSERT INTO oidc_tokens (access_token, access_token_hash, client_id, user_id, refresh_token, is_revoked) VALUES
 	 ('legacy-user', 'user-hash', 'client', 42, 'user-refresh', 0),

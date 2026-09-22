@@ -223,6 +223,9 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 
 	// 保存令牌
 	if err := s.tokenDAO.Create(token); err != nil {
+		if logger := helper.GetLogger(); logger != nil {
+			logger.Error(fmt.Sprintf("client_credentials 令牌入库失败 client=%s err=%v", clientID, err))
+		}
 		return nil, constants.ErrServerError
 	}
 
@@ -280,7 +283,7 @@ func (s *OIDCAuthorizationService) RotateLoginToken(old *model.OIDCToken, app *m
 		if err := dao.NewLoginSessionDAO(tx).Lock(old.LoginSessionID, old.UserID); err != nil {
 			return constants.ErrInvalidGrant
 		}
-		current, err := dao.NewOIDCTokenDAO(tx).GetValidByRefreshToken(old.RefreshToken)
+		current, err := dao.NewOIDCTokenDAO(tx).GetValidByRefreshToken(old.RefreshTokenValue())
 		if err != nil || current.UserID != old.UserID || current.ClientID != old.ClientID {
 			return constants.ErrInvalidGrant
 		}
@@ -371,9 +374,19 @@ func (s *OIDCAuthorizationService) RevokeToken(req *dto.RevocationRequest) error
 
 	// 2. 根据令牌类型处理
 	if req.TokenTypeHint == "refresh_token" || req.TokenTypeHint == "" {
-		// 尝试撤销刷新令牌
-		if err := s.tokenDAO.RevokeByRefreshToken(req.Token); err == nil {
-			return nil
+		// 撤销前校验令牌归属；没有匹配的刷新令牌时继续尝试访问令牌。
+		refreshToken, err := s.tokenDAO.GetByRefreshToken(req.Token)
+		if err == nil {
+			if refreshToken.ClientID != clientID {
+				return constants.ErrInvalidGrant
+			}
+			if err := s.tokenDAO.RevokeByRefreshToken(req.Token); err == nil {
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return constants.ErrServerError
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return constants.ErrServerError
 		}
 	}
 
@@ -640,7 +653,7 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		ClientID:            clientID,
 		UserID:              userID,
 		Scopes:              scopes,
-		RefreshToken:        refreshToken,
+		RefreshToken:        &refreshToken,
 		ExpiresAt:           time.Now().Add(time.Duration(tokenLifetime) * time.Second),
 		Attributes:          make(map[string]interface{}),
 	}

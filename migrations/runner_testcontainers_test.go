@@ -56,6 +56,40 @@ func TestMigrationDialects(t *testing.T) {
 			assertFinalMigrationSchema(t, db, fixture.driver)
 			assertLegacyIdentityBindingMigrated(t, db, fixture.driver)
 		})
+		t.Run(fixture.name+"/refresh-token-upgrade", func(t *testing.T) {
+			db := fixture.open(t)
+			setMigrationIntegrationKey(t)
+			if err := goose.SetDialect(dialectMap[fixture.driver]); err != nil {
+				t.Fatal(err)
+			}
+			goose.SetBaseFS(FS)
+			if err := goose.UpTo(db, dirByDriver[fixture.driver], 20260907000000); err != nil {
+				t.Fatalf("创建升级前 schema 失败: %v", err)
+			}
+			gormDB, err := openGormOnSQLDB(db, fixture.driver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			insert := `INSERT INTO oidc_tokens (access_token, access_token_hash, client_id, user_id, refresh_token) VALUES (?, ?, 'historical-client', 0, ?)`
+			if err := gormDB.Exec(insert, "historical-empty", "historical-empty", "").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := gormDB.Exec(insert, "historical-real", "historical-real", "real-refresh").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := RunGooseMigrations(db, fixture.driver, nil); err != nil {
+				t.Fatalf("升级失败: %v", err)
+			}
+			var old sql.NullString
+			if err := db.QueryRow("SELECT refresh_token FROM oidc_tokens WHERE access_token = 'historical-empty'").Scan(&old); err != nil || old.Valid {
+				t.Fatalf("历史空字符串应变为 NULL: value=%v err=%v", old, err)
+			}
+			var real string
+			if err := db.QueryRow("SELECT refresh_token FROM oidc_tokens WHERE access_token = 'historical-real'").Scan(&real); err != nil || real != "real-refresh" {
+				t.Fatalf("真实刷新令牌发生变化: value=%q err=%v", real, err)
+			}
+			assertFinalMigrationSchema(t, db, fixture.driver)
+		})
 	}
 }
 
@@ -202,19 +236,45 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 			t.Fatalf("硬切后仍存在旧表 %s", oldTable)
 		}
 	}
-	const expectedVersion int64 = 20260907000000
+	const expectedVersion int64 = 20260922000001
 	version, err := goose.GetDBVersion(db)
 	if err != nil || version != expectedVersion {
 		t.Fatalf("迁移版本错误: got=%d want=%d err=%v", version, expectedVersion, err)
 	}
 	assertActiveUserUniqueness(t, gormDB)
+	assertOIDCRefreshTokenUniqueness(t, db, gormDB, driver)
+}
+
+func assertOIDCRefreshTokenUniqueness(t *testing.T, sqlDB *sql.DB, db *gorm.DB, driver string) {
+	t.Helper()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	insert := `INSERT INTO oidc_tokens (access_token, access_token_hash, client_id, user_id, refresh_token) VALUES (?, ?, ?, 0, ?)`
+	for i := 0; i < 2; i++ {
+		access := fmt.Sprintf("machine-%s-%d", suffix, i)
+		if err := db.Exec(insert, access, access, "machine-"+suffix, nil).Error; err != nil {
+			t.Fatalf("多个机器令牌应允许 NULL refresh_token: %v", err)
+		}
+	}
+	if err := db.Exec(insert, "refresh-a-"+suffix, "refresh-a-"+suffix, "machine-"+suffix, "duplicate-"+suffix).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(insert, "refresh-b-"+suffix, "refresh-b-"+suffix, "machine-"+suffix, "duplicate-"+suffix).Error; err == nil {
+		t.Fatal("重复非空刷新令牌应被唯一索引拒绝")
+	}
+	if err := goose.Down(sqlDB, dirByDriver[driver]); err == nil {
+		t.Fatal("不可逆迁移的 Down 应拒绝执行")
+	}
+	version, err := goose.GetDBVersion(sqlDB)
+	if err != nil || version != 20260922000001 {
+		t.Fatalf("拒绝 Down 后迁移版本应保持不变: version=%d err=%v", version, err)
+	}
 }
 
 func assertActiveUserUniqueness(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	username, email, phone := "unique-"+suffix, "unique-"+suffix+"@example.test", "+62"+suffix[len(suffix)-9:]
-	insert := `INSERT INTO users (uuid, username, email, phone, status, is_activated) VALUES (?, ?, ?, ?, 1, 1)`
+	insert := `INSERT INTO users (uuid, username, email, phone, status, is_activated) VALUES (?, ?, ?, ?, 1, TRUE)`
 	if err := db.Exec(insert, "uuid-a-"+suffix, username, email, phone).Error; err != nil {
 		t.Fatalf("写入首个活跃用户失败: %v", err)
 	}
