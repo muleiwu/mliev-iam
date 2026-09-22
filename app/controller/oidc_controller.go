@@ -549,7 +549,7 @@ func (oc OIDCController) trySSO(
 	}
 	previousRefresh := ""
 	if oldToken != nil {
-		previousRefresh = oldToken.RefreshToken
+		previousRefresh = oldToken.RefreshTokenValue()
 	}
 	if err := oc.reissueSSOCookie(c, session, userID, previousRefresh); err != nil {
 		_ = sessionService.ResetAuthentication(rctx, session.SessionID)

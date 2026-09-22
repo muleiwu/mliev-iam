@@ -33,7 +33,7 @@ type OIDCToken struct {
 
 	// 令牌信息
 	Scopes       []string `gorm:"type:json;serializer:json" json:"scopes"`
-	RefreshToken string   `gorm:"uniqueIndex;size:255" json:"refreshToken"`
+	RefreshToken *string  `gorm:"uniqueIndex;size:255" json:"refreshToken"`
 	IDToken      string   `gorm:"type:text" json:"idToken"`
 
 	// 时间管理
@@ -67,7 +67,7 @@ func (t *OIDCToken) BeforeCreate(tx *gorm.DB) error {
 		t.ExpiresAt = time.Now().Add(1 * time.Hour)
 	}
 
-	if t.RefreshToken != "" && t.RefreshExpiresAt == nil {
+	if t.RefreshToken != nil && *t.RefreshToken != "" && t.RefreshExpiresAt == nil {
 		// 刷新令牌默认30天过期
 		refreshExpiry := time.Now().Add(30 * 24 * time.Hour)
 		t.RefreshExpiresAt = &refreshExpiry
@@ -111,7 +111,15 @@ func (t *OIDCToken) IsValid() bool {
 
 // IsRefreshValid checks if refresh token is valid
 func (t *OIDCToken) IsRefreshValid() bool {
-	return !t.IsRevoked && t.RefreshToken != "" && !t.IsRefreshExpired()
+	return !t.IsRevoked && t.RefreshToken != nil && *t.RefreshToken != "" && !t.IsRefreshExpired()
+}
+
+// RefreshTokenValue returns an empty string when this token has no refresh credential.
+func (t *OIDCToken) RefreshTokenValue() string {
+	if t == nil || t.RefreshToken == nil {
+		return ""
+	}
+	return *t.RefreshToken
 }
 
 // Revoke revokes the token

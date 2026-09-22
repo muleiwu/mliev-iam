@@ -223,6 +223,9 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 
 	// 保存令牌
 	if err := s.tokenDAO.Create(token); err != nil {
+		if logger := helper.GetLogger(); logger != nil {
+			logger.Error(fmt.Sprintf("client_credentials 令牌入库失败 client=%s err=%v", clientID, err))
+		}
 		return nil, constants.ErrServerError
 	}
 
@@ -280,7 +283,7 @@ func (s *OIDCAuthorizationService) RotateLoginToken(old *model.OIDCToken, app *m
 		if err := dao.NewLoginSessionDAO(tx).Lock(old.LoginSessionID, old.UserID); err != nil {
 			return constants.ErrInvalidGrant
 		}
-		current, err := dao.NewOIDCTokenDAO(tx).GetValidByRefreshToken(old.RefreshToken)
+		current, err := dao.NewOIDCTokenDAO(tx).GetValidByRefreshToken(old.RefreshTokenValue())
 		if err != nil || current.UserID != old.UserID || current.ClientID != old.ClientID {
 			return constants.ErrInvalidGrant
 		}
@@ -640,7 +643,7 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		ClientID:            clientID,
 		UserID:              userID,
 		Scopes:              scopes,
-		RefreshToken:        refreshToken,
+		RefreshToken:        &refreshToken,
 		ExpiresAt:           time.Now().Add(time.Duration(tokenLifetime) * time.Second),
 		Attributes:          make(map[string]interface{}),
 	}
