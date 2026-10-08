@@ -17,8 +17,9 @@ import (
 
 // IDTokenClaims ID Token的JWT声明
 type IDTokenClaims struct {
-	Roles  *[]string `json:"roles,omitempty"`
-	Groups *[]string `json:"groups,omitempty"`
+	Departments *[]string `json:"departments,omitempty"`
+	Roles       *[]string `json:"roles,omitempty"`
+	Groups      *[]string `json:"groups,omitempty"`
 	// 标准OIDC Claims (必需)
 	Sub string `json:"sub"` // Subject - 用户唯一标识符
 	Iss string `json:"iss"` // Issuer - 颁发者
@@ -64,8 +65,9 @@ type IDTokenClaims struct {
 
 // AccessTokenClaims Access Token的JWT声明 (符合 RFC 9068)
 type AccessTokenClaims struct {
-	Roles  *[]string `json:"roles,omitempty"`
-	Groups *[]string `json:"groups,omitempty"`
+	Departments *[]string `json:"departments,omitempty"`
+	Roles       *[]string `json:"roles,omitempty"`
+	Groups      *[]string `json:"groups,omitempty"`
 	// 标准JWT Claims (必需)
 	Iss string `json:"iss"`           // Issuer - 颁发者
 	Sub string `json:"sub"`           // Subject - 用户唯一标识符
@@ -88,12 +90,21 @@ type AccessTokenClaims struct {
 
 // OIDCIDTokenService ID Token生成服务
 type OIDCIDTokenService struct {
-	algorithm     string             // 签名算法: "RS256" 或 "HS256"
-	rsaKeyManager *jwt.RSAKeyManager // RS256 使用
-	hmacSecret    []byte             // HS256 使用
-	keyID         string             // 密钥ID
-	issuer        string
-	tokenLifetime int // 秒
+	departmentClaims *model.OIDCDepartmentSnapshot
+	algorithm        string             // 签名算法: "RS256" 或 "HS256"
+	rsaKeyManager    *jwt.RSAKeyManager // RS256 使用
+	hmacSecret       []byte             // HS256 使用
+	keyID            string             // 密钥ID
+	issuer           string
+	tokenLifetime    int // 秒
+}
+
+// withDepartmentClaims returns a request-local copy so a reused signer cannot
+// retain another user's department snapshot. Machine tokens never use it.
+func (s *OIDCIDTokenService) withDepartmentClaims(snapshot *model.OIDCDepartmentSnapshot) *OIDCIDTokenService {
+	copy := *s
+	copy.departmentClaims = snapshot
+	return &copy
 }
 
 // NewOIDCIDTokenServiceWithRSA 创建使用RSA签名的ID Token服务
@@ -184,6 +195,7 @@ func (s *OIDCIDTokenService) GenerateIDTokenWithHashes(
 	if len(roleSnapshots) > 0 {
 		claims.Roles, claims.Groups = roleSnapshots[0].For("id_token")
 	}
+	claims.Departments = s.departmentClaims.For("id_token")
 	return s.signToken(claims)
 }
 
@@ -236,6 +248,7 @@ func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID stri
 	if len(roleSnapshots) > 0 {
 		claims.Roles, claims.Groups = roleSnapshots[0].For("access_token")
 	}
+	claims.Departments = s.departmentClaims.For("access_token")
 	// 根据算法类型签名token
 	return s.signToken(claims)
 }

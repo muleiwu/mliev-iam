@@ -240,7 +240,7 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		UserID:      0, // 客户端凭据流程不关联用户
 		Scopes:      scopes,
 		ExpiresAt:   time.Now().Add(time.Duration(tokenLifetime) * time.Second),
-		Attributes:  oidcRoleAttributes(grant.Roles),
+		Attributes:  grant.attributes(),
 	}
 
 	// 保存令牌
@@ -514,7 +514,7 @@ func (s *OIDCAuthorizationService) handleImplicitIDTokenFlow(req *dto.AuthorizeR
 		if policyErr != nil {
 			return policyErr
 		}
-		idToken, err = txService.generateIDTokenWithHashes(grant.App, user, grant.Scopes, req.Nonce, issuer, "", "", grant.Roles)
+		idToken, err = txService.generateIDTokenWithHashes(grant.App, user, grant.Scopes, req.Nonce, issuer, "", "", grant)
 		return err
 	})
 	if err != nil {
@@ -676,7 +676,7 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		return nil, err
 	}
 	app, scopes = grant.App, grant.Scopes
-	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer, grant.Roles)
+	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer, grant)
 	if err != nil {
 		return nil, fmt.Errorf("生成访问令牌失败: %w", err)
 	}
@@ -695,12 +695,12 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		Scopes:              scopes,
 		RefreshToken:        &refreshToken,
 		ExpiresAt:           time.Now().Add(time.Duration(tokenLifetime) * time.Second),
-		Attributes:          oidcRoleAttributes(grant.Roles),
+		Attributes:          grant.attributes(),
 	}
 
 	// 生成 ID 令牌（若 scope 包含 openid），并写入 at_hash
 	if s.hasScope(scopes, "openid") {
-		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "", grant.Roles)
+		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "", grant)
 		if err != nil {
 			return nil, err
 		}
@@ -744,7 +744,7 @@ func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user 
 func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 	app *model.Application, user *model.User, scopes []string, nonce string, issuer string,
 	accessToken, authCode string,
-	roleSnapshots ...*model.OIDCRoleSnapshot,
+	grants ...*oidcGrant,
 ) (string, error) {
 	// 获取全局配置
 	env := helper.GetEnv()
@@ -796,7 +796,12 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 	}
 
 	// 5. 生成ID Token（包含 at_hash / c_hash，若上层提供）
-	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, nil, accessToken, authCode, roleSnapshots...)
+	var roles *model.OIDCRoleSnapshot
+	if len(grants) > 0 && grants[0] != nil {
+		roles = grants[0].Roles
+		idTokenService = idTokenService.withDepartmentClaims(grants[0].Departments)
+	}
+	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, nil, accessToken, authCode, roles)
 	if err != nil {
 		return "", fmt.Errorf("生成ID Token失败: %w", err)
 	}
@@ -805,7 +810,7 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 }
 
 // generateJWTAccessToken 生成 JWT 格式的 Access Token
-func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
+func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string, grants ...*oidcGrant) (string, error) {
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
 		// 只有应用未配置 tokenLifetime 时才回退到全局配置。
@@ -865,7 +870,12 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 	}
 
 	// 6. 生成 JWT Access Token
-	accessToken, err := tokenService.GenerateAccessToken(user, clientID, scopes, roleSnapshots...)
+	var roles *model.OIDCRoleSnapshot
+	if len(grants) > 0 && grants[0] != nil {
+		roles = grants[0].Roles
+		tokenService = tokenService.withDepartmentClaims(grants[0].Departments)
+	}
+	accessToken, err := tokenService.GenerateAccessToken(user, clientID, scopes, roles)
 	if err != nil {
 		return "", fmt.Errorf("生成 Access Token 失败: %w", err)
 	}

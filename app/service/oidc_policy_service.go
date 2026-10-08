@@ -13,9 +13,18 @@ import (
 )
 
 type oidcGrant struct {
-	App    *model.Application
-	Scopes []string
-	Roles  *model.OIDCRoleSnapshot
+	App         *model.Application
+	Scopes      []string
+	Roles       *model.OIDCRoleSnapshot
+	Departments *model.OIDCDepartmentSnapshot
+}
+
+func (g *oidcGrant) attributes() map[string]interface{} {
+	attrs := oidcRoleAttributes(g.Roles)
+	if g.Departments != nil {
+		attrs[model.OIDCDepartmentSnapshotAttribute] = g.Departments
+	}
+	return attrs
 }
 
 // CheckUserScopeAuthorization lets browser flows report policy denial before
@@ -136,6 +145,13 @@ func (s *OIDCAuthorizationService) evaluateOIDCGrant(app *model.Application, use
 		}
 		sort.Strings(values)
 		grant.Roles = &model.OIDCRoleSnapshot{ClaimName: c.RoleClaims.ClaimName, Values: values, Targets: c.RoleClaims.Targets}
+	}
+	if !machine && c.DepartmentClaims.Enabled {
+		values, err := s.oidcUserDepartments(userID, c.DepartmentClaims.DepartmentIDs)
+		if err != nil {
+			return nil, constants.ErrServerError
+		}
+		grant.Departments = &model.OIDCDepartmentSnapshot{Values: values, Targets: c.DepartmentClaims.Targets}
 	}
 	return grant, nil
 }

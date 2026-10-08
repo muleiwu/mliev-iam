@@ -21,16 +21,26 @@ func (h *OIDCProtocolHandler) validateAuthorizationConfig(raw map[string]interfa
 	if c.RoleClaims.ClaimName != "roles" && c.RoleClaims.ClaimName != "groups" {
 		return fmt.Errorf("角色字段只能为 roles 或 groups")
 	}
-	if c.RoleClaims.Enabled && len(c.RoleClaims.Targets) == 0 {
-		return fmt.Errorf("请选择角色输出位置")
-	}
-	for _, target := range c.RoleClaims.Targets {
-		if target != "access_token" && target != "id_token" && target != "userinfo" {
-			return fmt.Errorf("无效的角色输出位置: %s", target)
+	for _, output := range []struct {
+		label   string
+		enabled bool
+		targets []string
+	}{
+		{"角色", c.RoleClaims.Enabled, c.RoleClaims.Targets},
+		{"部门", c.DepartmentClaims.Enabled, c.DepartmentClaims.Targets},
+	} {
+		if output.enabled && len(output.targets) == 0 {
+			return fmt.Errorf("请选择%s输出位置", output.label)
+		}
+		for _, target := range output.targets {
+			if target != "access_token" && target != "id_token" && target != "userinfo" {
+				return fmt.Errorf("无效的%s输出位置: %s", output.label, target)
+			}
 		}
 	}
 	roles := append(append([]uint{}, c.RoleClaims.RoleIDs...), c.ClientRoleIDs...)
-	var users, departments []uint
+	var users []uint
+	departments := append([]uint{}, c.DepartmentClaims.DepartmentIDs...)
 	for scope, rule := range c.ScopeAuthorization.Rules {
 		if !allowed[scope] {
 			return fmt.Errorf("scope 规则 %s 不在应用允许列表中", scope)

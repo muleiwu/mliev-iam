@@ -49,18 +49,19 @@ type ApplicationStats struct {
 
 // OIDCApplicationConfig OIDC应用配置（用于前端表单）
 type OIDCApplicationConfig struct {
-	RoleClaims         *model.OIDCRoleClaimsConfig   `json:"roleClaims,omitempty"`
-	ScopeAuthorization *model.OIDCScopeAuthorization `json:"scopeAuthorization,omitempty"`
-	ClientRoleIDs      []uint                        `json:"clientRoleIds,omitempty"`
-	ClientID           string                        `json:"clientId,omitempty"`
-	ClientSecret       string                        `json:"clientSecret,omitempty"` // 仅在创建时返回
-	RedirectURIs       []string                      `json:"redirectUris" binding:"required,min=1"`
-	GrantTypes         []string                      `json:"grantTypes" binding:"required,min=1"`
-	ResponseTypes      []string                      `json:"responseTypes" binding:"required,min=1"`
-	Scopes             []string                      `json:"scopes" binding:"required,min=1"`
-	ClientType         string                        `json:"clientType" binding:"required,oneof=confidential public"`
-	RequirePKCE        bool                          `json:"requirePkce"`
-	TokenLifetime      int                           `json:"tokenLifetime,omitempty"`
+	DepartmentClaims   *model.OIDCDepartmentClaimsConfig `json:"departmentClaims,omitempty"`
+	RoleClaims         *model.OIDCRoleClaimsConfig       `json:"roleClaims,omitempty"`
+	ScopeAuthorization *model.OIDCScopeAuthorization     `json:"scopeAuthorization,omitempty"`
+	ClientRoleIDs      []uint                            `json:"clientRoleIds,omitempty"`
+	ClientID           string                            `json:"clientId,omitempty"`
+	ClientSecret       string                            `json:"clientSecret,omitempty"` // 仅在创建时返回
+	RedirectURIs       []string                          `json:"redirectUris" binding:"required,min=1"`
+	GrantTypes         []string                          `json:"grantTypes" binding:"required,min=1"`
+	ResponseTypes      []string                          `json:"responseTypes" binding:"required,min=1"`
+	Scopes             []string                          `json:"scopes" binding:"required,min=1"`
+	ClientType         string                            `json:"clientType" binding:"required,oneof=confidential public"`
+	RequirePKCE        bool                              `json:"requirePkce"`
+	TokenLifetime      int                               `json:"tokenLifetime,omitempty"`
 }
 
 // SAMLApplicationConfig SAML应用配置（用于前端表单）

@@ -73,6 +73,17 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string, expectedClientIDs 
 		}
 		response.Roles, response.Groups = snapshot.For("userinfo")
 	}
+	if value, ok := token.Attributes[model.OIDCDepartmentSnapshotAttribute]; ok {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, errors.New("invalid_token")
+		}
+		var snapshot model.OIDCDepartmentSnapshot
+		if err := json.Unmarshal(encoded, &snapshot); err != nil {
+			return nil, errors.New("invalid_token")
+		}
+		response.Departments = snapshot.For("userinfo")
+	}
 	return response, nil
 }
 
@@ -249,16 +260,27 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument(apps ...*model.Application) 
 	if len(apps) > 0 && apps[0] != nil {
 		if config, err := model.DecodeOIDCAuthorizationConfig(apps[0].ProtocolConfig); err == nil {
 			response.ScopesSupported = config.Scopes
-			if config.RoleClaims.Enabled {
-				for _, target := range config.RoleClaims.Targets {
+			for _, output := range []struct {
+				enabled bool
+				name    string
+				targets []string
+			}{
+				{config.RoleClaims.Enabled, config.RoleClaims.ClaimName, config.RoleClaims.Targets},
+				{config.DepartmentClaims.Enabled, "departments", config.DepartmentClaims.Targets},
+			} {
+				if !output.enabled {
+					continue
+				}
+				for _, target := range output.targets {
 					if target == "id_token" || target == "userinfo" {
-						response.ClaimsSupported = append(response.ClaimsSupported, config.RoleClaims.ClaimName)
+						response.ClaimsSupported = append(response.ClaimsSupported, output.name)
 						break
 					}
 				}
 			}
 		}
 	}
+
 	return response
 }
 

@@ -8,6 +8,13 @@ import (
 )
 
 const OIDCRoleSnapshotAttribute = "oidcRoleClaims"
+const OIDCDepartmentSnapshotAttribute = "oidcDepartmentClaims"
+
+type OIDCDepartmentClaimsConfig struct {
+	Enabled       bool     `json:"enabled"`
+	DepartmentIDs []uint   `json:"departmentIds"`
+	Targets       []string `json:"targets"`
+}
 
 type OIDCRoleClaimsConfig struct {
 	Enabled   bool     `json:"enabled"`
@@ -30,10 +37,11 @@ type OIDCScopeAuthorization struct {
 // OIDCAuthorizationConfig is the typed authorization subset of protocolConfig.
 // Absence retains legacy authorization behavior.
 type OIDCAuthorizationConfig struct {
-	Scopes             []string               `json:"scopes"`
-	RoleClaims         OIDCRoleClaimsConfig   `json:"roleClaims"`
-	ScopeAuthorization OIDCScopeAuthorization `json:"scopeAuthorization"`
-	ClientRoleIDs      []uint                 `json:"clientRoleIds"`
+	Scopes             []string                   `json:"scopes"`
+	RoleClaims         OIDCRoleClaimsConfig       `json:"roleClaims"`
+	DepartmentClaims   OIDCDepartmentClaimsConfig `json:"departmentClaims"`
+	ScopeAuthorization OIDCScopeAuthorization     `json:"scopeAuthorization"`
+	ClientRoleIDs      []uint                     `json:"clientRoleIds"`
 }
 
 func DecodeOIDCAuthorizationConfig(raw map[string]interface{}) (*OIDCAuthorizationConfig, error) {
@@ -50,6 +58,9 @@ func DecodeOIDCAuthorizationConfig(raw map[string]interface{}) (*OIDCAuthorizati
 	}
 	if config.RoleClaims.Targets == nil {
 		config.RoleClaims.Targets = []string{"access_token"}
+	}
+	if config.DepartmentClaims.Targets == nil {
+		config.DepartmentClaims.Targets = []string{"access_token"}
 	}
 	return &config, nil
 }
@@ -105,4 +116,24 @@ func (s *OIDCRoleSnapshot) For(target string) (roles, groups *[]string) {
 		}
 	}
 	return nil, nil
+}
+
+// OIDCDepartmentSnapshot is independent of role claims and never recalculated
+// from live memberships when reading UserInfo for an existing access token.
+type OIDCDepartmentSnapshot struct {
+	Values  []string `json:"values"`
+	Targets []string `json:"targets"`
+}
+
+func (s *OIDCDepartmentSnapshot) For(target string) *[]string {
+	if s == nil {
+		return nil
+	}
+	for _, destination := range s.Targets {
+		if destination == target {
+			values := append([]string{}, s.Values...)
+			return &values
+		}
+	}
+	return nil
 }

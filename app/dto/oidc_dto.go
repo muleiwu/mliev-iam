@@ -126,6 +126,7 @@ type TokenErrorResponse struct {
 
 // UserInfoResponse 用户信息响应
 type UserInfoResponse struct {
+	Departments         *[]string `json:"departments,omitempty"`
 	Roles               *[]string `json:"roles,omitempty"`
 	Groups              *[]string `json:"groups,omitempty"`
 	Sub                 string    `json:"sub"`

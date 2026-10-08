@@ -1,6 +1,6 @@
 # OIDC 角色与 Scope 授权
 
-IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相关角色输出到 Access Token、ID Token 或 UserInfo。Audience 仍为应用的客户端 UUID。本功能使用现有应用 `protocolConfig` 和令牌 `Attributes` JSON 字段，无需数据库表迁移。
+IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相关角色、用户部门输出到 Access Token、ID Token 或 UserInfo。Audience 仍为应用的客户端 UUID。本功能使用现有应用 `protocolConfig` 和令牌 `Attributes` JSON 字段，无需数据库表迁移。
 
 ## 配置入口
 
@@ -12,11 +12,12 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
 
 ## 管理 API 配置
 
-沿用应用创建和更新 API 的 `protocolConfig`，增加三个字段：
+沿用应用创建和更新 API 的 `protocolConfig`，支持以下字段：
 
 - `scopeAuthorization`：`enabled` 开关与按 scope 名索引的 `rules`。每条包含授权说明 `description`、用户范围 `userAccess`、机器授权开关 `allowClientCredentials`。
 - `roleClaims`：`enabled`、`claimName`（`roles` 或 `groups`）、输出角色白名单 `roleIds`、输出位置 `targets`（`access_token`、`id_token`、`userinfo`）。省略名称及位置时分别默认 `roles` 和 `access_token`；默认不开启。
 - `clientRoleIds`：单独分配给机密客户端的机器角色。
+- `departmentClaims`：用户部门输出开关、部门白名单 `departmentIds` 和输出位置 `targets`，见下节。
 
 下面是 Pagnode 示例中的相关配置。`42` 代表事先创建的 `pagnode-admin` 角色 ID，需替换为实际值。更新既有应用时可仅提交需要修改的 `protocolConfig` 顶层字段；未提交字段会保留。提交 `scopeAuthorization` 或 `roleClaims` 时应提供该对象的完整配置。
 
@@ -63,6 +64,43 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
 开启策略后，`scopes` 中的每个范围都必须有规则；规则不能引用允许列表之外的 scope。`userAccess.isPublic` 必须明确设置，引用的人员、部门、角色必须存在。角色输出只包含主体实际拥有且在输出白名单中的角色代码，去重排序；开启输出但未匹配角色时返回空数组。
 
 `groups` 是兼容性字段映射，其值仍为所选角色代码字符串数组。它不代表新建了组织用户组。首期不支持 `realm_access.roles` 等嵌套路径、任意 Claim 或脚本映射。
+
+## 部门字段输出
+
+在应用的「授权范围与角色 → 部门输出」中开启。字段固定为 `departments`，内容是部门编码字符串数组。部门配置与角色独立，默认关闭；开启后省略 `targets` 默认仅输出到 Access Token。开启状态下显式传入空输出位置会被拒绝。
+
+```json
+{
+  "departmentClaims": {
+    "enabled": true,
+    "departmentIds": [10, 12],
+    "targets": ["access_token", "id_token", "userinfo"]
+  }
+}
+```
+
+`10`、`12` 应替换为实际部门 ID。例如用户直接属于 `sre`，上级为 `platform`，应用同时允许这两个部门，则输出：
+
+```json
+{
+  "departments": ["platform", "sre"]
+}
+```
+
+部门范围按以下规则计算：
+
+- 从用户已激活、未离开、未删除的部门成员关系开始；直属部门须处于启用状态。
+- 按 `ParentID` 收集直属部门及上级，再与应用白名单取交集，去重并按编码排序。部门负责人或角色上的部门限制不等于成员关系。
+- 遇到禁用、冻结、删除或不存在的节点，停止这条链，不跨过失效节点继续追溯。已经收集的有效下级部门保留。
+- 父子节点独立选择。白名单只包含 `platform` 时，仅输出 `["platform"]`；不会因为选择父部门就公开所有子部门。
+- 白名单为空或没有匹配部门时，选定输出位置返回 `departments: []`；关闭或未选择该位置时省略字段。
+- 层级出现循环或查询失败时，不签发不完整声明，返回 `server_error`；失败的刷新事务不会消费原刷新令牌。
+
+机器的 `client_credentials` 令牌完全省略该字段，不继承应用创建者的部门，也没有单独的机器部门配置。无需申请新的 `departments` scope；现有 UserInfo 访问仍要求 `openid`。字段输出不改变原有应用、角色和 scope 的授权规则。
+
+同次签发共用一份部门结果。UserInfo 在令牌仍有效时返回签发快照；旧令牌没有部门快照时，不按当前配置补算。部门加入、离开、移动、禁用、编码修改或白名单调整影响后续签发和刷新，旧 JWT 的字段值不会被改写。刷新及注销沿用原有令牌撤销机制。
+
+仅当该应用将部门输出到 ID Token 或 UserInfo 时，Discovery 的 `claims_supported` 才声明 `departments`。此能力使用现有应用 JSON 配置和令牌属性存储，无需数据库迁移；旧管理客户端未提交 `departmentClaims` 时保留原值。
 
 ## 用户和机器调用
 
