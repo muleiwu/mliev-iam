@@ -35,6 +35,10 @@
 - ✅ 可嵌入 Iframe 的组件支持
 - ✅ 基于 Redis 的会话管理
 
+## 浏览器跨域接入
+
+Discovery/JWKS 支持无 Cookie 的公开跨域读取；Token、UserInfo、Revoke、Introspect 根据应用已登记的 HTTP/HTTPS 回调 Origin 放行，管理端继续使用全局白名单。配置说明、回归测试与 Kubernetes 发布后检查见 [OIDC CORS 接入与验收](docs/oidc-cors.zh-CN.md)。
+
 ## API 端点
 
 ### OIDC 标准端点

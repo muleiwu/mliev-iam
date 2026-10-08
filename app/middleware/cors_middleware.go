@@ -93,6 +93,9 @@ func CorsWithConfig(config CorsConfig) httpInterfaces.HandlerFunc {
 	}
 
 	return func(c httpInterfaces.RouterContextInterface) {
+		if serveOIDCCORS(c) {
+			return
+		}
 		p := path.Clean(c.Path())
 		if p == "/install" || strings.HasPrefix(p, "/install/") {
 			c.Next()
@@ -111,9 +114,9 @@ func CorsWithConfig(config CorsConfig) httpInterfaces.HandlerFunc {
 			allowed = "*"
 		}
 
+		appendCORSVary(c.ResponseWriter().Header(), "Origin")
 		if allowed != "" {
 			c.SetHeader("Access-Control-Allow-Origin", allowed)
-			c.SetHeader("Vary", "Origin")
 		}
 
 		c.SetHeader("Access-Control-Allow-Methods", strings.Join(config.AllowMethods, ", "))

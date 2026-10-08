@@ -87,6 +87,8 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
 
 ## Pagnode 接入
 
+浏览器跨域要求和发布后验证见 [OIDC CORS 接入与验收](oidc-cors.zh-CN.md)。
+
 使用 RS256 签名密钥，以 HTTPS 暴露 IAM，反向代理正确设置外部协议和主机名。配置示例中的占位符均需替换：
 
 ```dotenv

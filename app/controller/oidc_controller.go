@@ -175,8 +175,8 @@ func (oc OIDCController) Token(c httpInterfaces.RouterContextInterface) {
 	}
 
 	// 验证必需的客户端凭据（除了public客户端的某些流程）
-	if req.ClientID == "" {
-		oc.tokenErrorWithAuth(c, "invalid_client", "缺少客户端凭据")
+	if req.ClientID == "" || req.ClientID != appUuid {
+		oc.tokenErrorWithAuth(c, "invalid_client", "客户端凭据与请求端点不匹配")
 		return
 	}
 
@@ -230,7 +230,7 @@ func (oc OIDCController) UserInfo(c httpInterfaces.RouterContextInterface) {
 
 	// 2. 获取用户信息
 	userInfoService := service.NewOIDCUserInfoService(helper.GetDatabase())
-	response, err := userInfoService.GetUserInfo(accessToken)
+	response, err := userInfoService.GetUserInfo(accessToken, c.Param("client_id"))
 	if err != nil {
 		errorCode := err.Error()
 		errorDescription := oc.getUserInfoErrorDescription(errorCode)
@@ -350,6 +350,10 @@ func (oc OIDCController) Introspect(c httpInterfaces.RouterContextInterface) {
 		}
 	}
 
+	if req.ClientID == "" || req.ClientID != c.Param("client_id") {
+		oc.tokenErrorWithAuth(c, "invalid_client", "客户端凭据与请求端点不匹配")
+		return
+	}
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	response, err := authService.IntrospectToken(&req)
 	if err != nil {
@@ -376,6 +380,15 @@ func (oc OIDCController) Revoke(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
+	if req.ClientID == "" || req.ClientSecret == "" {
+		if id, secret, ok := c.Request().BasicAuth(); ok {
+			req.ClientID, req.ClientSecret = id, secret
+		}
+	}
+	if req.ClientID == "" || req.ClientID != c.Param("client_id") {
+		oc.tokenErrorWithAuth(c, "invalid_client", "客户端凭据与请求端点不匹配")
+		return
+	}
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
 	err := authService.RevokeToken(&req)
 	if err != nil {

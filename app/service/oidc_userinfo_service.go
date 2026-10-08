@@ -31,13 +31,17 @@ func NewOIDCUserInfoService(db *gorm.DB) *OIDCUserInfoService {
 }
 
 // GetUserInfo 获取用户信息
-func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResponse, error) {
+func (s *OIDCUserInfoService) GetUserInfo(accessToken string, expectedClientIDs ...string) (*dto.UserInfoResponse, error) {
 	// 1. 验证访问令牌
 	token, err := s.tokenDAO.GetValidByAccessToken(accessToken)
 	if err != nil {
 		return nil, errors.New("invalid_token")
 	}
 
+	// A per-client UserInfo route must not accept another application's token.
+	if len(expectedClientIDs) > 0 && (len(expectedClientIDs) != 1 || expectedClientIDs[0] == "" || token.ClientID != expectedClientIDs[0]) {
+		return nil, errors.New("invalid_token")
+	}
 	// 2. 检查作用域
 	if !s.hasScope(token.Scopes, "openid") {
 		return nil, errors.New("insufficient_scope")
