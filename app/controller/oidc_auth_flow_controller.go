@@ -462,10 +462,13 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		}
 	}()
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
-	issuer := utils.GetBaseURL(ctx, "/oidc")
+	issuer := utils.GetBaseURL(ctx, fmt.Sprintf("/oidc/%s", app.UUID))
 	scopes := authService.ParseScopes(session.Scope)
 	tokenResponse, err := authService.GenerateTokens(app, user.ID, scopes, session.Nonce, issuer, loginSID)
 	if err != nil {
+		if errors.Is(err, constants.ErrAccessDenied) || errors.Is(err, constants.ErrInvalidScope) {
+			return nil, fmt.Errorf("您没有申请此授权范围的权限，请联系应用管理员: %w", err)
+		}
 		return nil, fmt.Errorf("生成 Token 失败: %w", err)
 	}
 
@@ -1025,7 +1028,7 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx httpInterfaces.RouterContextInte
 	response.Client.Description = app.Description
 
 	// 解析scopes并提供描述
-	response.Scopes = c.parseScopesWithDescription(session.Scope)
+	response.Scopes = c.parseScopesWithDescription(session.Scope, app)
 
 	response.User.ID = user.ID
 	response.User.Username = user.Username
@@ -1060,7 +1063,7 @@ func (c OIDCAuthFlowController) checkMissingUserInfo(scopeStr string, user *dto.
 }
 
 // parseScopesWithDescription 解析scopes并返回带描述的列表
-func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []struct {
+func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string, apps ...*model.Application) []struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 } {
@@ -1082,6 +1085,11 @@ func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []st
 	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
 	for _, scope := range scopeList {
 		description, ok := scopeDescriptions[scope]
+		if len(apps) > 0 {
+			if custom := service.OIDCScopeDescription(apps[0], scope); custom != "" {
+				description, ok = custom, true
+			}
+		}
 		if !ok {
 			description = "访问 " + scope + " 权限"
 		}
@@ -1544,7 +1552,7 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 	}
 
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
-	issuer := utils.GetBaseURL(ctx, "/oidc")
+	issuer := utils.GetBaseURL(ctx, fmt.Sprintf("/oidc/%s", app.UUID))
 	newTokenResponse, err := authService.RotateLoginToken(oldToken, app, "", issuer)
 	if err != nil {
 		c.Error(ctx, 401, "刷新令牌无效或会话已撤销")
@@ -1984,7 +1992,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 	}
 
 	// 8. 信息完整，需要授权确认
-	scopes := c.parseScopesForFlow(session.Scope)
+	scopes := c.parseScopesForFlow(session.Scope, app)
 	c.Success(ctx, FlowStatusResponse{
 		SessionID:   sessionID,
 		Status:      "needs_consent",
@@ -1998,7 +2006,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 }
 
 // parseScopesForFlow 解析 scope 并返回流程状态所需的描述列表
-func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string) []FlowStatusScope {
+func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string, apps ...*model.Application) []FlowStatusScope {
 	scopeDescriptions := map[string]string{
 		"openid":         "验证您的身份",
 		"profile":        "访问您的基本资料（昵称、头像等）",
@@ -2012,6 +2020,11 @@ func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string) []FlowStatus
 	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
 	for _, scope := range scopeList {
 		desc, ok := scopeDescriptions[scope]
+		if len(apps) > 0 {
+			if custom := service.OIDCScopeDescription(apps[0], scope); custom != "" {
+				desc, ok = custom, true
+			}
+		}
 		if !ok {
 			desc = "访问 " + scope + " 权限"
 		}

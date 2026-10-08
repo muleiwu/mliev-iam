@@ -17,6 +17,8 @@ import (
 
 // IDTokenClaims ID Token的JWT声明
 type IDTokenClaims struct {
+	Roles  *[]string `json:"roles,omitempty"`
+	Groups *[]string `json:"groups,omitempty"`
 	// 标准OIDC Claims (必需)
 	Sub string `json:"sub"` // Subject - 用户唯一标识符
 	Iss string `json:"iss"` // Issuer - 颁发者
@@ -62,6 +64,8 @@ type IDTokenClaims struct {
 
 // AccessTokenClaims Access Token的JWT声明 (符合 RFC 9068)
 type AccessTokenClaims struct {
+	Roles  *[]string `json:"roles,omitempty"`
+	Groups *[]string `json:"groups,omitempty"`
 	// 标准JWT Claims (必需)
 	Iss string `json:"iss"`           // Issuer - 颁发者
 	Sub string `json:"sub"`           // Subject - 用户唯一标识符
@@ -139,6 +143,7 @@ func (s *OIDCIDTokenService) GenerateIDToken(user *model.User, clientID string, 
 func (s *OIDCIDTokenService) GenerateIDTokenWithHashes(
 	user *model.User, clientID string, scopes []string, nonce string, authTime *time.Time,
 	accessToken, authorizationCode string,
+	roleSnapshots ...*model.OIDCRoleSnapshot,
 ) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
@@ -176,6 +181,9 @@ func (s *OIDCIDTokenService) GenerateIDTokenWithHashes(
 		s.addPhoneClaims(claims, user)
 	}
 
+	if len(roleSnapshots) > 0 {
+		claims.Roles, claims.Groups = roleSnapshots[0].For("id_token")
+	}
 	return s.signToken(claims)
 }
 
@@ -199,7 +207,7 @@ func leftMostHash(value, alg string) string {
 }
 
 // GenerateAccessToken 生成 JWT 格式的 Access Token (符合 RFC 9068)
-func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID string, scopes []string) (string, error) {
+func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID string, scopes []string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
 
@@ -225,12 +233,15 @@ func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID stri
 		claims.Email = *user.Email
 	}
 
+	if len(roleSnapshots) > 0 {
+		claims.Roles, claims.Groups = roleSnapshots[0].For("access_token")
+	}
 	// 根据算法类型签名token
 	return s.signToken(claims)
 }
 
 // GenerateClientCredentialsAccessToken 生成客户端凭据流程的 JWT Access Token
-func (s *OIDCIDTokenService) GenerateClientCredentialsAccessToken(clientID string, scopes []string) (string, error) {
+func (s *OIDCIDTokenService) GenerateClientCredentialsAccessToken(clientID string, scopes []string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
 
@@ -249,6 +260,9 @@ func (s *OIDCIDTokenService) GenerateClientCredentialsAccessToken(clientID strin
 		Scope:    joinScopes(scopes),
 	}
 
+	if len(roleSnapshots) > 0 {
+		claims.Roles, claims.Groups = roleSnapshots[0].For("access_token")
+	}
 	// 根据算法类型签名token
 	return s.signToken(claims)
 }
@@ -257,13 +271,17 @@ func (s *OIDCIDTokenService) GenerateClientCredentialsAccessToken(clientID strin
 func (s *OIDCIDTokenService) signToken(claims jwtLib.Claims) (string, error) {
 	var tokenString string
 	var err error
+	tokenType := "JWT"
+	if _, ok := claims.(*AccessTokenClaims); ok {
+		tokenType = "at+jwt"
+	}
 
 	switch s.algorithm {
 	case "RS256":
 		if s.rsaKeyManager == nil || !s.rsaKeyManager.IsInitialized() {
 			return "", fmt.Errorf("RS256算法需要初始化RSA密钥管理器")
 		}
-		tokenString, err = s.rsaKeyManager.SignToken(claims)
+		tokenString, err = s.rsaKeyManager.SignTokenWithType(claims, tokenType)
 		if err != nil {
 			return "", fmt.Errorf("使用RSA签名Token失败: %w", err)
 		}
@@ -274,6 +292,7 @@ func (s *OIDCIDTokenService) signToken(claims jwtLib.Claims) (string, error) {
 		}
 		token := jwtLib.NewWithClaims(jwtLib.SigningMethodHS256, claims)
 		token.Header["kid"] = s.keyID
+		token.Header["typ"] = tokenType
 		tokenString, err = token.SignedString(s.hmacSecret)
 		if err != nil {
 			return "", fmt.Errorf("使用HMAC签名Token失败: %w", err)

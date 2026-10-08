@@ -320,7 +320,12 @@ func (oc OIDCController) Discovery(c httpInterfaces.RouterContextInterface) {
 	baseURL := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", clientId))
 
 	discoveryService := service.NewOIDCDiscoveryService(baseURL)
-	response := discoveryService.GetDiscoveryDocument()
+	app, err := service.NewApplicationService(helper.GetDatabase()).GetApplicationByClientID(clientId)
+	if err != nil || !app.IsActive {
+		c.JSON(http.StatusNotFound, map[string]any{"error": "invalid_client"})
+		return
+	}
+	response := discoveryService.GetDiscoveryDocument(app)
 
 	c.JSON(http.StatusOK, response)
 }

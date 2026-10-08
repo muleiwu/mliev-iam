@@ -648,3 +648,43 @@ func (c *testRouterContext) AbortWithStatusJSON(code int, obj any) {
 func (c *testRouterContext) Request() *http.Request { return c.req }
 
 func (c *testRouterContext) ResponseWriter() http.ResponseWriter { return nil }
+
+func TestCheckOIDCUserAccessReportsScopeFailureBeforeLogin(t *testing.T) {
+	db := registerControllerTestDatabase(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	user := &model.User{Username: "scope-browser-user", Status: model.UserStatusActive, IsActivated: true}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatal(err)
+	}
+	restricted := false
+	app := &model.Application{UUID: "scope-browser-client", Name: "Scope browser", ProtocolType: "oidc", IsActive: true, ProtocolConfig: map[string]interface{}{
+		"clientId": "scope-browser-client", "redirectUris": []interface{}{"https://client.example/callback"}, "scopes": []interface{}{"pagnode:admin"},
+		"scopeAuthorization": model.OIDCScopeAuthorization{Enabled: true, Rules: map[string]model.OIDCScopeRule{"pagnode:admin": {Description: "管理 Pagnode 控制面", UserAccess: &model.ApplicationAccessScope{IsPublic: &restricted}}}},
+	}}
+	if err := db.Create(app).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := &service.OIDCSession{ClientID: app.UUID, RedirectURI: "https://client.example/callback", Scope: "pagnode:admin", State: "preserve-state"}
+	_, failure, err := checkOIDCUserAccess(session, user.ID)
+	if err != nil || failure == nil || failure.Code != "access_denied" {
+		t.Fatalf("scope denial must become a browser failure: %+v %v", failure, err)
+	}
+	parsed, err := url.Parse(failure.RedirectURL)
+	if err != nil || parsed.Query().Get("state") != session.State {
+		t.Fatalf("state lost: %v %v", parsed, err)
+	}
+	if !strings.Contains(failure.Description, "授权范围") {
+		t.Fatal(failure.Description)
+	}
+	descriptions := (OIDCAuthFlowController{}).parseScopesForFlow(session.Scope, app)
+	if len(descriptions) != 1 || descriptions[0].Description != "管理 Pagnode 控制面" {
+		t.Fatalf("configured description missing: %+v", descriptions)
+	}
+	session.Scope = "unregistered"
+	_, failure, err = checkOIDCUserAccess(session, user.ID)
+	if err != nil || failure == nil || failure.Code != "invalid_scope" {
+		t.Fatalf("unknown scope: %+v %v", failure, err)
+	}
+}

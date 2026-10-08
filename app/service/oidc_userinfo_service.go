@@ -43,7 +43,10 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResp
 		return nil, errors.New("insufficient_scope")
 	}
 
-	// 3. 获取用户信息
+	// 3. 机器令牌没有用户资料
+	if token.UserID == 0 {
+		return nil, errors.New("invalid_token")
+	}
 	user, err := s.userService.GetUserModelByID(token.UserID)
 	if err != nil {
 		return nil, errors.New("user_not_found")
@@ -54,7 +57,19 @@ func (s *OIDCUserInfoService) GetUserInfo(accessToken string) (*dto.UserInfoResp
 
 	// 4. 构建用户信息响应
 	_ = dao.NewLoginSessionDAO(s.db).Touch(token.LoginSessionID, "")
-	return s.BuildUserInfoResponse(user, token.Scopes), nil
+	response := s.BuildUserInfoResponse(user, token.Scopes)
+	if value, ok := token.Attributes[model.OIDCRoleSnapshotAttribute]; ok {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, errors.New("invalid_token")
+		}
+		var snapshot model.OIDCRoleSnapshot
+		if err := json.Unmarshal(encoded, &snapshot); err != nil {
+			return nil, errors.New("invalid_token")
+		}
+		response.Roles, response.Groups = snapshot.For("userinfo")
+	}
+	return response, nil
 }
 
 // BuildUserInfoResponse 构建用户信息响应
@@ -194,13 +209,13 @@ func NewOIDCDiscoveryService(baseURL string) *OIDCDiscoveryService {
 //     refresh_token / client_credentials)
 //   - code_challenge_methods_supported 跟随 oidc.pkce.allow_plain 动态生成，
 //     plain 默认禁用时只声明 S256
-func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse {
+func (s *OIDCDiscoveryService) GetDiscoveryDocument(apps ...*model.Application) *dto.OIDCDiscoveryResponse {
 	codeChallengeMethods := []string{"S256"}
 	if pkcePlainAllowed() {
 		codeChallengeMethods = append(codeChallengeMethods, "plain")
 	}
 
-	return &dto.OIDCDiscoveryResponse{
+	response := &dto.OIDCDiscoveryResponse{
 		Issuer:                            s.baseURL,
 		AuthorizationEndpoint:             fmt.Sprintf("%s/authorize", s.baseURL),
 		TokenEndpoint:                     fmt.Sprintf("%s/token", s.baseURL),
@@ -227,6 +242,20 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument() *dto.OIDCDiscoveryResponse
 		CodeChallengeMethodsSupported: codeChallengeMethods,
 		PromptValuesSupported:         SupportedOIDCPromptValues(),
 	}
+	if len(apps) > 0 && apps[0] != nil {
+		if config, err := model.DecodeOIDCAuthorizationConfig(apps[0].ProtocolConfig); err == nil {
+			response.ScopesSupported = config.Scopes
+			if config.RoleClaims.Enabled {
+				for _, target := range config.RoleClaims.Targets {
+					if target == "id_token" || target == "userinfo" {
+						response.ClaimsSupported = append(response.ClaimsSupported, config.RoleClaims.ClaimName)
+						break
+					}
+				}
+			}
+		}
+	}
+	return response
 }
 
 // OIDCManagementService OIDC管理服务（已废弃，使用ApplicationService代替）

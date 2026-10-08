@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
@@ -70,6 +72,13 @@ func checkOIDCUserAccess(session *service.OIDCSession, userID uint) (*model.Appl
 		return nil, nil, fmt.Errorf("无效的重定向 URI: %w", err)
 	}
 	if appService.CheckUserAccess(app.ID, userID) {
+		if err := service.NewOIDCAuthorizationService(helper.GetDatabase()).CheckUserScopeAuthorization(app, userID, session.Scope); err != nil {
+			if !errors.Is(err, constants.ErrAccessDenied) && !errors.Is(err, constants.ErrInvalidScope) {
+				return nil, nil, err
+			}
+			failure, failureErr := newOIDCFailure(session, err.Error(), "您没有申请此授权范围的权限，请联系应用管理员")
+			return app, failure, failureErr
+		}
 		return app, nil, nil
 	}
 
