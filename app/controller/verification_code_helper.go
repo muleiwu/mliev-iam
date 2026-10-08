@@ -19,12 +19,14 @@ func getVerificationCodeConfig() *service.VerificationCodeConfig {
 	}
 
 	return &service.VerificationCodeConfig{
-		BaseURL:        pushSettings.BaseURL,
-		AppID:          pushSettings.AppID,
-		AppSecret:      pushSettings.AppSecret,
-		SMSChannelID:   pushSettings.SMSChannelID,
-		EmailChannelID: pushSettings.EmailChannelID,
-		SMSSignature:   pushSettings.SMSSignature,
-		EmailSignature: pushSettings.EmailSignature,
+		BaseURL:               pushSettings.BaseURL,
+		AppID:                 pushSettings.AppID,
+		AppSecret:             pushSettings.AppSecret,
+		SMSChannelID:          pushSettings.SMSChannelID,
+		EmailChannelID:        pushSettings.EmailChannelID,
+		SMSSignature:          pushSettings.SMSSignature,
+		EmailSignature:        pushSettings.EmailSignature,
+		SMSTemplateBindings:   pushSettings.SMSTemplateBindings,
+		EmailTemplateBindings: pushSettings.EmailTemplateBindings,
 	}
 }

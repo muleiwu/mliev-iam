@@ -170,8 +170,8 @@ func (c SettingController) UpdatePushSettings(ctx httpInterfaces.RouterContextIn
 
 	settingService := service.NewSettingService(helper.GetDatabase())
 
-	if err := settingService.UpdatePushSettings(&req); err != nil {
-		c.Error(ctx, 500, err.Error())
+	if err := settingService.UpdatePushSettingsWithContext(ctx.Request().Context(), &req); err != nil {
+		respondPushError(ctx, err)
 		return
 	}
 

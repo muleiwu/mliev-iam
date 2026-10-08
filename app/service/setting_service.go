@@ -420,14 +420,27 @@ func (s *SettingService) GetPushSettings() (*dto.PushSettings, error) {
 
 // UpdatePushSettings 更新推送服务配置
 func (s *SettingService) UpdatePushSettings(req *dto.UpdatePushSettingsRequest) error {
-	config := dto.PushSettings{
-		BaseURL:        req.BaseURL,
-		AppID:          req.AppID,
-		AppSecret:      req.AppSecret,
-		SMSChannelID:   req.SMSChannelID,
-		EmailChannelID: req.EmailChannelID,
-		SMSSignature:   req.SMSSignature,
-		EmailSignature: req.EmailSignature,
+	return s.UpdatePushSettingsWithContext(context.Background(), req)
+}
+
+func (s *SettingService) UpdatePushSettingsWithContext(ctx context.Context, req *dto.UpdatePushSettingsRequest) error {
+	config := dto.PushSettings(*req)
+	if config.SMSChannelID < 0 || config.EmailChannelID < 0 {
+		return invalidPushConfig("通道 ID 不能为负数")
+	}
+	if config.SMSChannelID > 0 || config.EmailChannelID > 0 {
+		push, err := NewPushService(config.Credentials())
+		if err != nil {
+			return err
+		}
+		for _, kind := range []string{"sms", "email"} {
+			id, _, _ := pushChannelSettings(config, kind)
+			if id > 0 {
+				if err := push.ValidateChannel(ctx, config, kind); err != nil {
+					return fmt.Errorf("%s配置校验失败: %w", kind, err)
+				}
+			}
+		}
 	}
 
 	configJSON, err := json.Marshal(config)
@@ -455,8 +468,8 @@ func (s *SettingService) getDefaultPushSettings() *dto.PushSettings {
 		BaseURL:        "https://push.mliev.com",
 		AppID:          "",
 		AppSecret:      "",
-		SMSChannelID:   1,
-		EmailChannelID: 2,
+		SMSChannelID:   0,
+		EmailChannelID: 0,
 		SMSSignature:   "",
 		EmailSignature: "",
 	}
