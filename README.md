@@ -12,6 +12,7 @@ fine-grained RBAC, and enterprise directory integration in a single binary.
 ## Features
 
 - **OIDC / OAuth2 provider** — authorization-code flow with PKCE, token introspection and revocation, JWKS, and discovery; applications can also register as SAML, CAS, or plain OAuth2 clients
+- **Two-factor authentication** — Optional TOTP, SMS and email verification across all login entrypoints, with single-use recovery codes and audited administrator resets. [Deployment and API guide (中文)](docs/two-factor-authentication.zh-CN.md)
 - **Single sign-on** — one identity hub for all your applications, served under `/oidc/:client_id/*`
 - **Social login** — Google, GitHub, QQ, WeChat, WeChat Mini Program, and generic OAuth2/OIDC identity sources
 - **Enterprise directory sync** — Feishu (Lark), WeCom, and DingTalk directories with event callbacks and sync automation

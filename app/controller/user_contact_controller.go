@@ -122,7 +122,7 @@ func (uc UserController) ChangeEmail(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
-	uc.changeContact(c, userID, service.VerificationTypeEmail, req.Email, req.Code)
+	uc.changeContact(c, userID, service.VerificationTypeEmail, req.Email, req.Code, req.OperationToken)
 }
 
 // ChangePhone 改绑手机号
@@ -143,11 +143,11 @@ func (uc UserController) ChangePhone(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 
-	uc.changeContact(c, userID, service.VerificationTypePhone, req.Phone, req.Code)
+	uc.changeContact(c, userID, service.VerificationTypePhone, req.Phone, req.Code, req.OperationToken)
 }
 
 // changeContact 校验验证码后更新联系方式并置 verified_at。
-func (uc UserController) changeContact(c httpInterfaces.RouterContextInterface, userID uint, verificationType service.VerificationType, value, code string) {
+func (uc UserController) changeContact(c httpInterfaces.RouterContextInterface, userID uint, verificationType service.VerificationType, value, code string, operationTokens ...string) {
 	receiver, err := normalizeContactReceiver(verificationType, value)
 	if err != nil {
 		uc.Error(c, constants.ErrCodeBadRequest, err.Error())
@@ -168,7 +168,22 @@ func (uc UserController) changeContact(c httpInterfaces.RouterContextInterface, 
 	}
 
 	userService := service.NewUserService(helper.GetDatabase())
-	if err := userService.UpdateVerifiedContact(userID, verificationType, receiver); err != nil {
+	user, err := userService.GetUserModelByID(userID)
+	if err != nil {
+		uc.Error(c, 400, "用户不可用")
+		return
+	}
+	var proof *service.TwoFactorProof
+	if user.TwoFactorEnabled {
+		token := ""
+		if len(operationTokens) > 0 {
+			token = operationTokens[0]
+		}
+		proof, err = twoFactorService().ChangeContact(c.Request().Context(), userID, middleware.GetCurrentSessionID(c), token, verificationType, receiver, c.ClientIP())
+	} else {
+		err = userService.UpdateVerifiedContact(userID, verificationType, receiver)
+	}
+	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "邮箱已存在") {
@@ -180,6 +195,12 @@ func (uc UserController) changeContact(c httpInterfaces.RouterContextInterface, 
 		return
 	}
 
+	if proof != nil {
+		if err := renewTwoFactorSession(c, userID, proof); err != nil {
+			uc.Error(c, 500, "联系方式已修改，请重新登录")
+			return
+		}
+	}
 	response, err := userService.GetUserByID(userID)
 	if err != nil {
 		uc.Error(c, constants.ErrCodeInternal, err.Error())

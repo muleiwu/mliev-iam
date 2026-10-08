@@ -19,6 +19,7 @@ import (
 
 // OIDCSession OIDC授权会话
 type OIDCSession struct {
+	PendingTwoFactorID          string                    `json:"pending_two_factor_id,omitempty"`
 	LoginSessionID              string                    `json:"login_session_id,omitempty"`
 	SessionID                   string                    `json:"session_id"`
 	ClientID                    string                    `json:"client_id"`
@@ -367,7 +368,7 @@ func oidcSessionPromptHas(prompt, value string) bool {
 }
 
 // MarkAsAuthenticated 标记会话为已认证
-func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint, loginID string) error {
+func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint, loginID string, expectedChallenges ...string) error {
 	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -376,13 +377,43 @@ func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID 
 	if loginID == "" {
 		return fmt.Errorf("缺少登录会话标识")
 	}
+	expected := ""
+	if len(expectedChallenges) > 0 {
+		expected = expectedChallenges[0]
+	}
+	if expected != "" && session.PendingTwoFactorID != expected {
+		return ErrTwoFactorExpired
+	}
 	session.LoginSessionID = loginID
+	session.PendingTwoFactorID = ""
 	session.UserID = &userID
 	session.IsAuthenticated = true
 	session.AuthTime = time.Now()
 	session.Error = nil
 	session.ExpiresAt = time.Now().Add(30 * time.Minute)
 
+	if expected != "" {
+		payload, err := json.Marshal(session)
+		if err != nil {
+			return err
+		}
+		// A concurrent account choice must not be overwritten by a previously
+		// verified challenge. Compare and authenticate in one Redis operation.
+		const script = `local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local current = cjson.decode(raw)
+if current.pending_two_factor_id ~= ARGV[1] or current.is_authenticated then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', 1800)
+return 1`
+		n, err := s.redis.Eval(ctx, script, []string{s.keyPrefix + sessionID}, expected, string(payload)).Int()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return ErrTwoFactorExpired
+		}
+		return nil
+	}
 	return s.UpdateSession(ctx, session)
 }
 
@@ -396,6 +427,7 @@ func (s *OIDCSessionService) MarkAsFailed(ctx context.Context, sessionID string,
 	}
 
 	session.LoginSessionID = ""
+	session.PendingTwoFactorID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false
@@ -482,6 +514,7 @@ func resetAuthenticationState(session *OIDCSession) error {
 	}
 
 	session.LoginSessionID = ""
+	session.PendingTwoFactorID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
 	session.IsConsentGranted = false

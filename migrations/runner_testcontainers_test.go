@@ -226,7 +226,7 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"login_sessions", "identity_connections", "external_principals", "external_principal_conflicts", "directory_sync_snapshot_objects", "directory_operation_leases"} {
+	for _, table := range []string{"two_factor_methods", "two_factor_recovery_codes", "two_factor_events", "login_sessions", "identity_connections", "external_principals", "external_principal_conflicts", "directory_sync_snapshot_objects", "directory_operation_leases"} {
 		if !gormDB.Migrator().HasTable(table) {
 			t.Fatalf("最终 schema 缺少表 %s", table)
 		}
@@ -236,7 +236,7 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 			t.Fatalf("硬切后仍存在旧表 %s", oldTable)
 		}
 	}
-	const expectedVersion int64 = 20260922000001
+	const expectedVersion int64 = 20261008000000
 	version, err := goose.GetDBVersion(db)
 	if err != nil || version != expectedVersion {
 		t.Fatalf("迁移版本错误: got=%d want=%d err=%v", version, expectedVersion, err)
@@ -265,7 +265,7 @@ func assertOIDCRefreshTokenUniqueness(t *testing.T, sqlDB *sql.DB, db *gorm.DB, 
 		t.Fatal("不可逆迁移的 Down 应拒绝执行")
 	}
 	version, err := goose.GetDBVersion(sqlDB)
-	if err != nil || version != 20260922000001 {
+	if err != nil || version != 20261008000000 {
 		t.Fatalf("拒绝 Down 后迁移版本应保持不变: version=%d err=%v", version, err)
 	}
 }

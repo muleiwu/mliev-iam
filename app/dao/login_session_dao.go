@@ -23,6 +23,9 @@ func (d *LoginSessionDAO) Valid(id string, userID uint) (*model.LoginSession, er
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrLoginSessionInvalid
 	}
+	if err == nil {
+		err = ValidateSessionAssurance(d.db, &session)
+	}
 	return &session, err
 }
 
@@ -40,7 +43,8 @@ func (d *LoginSessionDAO) Lock(id string, userID uint) error {
 		_, err := d.Valid(id, userID)
 		return err
 	}
-	return nil
+	_, err := d.Valid(id, userID)
+	return err
 }
 
 func (d *LoginSessionDAO) Extend(id string, until time.Time) error {

@@ -45,7 +45,7 @@ func TestOIDCRefreshTokenNullMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RunGooseMigrations(db, "sqlite", nil); err != nil {
+	if err := goose.UpTo(db, "sqlite", 20260922000001); err != nil {
 		t.Fatalf("升级失败: %v", err)
 	}
 	var legacy sql.NullString

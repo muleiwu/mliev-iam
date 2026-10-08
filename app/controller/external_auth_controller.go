@@ -177,6 +177,10 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 			return
 		}
 		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+			if pending, ok := err.(*twoFactorPending); ok {
+				ec.popup(c, map[string]any{"type": "oidc-external-callback", "sessionId": response.SessionID, "requiresTwoFactor": true, "twoFactorChallenge": pending.challenge}, stateData.OpenerOrigin, "二次验证")
+				return
+			}
 			ec.Error(c, 500, "创建登录会话失败: "+err.Error())
 			return
 		}
@@ -184,6 +188,9 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 		return
 	}
 	if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+		if respondTwoFactorRequired(c, err) {
+			return
+		}
 		ec.Error(c, 500, "创建登录会话失败: "+err.Error())
 		return
 	}
@@ -215,7 +222,13 @@ func (ec ExternalAuthController) BindWithLogin(c httpInterfaces.RouterContextInt
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}
-	clearContinuationCookie(c, req.ContinuationCSRF)
+	if response.PendingContinuationID != "" {
+		c.Set("two_factor_continuation", response.PendingContinuationID)
+		c.Set("two_factor_continuation_csrf", response.PendingContinuationCSRF)
+		c.Set("primary_auth_method", "password")
+	} else {
+		clearContinuationCookie(c, req.ContinuationCSRF)
+	}
 	ec.completeLoginResponse(c, response, response.SessionID, "绑定成功")
 }
 
@@ -283,6 +296,9 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 			}
 		}
 		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+			if respondTwoFactorRequired(c, err) {
+				return
+			}
 			ec.Error(c, 500, "创建登录会话失败: "+err.Error())
 			return
 		}
@@ -338,6 +354,9 @@ func (ec ExternalAuthController) GetMiniProgramQRCodeStatus(c httpInterfaces.Rou
 	}
 	if response.State == service.QRStateConfirmed && response.User != nil {
 		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+			if respondTwoFactorRequired(c, err) {
+				return
+			}
 			ec.Error(c, 500, "创建登录会话失败: "+err.Error())
 			return
 		}
@@ -437,6 +456,9 @@ func (ec ExternalAuthController) completeLoginResponse(c httpInterfaces.RouterCo
 		}
 	}
 	if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
+		if respondTwoFactorRequired(c, err) {
+			return
+		}
 		ec.Error(c, 500, "创建登录会话失败: "+err.Error())
 		return
 	}

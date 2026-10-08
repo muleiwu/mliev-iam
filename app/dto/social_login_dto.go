@@ -16,14 +16,16 @@ type SocialAuthCallbackRequest struct {
 
 // SocialAuthCallbackResponse OAuth回调响应（登录成功）
 type SocialAuthCallbackResponse struct {
-	Token            string                `json:"token"`     // JWT访问令牌
-	User             *UserResponse         `json:"user"`      // 用户信息
-	IsNewUser        bool                  `json:"isNewUser"` // 是否为新注册用户
-	NeedsBind        bool                  `json:"needsBind"` // 是否需要绑定已有账号
-	Error            *AuthorizationFailure `json:"error,omitempty"`
-	ContinuationID   string                `json:"-"` // 仅服务端用于设置 HttpOnly continuation Cookie
-	ContinuationCSRF string                `json:"continuationCsrf,omitempty"`
-	SessionID        string                `json:"sessionId,omitempty"` // OIDC会话ID（用于OIDC流程）
+	PendingContinuationID   string                `json:"-"`
+	PendingContinuationCSRF string                `json:"-"`
+	Token                   string                `json:"token"`     // JWT访问令牌
+	User                    *UserResponse         `json:"user"`      // 用户信息
+	IsNewUser               bool                  `json:"isNewUser"` // 是否为新注册用户
+	NeedsBind               bool                  `json:"needsBind"` // 是否需要绑定已有账号
+	Error                   *AuthorizationFailure `json:"error,omitempty"`
+	ContinuationID          string                `json:"-"` // 仅服务端用于设置 HttpOnly continuation Cookie
+	ContinuationCSRF        string                `json:"continuationCsrf,omitempty"`
+	SessionID               string                `json:"sessionId,omitempty"` // OIDC会话ID（用于OIDC流程）
 }
 
 // SocialBindWithLoginRequest 用社交账号绑定已有账户

@@ -74,14 +74,16 @@ type SendContactVerificationCodeRequest struct {
 
 // ChangeEmailRequest 改绑邮箱请求
 type ChangeEmailRequest struct {
-	Email string `json:"email" binding:"required,email,max=100"`
-	Code  string `json:"code" binding:"required,len=6"`
+	OperationToken string `json:"operationToken,omitempty"`
+	Email          string `json:"email" binding:"required,email,max=100"`
+	Code           string `json:"code" binding:"required,len=6"`
 }
 
 // ChangePhoneRequest 改绑手机号请求
 type ChangePhoneRequest struct {
-	Phone string `json:"phone" binding:"required,max=20"`
-	Code  string `json:"code" binding:"required,len=6"`
+	OperationToken string `json:"operationToken,omitempty"`
+	Phone          string `json:"phone" binding:"required,max=20"`
+	Code           string `json:"code" binding:"required,len=6"`
 }
 
 // UserQueryRequest 用户查询请求
@@ -101,30 +103,31 @@ type UserQueryRequest struct {
 
 // UserResponse 用户响应信息
 type UserResponse struct {
-	ID              uint                   `json:"id"`
-	UUID            string                 `json:"uuid"`
-	Username        string                 `json:"username"`
-	Email           string                 `json:"email"`
-	Phone           string                 `json:"phone"`
-	Nickname        string                 `json:"nickname"`
-	RealName        string                 `json:"realName"`
-	Avatar          string                 `json:"avatar"`
-	Status          model.UserStatus       `json:"status"`
-	StatusText      string                 `json:"statusText"`
-	IsActivated     bool                   `json:"isActivated"`
-	IsVerified      bool                   `json:"isVerified"` // 派生：EmailVerifiedAt 或 PhoneVerifiedAt 任一非空
-	EmailVerified   bool                   `json:"emailVerified"`
-	PhoneVerified   bool                   `json:"phoneVerified"`
-	EmailVerifiedAt *time.Time             `json:"emailVerifiedAt"`
-	PhoneVerifiedAt *time.Time             `json:"phoneVerifiedAt"`
-	HasPassword     bool                   `json:"hasPassword"` // 是否已设置密码（社交注册用户可能没有）
-	LoginCount      int64                  `json:"loginCount"`
-	LastLoginAt     *time.Time             `json:"lastLoginAt"`
-	LastLoginIP     string                 `json:"lastLoginIP"`
-	Attributes      map[string]interface{} `json:"attributes,omitempty"`
-	Remark          string                 `json:"remark"`
-	CreatedAt       time.Time              `json:"createdAt"`
-	UpdatedAt       time.Time              `json:"updatedAt"`
+	TwoFactorEnabled bool                   `json:"twoFactorEnabled"`
+	ID               uint                   `json:"id"`
+	UUID             string                 `json:"uuid"`
+	Username         string                 `json:"username"`
+	Email            string                 `json:"email"`
+	Phone            string                 `json:"phone"`
+	Nickname         string                 `json:"nickname"`
+	RealName         string                 `json:"realName"`
+	Avatar           string                 `json:"avatar"`
+	Status           model.UserStatus       `json:"status"`
+	StatusText       string                 `json:"statusText"`
+	IsActivated      bool                   `json:"isActivated"`
+	IsVerified       bool                   `json:"isVerified"` // 派生：EmailVerifiedAt 或 PhoneVerifiedAt 任一非空
+	EmailVerified    bool                   `json:"emailVerified"`
+	PhoneVerified    bool                   `json:"phoneVerified"`
+	EmailVerifiedAt  *time.Time             `json:"emailVerifiedAt"`
+	PhoneVerifiedAt  *time.Time             `json:"phoneVerifiedAt"`
+	HasPassword      bool                   `json:"hasPassword"` // 是否已设置密码（社交注册用户可能没有）
+	LoginCount       int64                  `json:"loginCount"`
+	LastLoginAt      *time.Time             `json:"lastLoginAt"`
+	LastLoginIP      string                 `json:"lastLoginIP"`
+	Attributes       map[string]interface{} `json:"attributes,omitempty"`
+	Remark           string                 `json:"remark"`
+	CreatedAt        time.Time              `json:"createdAt"`
+	UpdatedAt        time.Time              `json:"updatedAt"`
 }
 
 // UserListResponse 用户列表响应
@@ -164,30 +167,31 @@ func ConvertToUserResponse(user *model.User) UserResponse {
 	phoneVerified := user.PhoneVerified()
 
 	return UserResponse{
-		ID:              user.ID,
-		UUID:            user.UUID,
-		Username:        user.Username,
-		Email:           email,
-		Phone:           phone,
-		Nickname:        user.Nickname,
-		RealName:        user.RealName,
-		Avatar:          user.Avatar,
-		Status:          user.Status,
-		StatusText:      user.Status.String(),
-		IsActivated:     user.IsActivated,
-		IsVerified:      emailVerified || phoneVerified,
-		EmailVerified:   emailVerified,
-		PhoneVerified:   phoneVerified,
-		EmailVerifiedAt: user.EmailVerifiedAt,
-		PhoneVerifiedAt: user.PhoneVerifiedAt,
-		HasPassword:     user.PasswordHash != "",
-		LoginCount:      user.LoginCount,
-		LastLoginAt:     user.LastLoginAt,
-		LastLoginIP:     user.LastLoginIP,
-		Attributes:      user.Attributes,
-		Remark:          user.Remark,
-		CreatedAt:       user.CreatedAt,
-		UpdatedAt:       user.UpdatedAt,
+		TwoFactorEnabled: user.TwoFactorEnabled,
+		ID:               user.ID,
+		UUID:             user.UUID,
+		Username:         user.Username,
+		Email:            email,
+		Phone:            phone,
+		Nickname:         user.Nickname,
+		RealName:         user.RealName,
+		Avatar:           user.Avatar,
+		Status:           user.Status,
+		StatusText:       user.Status.String(),
+		IsActivated:      user.IsActivated,
+		IsVerified:       emailVerified || phoneVerified,
+		EmailVerified:    emailVerified,
+		PhoneVerified:    phoneVerified,
+		EmailVerifiedAt:  user.EmailVerifiedAt,
+		PhoneVerifiedAt:  user.PhoneVerifiedAt,
+		HasPassword:      user.PasswordHash != "",
+		LoginCount:       user.LoginCount,
+		LastLoginAt:      user.LastLoginAt,
+		LastLoginIP:      user.LastLoginIP,
+		Attributes:       user.Attributes,
+		Remark:           user.Remark,
+		CreatedAt:        user.CreatedAt,
+		UpdatedAt:        user.UpdatedAt,
 	}
 }
 

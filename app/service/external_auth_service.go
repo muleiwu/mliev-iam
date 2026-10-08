@@ -257,6 +257,9 @@ func (s *ExternalAuthService) BindWithExistingUser(ctx context.Context, continua
 	if err != nil {
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
+	if user.TwoFactorEnabled {
+		return &dto.SocialAuthCallbackResponse{User: user, SessionID: temp.SessionID, PendingContinuationID: continuationID, PendingContinuationCSRF: csrf}, nil
+	}
 	if err := s.consumeContinuation(ctx, continuationID); err != nil {
 		return nil, err
 	}
@@ -566,4 +569,34 @@ func (s *ExternalAuthService) storeJSON(key string, value any, ttl time.Duration
 		return err
 	}
 	return s.redis.Set(context.Background(), key, data, ttl).Err()
+}
+
+// CompleteTwoFactorBinding attaches a pending external identity only after the
+// local account has proved its second factor; no password is retained in Redis.
+func (s *ExternalAuthService) CompleteTwoFactorBinding(ctx context.Context, continuationID, csrf string, proof *TwoFactorProof) error {
+	if proof == nil {
+		return ErrTwoFactorRequired
+	}
+	temp, release, err := s.lockContinuation(ctx, continuationID, csrf)
+	if err != nil {
+		return err
+	}
+	defer release()
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.LockLoginUser(tx, proof.userID); err != nil {
+			return err
+		}
+		var user model.User
+		if err := tx.First(&user, proof.userID).Error; err != nil {
+			return err
+		}
+		if !user.CanLogin() || !proof.validFor(&user) {
+			return ErrTwoFactorExpired
+		}
+		return s.attachProfile(tx, temp.ConnectionID, user.ID, temp.Profile)
+	})
+	if err != nil {
+		return err
+	}
+	return s.consumeContinuation(ctx, continuationID)
 }
