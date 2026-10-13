@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
-	mlievpush "github.com/mliev-sdk/push-go"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -23,19 +23,21 @@ const (
 
 // VerificationCodeConfig 验证码服务配置
 type VerificationCodeConfig struct {
-	BaseURL        string
-	AppID          string
-	AppSecret      string
-	SMSChannelID   int
-	EmailChannelID int
-	SMSSignature   string
-	EmailSignature string
+	BaseURL               string
+	AppID                 string
+	AppSecret             string
+	SMSChannelID          int
+	EmailChannelID        int
+	SMSSignature          string
+	EmailSignature        string
+	SMSTemplateBindings   map[string]dto.PushTemplateBinding
+	EmailTemplateBindings map[string]dto.PushTemplateBinding
 }
 
 // VerificationCodeService 验证码服务
 type VerificationCodeService struct {
 	redis      *redis.Client
-	pushClient *mlievpush.Client
+	pushClient *PushService
 	config     *VerificationCodeConfig
 	keyPrefix  string
 	expiry     time.Duration
@@ -43,9 +45,9 @@ type VerificationCodeService struct {
 
 // NewVerificationCodeService 创建验证码服务
 func NewVerificationCodeService(redisClient *redis.Client, config *VerificationCodeConfig) *VerificationCodeService {
-	var pushClient *mlievpush.Client
+	var pushClient *PushService
 	if config != nil && config.BaseURL != "" && config.AppID != "" && config.AppSecret != "" {
-		pushClient = mlievpush.NewClient(config.BaseURL, config.AppID, config.AppSecret)
+		pushClient, _ = NewPushService(dto.PushCredentials{BaseURL: config.BaseURL, AppID: config.AppID, AppSecret: config.AppSecret})
 	}
 
 	return &VerificationCodeService{
@@ -53,12 +55,16 @@ func NewVerificationCodeService(redisClient *redis.Client, config *VerificationC
 		pushClient: pushClient,
 		config:     config,
 		keyPrefix:  "verification:code:",
-		expiry:     5 * time.Minute, // 验证码5分钟过期
+		expiry:     verificationCodeExpiry,
 	}
 }
 
 // GenerateCode 生成6位随机验证码
 func (s *VerificationCodeService) GenerateCode() (string, error) {
+	return generateVerificationCode()
+}
+
+func generateVerificationCode() (string, error) {
 	const digits = "0123456789"
 	code := make([]byte, 6)
 
@@ -81,13 +87,7 @@ func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string,
 	logVerificationCodeInfo(traceID, "发送验证码开始 type=%s receiver=%s session=%s", verificationType, MaskVerificationReceiver(receiver), shortVerificationLogValue(sessionID))
 
 	if s.pushClient == nil {
-		baseURL := ""
-		appID := ""
-		if s.config != nil {
-			baseURL = s.config.BaseURL
-			appID = s.config.AppID
-		}
-		logVerificationCodeError(traceID, "推送服务未配置 baseUrl=%s appId=%s", baseURL, MaskVerificationReceiver(appID))
+		logVerificationCodeError(traceID, "推送服务未配置或连接配置无效")
 		return fmt.Errorf("推送服务未配置")
 	}
 
@@ -126,13 +126,16 @@ func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string,
 
 	// 发送验证码
 	var channelID int
-	SignatureName := ""
+	signatureName := ""
+	var bindings map[string]dto.PushTemplateBinding
 	if verificationType == VerificationTypePhone {
 		channelID = s.config.SMSChannelID
-		SignatureName = s.config.SMSSignature
+		signatureName = s.config.SMSSignature
+		bindings = s.config.SMSTemplateBindings
 	} else {
 		channelID = s.config.EmailChannelID
-		SignatureName = s.config.EmailSignature
+		signatureName = s.config.EmailSignature
+		bindings = s.config.EmailTemplateBindings
 	}
 	if channelID <= 0 {
 		s.redis.Del(ctx, codeKey)
@@ -140,19 +143,9 @@ func (s *VerificationCodeService) SendCode(ctx context.Context, receiver string,
 		logVerificationCodeError(traceID, "推送渠道未配置 type=%s channelId=%d", verificationType, channelID)
 		return fmt.Errorf("%s验证码推送渠道未配置", verificationTypeLabel(verificationType))
 	}
-	logVerificationCodeInfo(traceID, "调用推送服务 type=%s receiver=%s channelId=%d signatureConfigured=%t", verificationType, MaskVerificationReceiver(receiver), channelID, SignatureName != "")
+	logVerificationCodeInfo(traceID, "调用推送服务 type=%s receiver=%s channelId=%d signatureConfigured=%t", verificationType, MaskVerificationReceiver(receiver), channelID, signatureName != "")
 
-	req := &mlievpush.SendMessageRequest{
-		ChannelID:     channelID,
-		SignatureName: SignatureName,
-		Receiver:      receiver,
-		TemplateParams: map[string]string{
-			"code":        code,
-			"expire_time": "5",
-		},
-	}
-
-	_, err = s.pushClient.SendMessage(ctx, req)
+	_, err = s.pushClient.SendCode(ctx, channelID, signatureName, receiver, bindings, code, s.expiry)
 	if err != nil {
 		// 发送失败时删除存储的验证码
 		s.redis.Del(ctx, codeKey)

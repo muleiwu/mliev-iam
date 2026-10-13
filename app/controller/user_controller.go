@@ -104,6 +104,9 @@ func (uc UserController) ValidateLogin(c httpInterfaces.RouterContextInterface) 
 	}
 
 	if err := completeUserLogin(c, response, req.RememberMe); err != nil {
+		if respondTwoFactorRequired(c, err) {
+			return
+		}
 		uc.Error(c, 500, "创建登录会话失败")
 		return
 	}

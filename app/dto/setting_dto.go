@@ -56,30 +56,24 @@ type UpdateRegisterFieldsRequest struct {
 
 // PushSettings 推送服务配置
 type PushSettings struct {
-	BaseURL        string `json:"baseUrl"`
-	AppID          string `json:"appId"`
-	AppSecret      string `json:"appSecret"`
-	SMSChannelID   int    `json:"smsChannelId"`
-	EmailChannelID int    `json:"emailChannelId"`
-	SMSSignature   string `json:"smsSignature"`
-	EmailSignature string `json:"emailSignature"`
+	BaseURL               string                         `json:"baseUrl"`
+	AppID                 string                         `json:"appId"`
+	AppSecret             string                         `json:"appSecret"`
+	SMSChannelID          int                            `json:"smsChannelId"`
+	EmailChannelID        int                            `json:"emailChannelId"`
+	SMSSignature          string                         `json:"smsSignature"`
+	EmailSignature        string                         `json:"emailSignature"`
+	SMSTemplateBindings   map[string]PushTemplateBinding `json:"smsTemplateBindings"`
+	EmailTemplateBindings map[string]PushTemplateBinding `json:"emailTemplateBindings"`
 }
 
 // UpdatePushSettingsRequest 更新推送服务配置请求
-type UpdatePushSettingsRequest struct {
-	BaseURL        string `json:"baseUrl"`
-	AppID          string `json:"appId"`
-	AppSecret      string `json:"appSecret"`
-	SMSChannelID   int    `json:"smsChannelId"`
-	EmailChannelID int    `json:"emailChannelId"`
-	SMSSignature   string `json:"smsSignature"`
-	EmailSignature string `json:"emailSignature"`
-}
+type UpdatePushSettingsRequest PushSettings
 
 // StorageSettings 对象存储（S3 兼容）配置
 type StorageSettings struct {
 	Enabled     bool   `json:"enabled"`
-	Endpoint    string `json:"endpoint"`    // S3 兼容 endpoint，留空表示 AWS 官方
+	Endpoint    string `json:"endpoint"` // S3 兼容 endpoint，留空表示 AWS 官方
 	Region      string `json:"region"`
 	Bucket      string `json:"bucket"`
 	AccessKey   string `json:"accessKey"`

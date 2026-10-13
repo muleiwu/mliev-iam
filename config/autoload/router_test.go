@@ -99,6 +99,17 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	}
 }
 
+func TestPushSettingsRoutesRequireAdminAuth(t *testing.T) {
+	router := newRecordingRouter()
+	Router{}.InitConfig()["http.router"].(func(httpInterfaces.RouterInterface))(router)
+	for _, path := range []string{"/channels/query", "/channels/:id/query", "/test"} {
+		router.assertRoute(t, "POST", "/api/admin/settings/push"+path)
+	}
+	if router.middlewarePrefixes["/api/admin/settings"] == 0 {
+		t.Fatal("push settings routes must require AdminAuthMiddleware")
+	}
+}
+
 type recordingRouter struct {
 	prefix             string
 	routes             map[string]bool

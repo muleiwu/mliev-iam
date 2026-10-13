@@ -69,6 +69,7 @@ func (receiver Router) InitConfig() map[string]any {
 
 			adminAuthProtected := admin.Group("/auth")
 			adminAuthProtected.Use(middleware.AdminAuthMiddleware())
+			adminAuthProtected.POST("/2fa/reauthenticate", controller.TwoFactorController{}.Reauthenticate)
 			adminAuthProtected.GET("/profile", AdminController.AuthController{}.GetAdminProfile)
 
 			// 管理员用户管理
@@ -79,6 +80,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSessions.GET("", controller.LoginSessionController{}.ListAdmin)
 			adminSessions.POST("/:sid/revoke", controller.LoginSessionController{}.RevokeAdmin)
 			adminUsers.POST("/:id/sessions/revoke-all", controller.LoginSessionController{}.RevokeAllAdmin)
+			adminUsers.POST("/:id/2fa/reset", controller.TwoFactorController{}.AdminReset)
 			adminUsers.POST("", AdminController.UserController{}.CreateUser)
 			adminUsers.GET("", AdminController.UserController{}.GetUserList)
 			adminUsers.GET("/:id", AdminController.UserController{}.GetUser)
@@ -244,6 +246,9 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSettings.PUT("/register-fields/config", AdminController.SettingController{}.UpdateRegisterFieldsSettings)
 			adminSettings.GET("/push/config", AdminController.SettingController{}.GetPushSettings)
 			adminSettings.PUT("/push/config", AdminController.SettingController{}.UpdatePushSettings)
+			adminSettings.POST("/push/channels/query", AdminController.PushController{}.ListChannels)
+			adminSettings.POST("/push/channels/:id/query", AdminController.PushController{}.GetChannel)
+			adminSettings.POST("/push/test", AdminController.PushController{}.Test)
 			adminSettings.GET("/captcha/bindings", AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings)
 			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
 			adminSettings.GET("/storage/config", AdminController.SettingController{}.GetStorageSettings)
@@ -294,9 +299,21 @@ func (receiver Router) InitConfig() map[string]any {
 			userPublic := api.Group("/user")
 			userPublic.POST("/login", controller.UserController{}.ValidateLogin)
 
+			twoFactor := api.Group("/2fa/challenges")
+			twoFactor.GET("/:id", controller.TwoFactorController{}.Get)
+			twoFactor.POST("/:id/send-code", controller.TwoFactorController{}.Send)
+			twoFactor.POST("/:id/verify", controller.TwoFactorController{}.Verify)
+			twoFactor.POST("/:id/cancel", controller.TwoFactorController{}.Cancel)
+
 			// 受保护：/api/user/*
 			userAuth := api.Group("/user")
 			userAuth.Use(middleware.UserAuthMiddleware())
+			userAuth.GET("/2fa", controller.TwoFactorController{}.Status)
+			userAuth.POST("/2fa/reauthenticate", controller.TwoFactorController{}.Reauthenticate)
+			userAuth.POST("/2fa/enroll", controller.TwoFactorController{}.Enroll)
+			userAuth.POST("/2fa/disable", controller.TwoFactorController{}.Mutate)
+			userAuth.POST("/2fa/methods/:method/remove", controller.TwoFactorController{}.Mutate)
+			userAuth.POST("/2fa/recovery-codes/regenerate", controller.TwoFactorController{}.Mutate)
 			userAuth.GET("/sessions", controller.LoginSessionController{}.ListMine)
 			userAuth.POST("/sessions/:sid/revoke", controller.LoginSessionController{}.RevokeMine)
 			userAuth.POST("/sessions/revoke-others", controller.LoginSessionController{}.RevokeOthers)

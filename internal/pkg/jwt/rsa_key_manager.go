@@ -266,6 +266,11 @@ func (m *RSAKeyManager) GetJWK() (map[string]interface{}, error) {
 
 // SignToken 使用私钥签名JWT token
 func (m *RSAKeyManager) SignToken(claims jwt.Claims) (string, error) {
+	return m.SignTokenWithType(claims, "JWT")
+}
+
+// SignTokenWithType sets the protected token type before signing.
+func (m *RSAKeyManager) SignTokenWithType(claims jwt.Claims, tokenType string) (string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -275,6 +280,7 @@ func (m *RSAKeyManager) SignToken(claims jwt.Claims) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = m.keyID
+	token.Header["typ"] = tokenType
 
 	tokenString, err := token.SignedString(m.privateKey)
 	if err != nil {

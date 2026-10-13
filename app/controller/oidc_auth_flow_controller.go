@@ -76,6 +76,9 @@ type RegisterResponse struct {
 
 // LoginResponse 登录响应
 type LoginResponse struct {
+	RememberMe                bool                      `json:"rememberMe"`
+	RequiresTwoFactor         bool                      `json:"requiresTwoFactor,omitempty"`
+	TwoFactorChallenge        *dto.TwoFactorChallenge   `json:"twoFactorChallenge,omitempty"`
 	Success                   bool                      `json:"success"`
 	Message                   string                    `json:"message"`
 	Error                     *dto.AuthorizationFailure `json:"error,omitempty"`
@@ -427,6 +430,15 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		}, nil
 	}
 
+	if session.RegistrationDecision != service.OIDCRegistrationChoiceCurrent {
+		if err := beginTwoFactorLogin(ctx, user, "oidc", sessionID, rememberMe); err != nil {
+			var pending *twoFactorPending
+			if errors.As(err, &pending) {
+				return &LoginResponse{RequiresTwoFactor: true, TwoFactorChallenge: pending.challenge, Message: "请完成二次验证"}, nil
+			}
+			return nil, err
+		}
+	}
 	// 在改变当前浏览器的账号前，先准备新账号的全部凭据。
 	inheritSID := ""
 	if session.RegistrationDecision == service.OIDCRegistrationChoiceCurrent {
@@ -450,15 +462,19 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		}
 	}()
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
-	issuer := utils.GetBaseURL(ctx, "/oidc")
+	issuer := utils.GetBaseURL(ctx, fmt.Sprintf("/oidc/%s", app.UUID))
 	scopes := authService.ParseScopes(session.Scope)
 	tokenResponse, err := authService.GenerateTokens(app, user.ID, scopes, session.Nonce, issuer, loginSID)
 	if err != nil {
+		if errors.Is(err, constants.ErrAccessDenied) || errors.Is(err, constants.ErrInvalidScope) {
+			return nil, fmt.Errorf("您没有申请此授权范围的权限，请联系应用管理员: %w", err)
+		}
 		return nil, fmt.Errorf("生成 Token 失败: %w", err)
 	}
 
 	// 标记会话为已认证
-	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID, loginSID); err != nil {
+	expectedChallenge, _ := ctx.Get("two_factor_challenge_id").(string)
+	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID, loginSID, expectedChallenge); err != nil {
 		_ = dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(tokenResponse.RefreshToken)
 		return nil, fmt.Errorf("更新会话失败: %w", err)
 	}
@@ -494,8 +510,9 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 	missingFields := c.checkMissingUserInfo(session.Scope, user)
 
 	response := LoginResponse{
-		Success: true,
-		Message: "登录成功",
+		RememberMe: rememberMe,
+		Success:    true,
+		Message:    "登录成功",
 		UserInfo: &struct {
 			ID       uint   `json:"id"`
 			Username string `json:"username"`
@@ -579,6 +596,7 @@ func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInte
 		}
 	}
 
+	ctx.Set("primary_auth_method", req.Type)
 	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, err.Error())
@@ -1010,7 +1028,7 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx httpInterfaces.RouterContextInte
 	response.Client.Description = app.Description
 
 	// 解析scopes并提供描述
-	response.Scopes = c.parseScopesWithDescription(session.Scope)
+	response.Scopes = c.parseScopesWithDescription(session.Scope, app)
 
 	response.User.ID = user.ID
 	response.User.Username = user.Username
@@ -1045,7 +1063,7 @@ func (c OIDCAuthFlowController) checkMissingUserInfo(scopeStr string, user *dto.
 }
 
 // parseScopesWithDescription 解析scopes并返回带描述的列表
-func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []struct {
+func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string, apps ...*model.Application) []struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 } {
@@ -1067,6 +1085,11 @@ func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string) []st
 	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
 	for _, scope := range scopeList {
 		description, ok := scopeDescriptions[scope]
+		if len(apps) > 0 {
+			if custom := service.OIDCScopeDescription(apps[0], scope); custom != "" {
+				description, ok = custom, true
+			}
+		}
 		if !ok {
 			description = "访问 " + scope + " 权限"
 		}
@@ -1365,6 +1388,19 @@ func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContext
 		return
 	}
 
+	if currentUser.TwoFactorEnabled {
+		factors, err := dao.NewTwoFactorDAO(helper.GetDatabase()).Methods(currentUser.ID)
+		if err != nil {
+			c.Error(ctx, 500, "读取安全设置失败")
+			return
+		}
+		for _, factor := range factors {
+			if (factor.Method == "email" && req.Email != "" && req.Email != factor.Receiver) || (factor.Method == "phone" && req.Phone != "" && req.Phone != factor.Receiver) {
+				c.Error(ctx, 400, "请先在个人中心安全设置中验证身份并修改已绑定的联系方式")
+				return
+			}
+		}
+	}
 	updateReq := &dto.UpdateUserRequest{}
 
 	// 只更新用户提供的字段，未提供的保留原值；
@@ -1516,7 +1552,7 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 	}
 
 	authService := service.NewOIDCAuthorizationService(helper.GetDatabase())
-	issuer := utils.GetBaseURL(ctx, "/oidc")
+	issuer := utils.GetBaseURL(ctx, fmt.Sprintf("/oidc/%s", app.UUID))
 	newTokenResponse, err := authService.RotateLoginToken(oldToken, app, "", issuer)
 	if err != nil {
 		c.Error(ctx, 401, "刷新令牌无效或会话已撤销")
@@ -1738,9 +1774,10 @@ func validSwitchAccountCSRF(session *service.OIDCSession, csrfToken string) bool
 
 // FlowStatusResponse 流程状态响应
 type FlowStatusResponse struct {
-	SessionID string `json:"sessionId"`
-	Status    string `json:"status"` // needs_registration_confirmation | needs_login | needs_consent | needs_profile | error
-	Prompt    string `json:"prompt,omitempty"`
+	TwoFactorChallenge *dto.TwoFactorChallenge `json:"twoFactorChallenge,omitempty"`
+	SessionID          string                  `json:"sessionId"`
+	Status             string                  `json:"status"` // needs_registration_confirmation | needs_login | needs_consent | needs_profile | error
+	Prompt             string                  `json:"prompt,omitempty"`
 	// CsrfToken 在注册意图确认和授权确认状态下下发。
 	CsrfToken     string                    `json:"csrfToken,omitempty"`
 	AutoApprove   bool                      `json:"autoApprove,omitempty"`
@@ -1865,6 +1902,19 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		}
 	}
 
+	if session.PendingTwoFactorID != "" {
+		svc := twoFactorService()
+		tr, pendingErr := svc.Read(ctx.Request().Context(), session.PendingTwoFactorID, twoFactorBinding(ctx, false))
+		if pendingErr == nil {
+			view, viewErr := svc.View(ctx.Request().Context(), tr)
+			if viewErr != nil {
+				c.Error(ctx, 500, "读取二次验证失败")
+				return
+			}
+			c.Success(ctx, FlowStatusResponse{SessionID: sessionID, Status: "needs_two_factor", Client: clientInfo, Prompt: session.Prompt, TwoFactorChallenge: view})
+			return
+		}
+	}
 	// 5. 如果未认证，返回 needs_login
 	if !session.IsAuthenticated || session.UserID == nil {
 		c.Success(ctx, FlowStatusResponse{
@@ -1942,7 +1992,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 	}
 
 	// 8. 信息完整，需要授权确认
-	scopes := c.parseScopesForFlow(session.Scope)
+	scopes := c.parseScopesForFlow(session.Scope, app)
 	c.Success(ctx, FlowStatusResponse{
 		SessionID:   sessionID,
 		Status:      "needs_consent",
@@ -1956,7 +2006,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 }
 
 // parseScopesForFlow 解析 scope 并返回流程状态所需的描述列表
-func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string) []FlowStatusScope {
+func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string, apps ...*model.Application) []FlowStatusScope {
 	scopeDescriptions := map[string]string{
 		"openid":         "验证您的身份",
 		"profile":        "访问您的基本资料（昵称、头像等）",
@@ -1970,6 +2020,11 @@ func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string) []FlowStatus
 	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
 	for _, scope := range scopeList {
 		desc, ok := scopeDescriptions[scope]
+		if len(apps) > 0 {
+			if custom := service.OIDCScopeDescription(apps[0], scope); custom != "" {
+				desc, ok = custom, true
+			}
+		}
 		if !ok {
 			desc = "访问 " + scope + " 权限"
 		}

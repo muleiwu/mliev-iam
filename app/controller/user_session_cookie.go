@@ -35,6 +35,16 @@ func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.User
 		}
 		sid = transaction.LoginSessionID
 	}
+	kind := "account"
+	if strings.Contains(ctx.Request().URL.Path, "external") {
+		kind = "external"
+	}
+	pendingBinding, _ := ctx.Get("two_factor_continuation").(string)
+	if sid == "" || pendingBinding != "" {
+		if err := beginTwoFactorLogin(ctx, user, kind, oidcID, rememberMe); err != nil {
+			return err
+		}
+	}
 	token, maxAge, sid, err := prepareUserSessionCookie(ctx, user, rememberMe, sid)
 	if err != nil {
 		return err
@@ -103,7 +113,11 @@ func prepareUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *d
 		case strings.Contains(path, "register"):
 			method = "registration"
 		}
-		session, createErr := service.NewLoginSessionService(helper.GetDatabase()).Create(user.ID, method, ctx.ClientIP(), ctx.GetHeader("User-Agent"), time.Now().Add(jwtService.GetConfig().AccessTokenTTL))
+		if primary, ok := ctx.Get("primary_auth_method").(string); ok {
+			method = primary
+		}
+		proof, _ := ctx.Get("two_factor_proof").(*service.TwoFactorProof)
+		session, createErr := service.NewLoginSessionService(helper.GetDatabase()).CreateWithProof(user.ID, method, ctx.ClientIP(), ctx.GetHeader("User-Agent"), time.Now().Add(jwtService.GetConfig().AccessTokenTTL), proof)
 		if createErr != nil {
 			return "", 0, "", createErr
 		}

@@ -103,6 +103,12 @@ func (s *OIDCAuthorizationService) ProcessAuthorize(req *dto.AuthorizeRequest, u
 	if _, err := dao.NewLoginSessionDAO(s.db).Valid(req.LoginSessionID, userID); err != nil {
 		return s.errorResponse("login_required", "登录会话已失效，请重新登录", req.State), nil
 	}
+	if _, err := s.evaluateOIDCGrant(app, userID, scopes, false); err != nil {
+		if errors.Is(err, constants.ErrServerError) {
+			return s.errorResponse("server_error", "授权检查失败", req.State), nil
+		}
+		return s.errorResponse(err.Error(), "您没有申请此授权范围的权限", req.State), nil
+	}
 	// 7. 处理不同的响应类型
 	responseType := model.ResponseType(req.ResponseType)
 	switch responseType {
@@ -160,7 +166,8 @@ func (s *OIDCAuthorizationService) ExchangeCodeForToken(req *dto.TokenRequest, i
 
 // generateTokensFromCode 基于已消费的授权码生成 token，并设置 authorization_code_id 关联
 func (s *OIDCAuthorizationService) generateTokensFromCode(app *model.Application, authCode *model.AuthorizationCode, issuer string) (*dto.TokenResponse, error) {
-	return s.generateSessionTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer, authCode.LoginSessionID, &authCode.ID)
+	result, err := s.generateSessionTokens(app, authCode.UserID, authCode.Scopes, authCode.Nonce, issuer, authCode.LoginSessionID, &authCode.ID)
+	return result, oidcGrantError(err)
 }
 
 // ExchangeClientCredentials 客户端凭据流程
@@ -183,6 +190,16 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 	}
 
 	// 4. 解析请求的作用域
+	config, err := model.DecodeOIDCAuthorizationConfig(app.ProtocolConfig)
+	if err != nil {
+		return nil, constants.ErrServerError
+	}
+	if handler.IsPublicClient(app) {
+		return nil, constants.ErrUnauthorizedClient
+	}
+	if config.ScopeAuthorization.Enabled && req.Scope == "" {
+		return nil, constants.ErrInvalidScope
+	}
 	scopes := s.parseScopes(req.Scope)
 	if len(scopes) == 0 {
 		// 如果没有指定scope，使用应用配置的默认scopes
@@ -202,8 +219,13 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		}
 	}
 
+	grant, err := s.evaluateOIDCGrant(app, 0, scopes, true)
+	if err != nil {
+		return nil, err
+	}
+	app, scopes = grant.App, grant.Scopes
 	// 6. 生成 JWT 格式的访问令牌（不含refresh_token和id_token）
-	accessToken, err := s.generateClientCredentialsJWTAccessToken(app, scopes, issuer)
+	accessToken, err := s.generateClientCredentialsJWTAccessToken(app, scopes, issuer, grant.Roles)
 	if err != nil {
 		return nil, constants.ErrServerError
 	}
@@ -218,7 +240,7 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		UserID:      0, // 客户端凭据流程不关联用户
 		Scopes:      scopes,
 		ExpiresAt:   time.Now().Add(time.Duration(tokenLifetime) * time.Second),
-		Attributes:  make(map[string]interface{}),
+		Attributes:  grant.attributes(),
 	}
 
 	// 保存令牌
@@ -302,7 +324,7 @@ func (s *OIDCAuthorizationService) RotateLoginToken(old *model.OIDCToken, app *m
 			return constants.ErrInvalidGrant
 		}
 		result, err = NewOIDCAuthorizationService(tx).generateTokensLocked(app, current.UserID, scopes, "", issuer, current.LoginSessionID, current.AuthorizationCodeID)
-		return err
+		return oidcGrantError(err)
 	})
 	return result, err
 }
@@ -464,7 +486,11 @@ func (s *OIDCAuthorizationService) handleImplicitFlow(req *dto.AuthorizeRequest,
 	// 隐式流程直接生成访问令牌
 	tokenResponse, err := s.GenerateTokens(app, user.ID, scopes, req.Nonce, issuer, req.LoginSessionID)
 	if err != nil {
-		return s.errorResponse("server_error", "服务器错误", req.State), nil
+		code := "server_error"
+		if errors.Is(err, constants.ErrAccessDenied) || errors.Is(err, constants.ErrInvalidScope) {
+			code = err.Error()
+		}
+		return s.errorResponse(code, "无法授予请求的授权范围", req.State), nil
 	}
 
 	// 注意：隐式流程不返回刷新令牌
@@ -483,11 +509,20 @@ func (s *OIDCAuthorizationService) handleImplicitIDTokenFlow(req *dto.AuthorizeR
 			return err
 		}
 		var err error
-		idToken, err = NewOIDCAuthorizationService(tx).generateIDToken(app, user, scopes, req.Nonce, issuer)
+		txService := NewOIDCAuthorizationService(tx)
+		grant, policyErr := txService.evaluateOIDCGrant(app, user.ID, scopes, false)
+		if policyErr != nil {
+			return policyErr
+		}
+		idToken, err = txService.generateIDTokenWithHashes(grant.App, user, grant.Scopes, req.Nonce, issuer, "", "", grant)
 		return err
 	})
 	if err != nil {
-		return s.errorResponse("server_error", "服务器错误", req.State), nil
+		code := "server_error"
+		if errors.Is(err, constants.ErrAccessDenied) || errors.Is(err, constants.ErrInvalidScope) {
+			code = err.Error()
+		}
+		return s.errorResponse(code, "无法授予请求的授权范围", req.State), nil
 	}
 
 	return &dto.AuthorizeResponse{
@@ -636,7 +671,12 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		return nil, constants.ErrInvalidGrant
 	}
 
-	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer)
+	grant, err := s.evaluateOIDCGrant(app, userID, scopes, false)
+	if err != nil {
+		return nil, err
+	}
+	app, scopes = grant.App, grant.Scopes
+	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer, grant)
 	if err != nil {
 		return nil, fmt.Errorf("生成访问令牌失败: %w", err)
 	}
@@ -655,12 +695,12 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		Scopes:              scopes,
 		RefreshToken:        &refreshToken,
 		ExpiresAt:           time.Now().Add(time.Duration(tokenLifetime) * time.Second),
-		Attributes:          make(map[string]interface{}),
+		Attributes:          grant.attributes(),
 	}
 
 	// 生成 ID 令牌（若 scope 包含 openid），并写入 at_hash
 	if s.hasScope(scopes, "openid") {
-		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "")
+		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "", grant)
 		if err != nil {
 			return nil, err
 		}
@@ -704,6 +744,7 @@ func (s *OIDCAuthorizationService) generateIDToken(app *model.Application, user 
 func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 	app *model.Application, user *model.User, scopes []string, nonce string, issuer string,
 	accessToken, authCode string,
+	grants ...*oidcGrant,
 ) (string, error) {
 	// 获取全局配置
 	env := helper.GetEnv()
@@ -755,7 +796,12 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 	}
 
 	// 5. 生成ID Token（包含 at_hash / c_hash，若上层提供）
-	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, nil, accessToken, authCode)
+	var roles *model.OIDCRoleSnapshot
+	if len(grants) > 0 && grants[0] != nil {
+		roles = grants[0].Roles
+		idTokenService = idTokenService.withDepartmentClaims(grants[0].Departments)
+	}
+	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, nil, accessToken, authCode, roles)
 	if err != nil {
 		return "", fmt.Errorf("生成ID Token失败: %w", err)
 	}
@@ -764,7 +810,7 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 }
 
 // generateJWTAccessToken 生成 JWT 格式的 Access Token
-func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string) (string, error) {
+func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application, userID uint, scopes []string, issuer string, grants ...*oidcGrant) (string, error) {
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
 		// 只有应用未配置 tokenLifetime 时才回退到全局配置。
@@ -824,7 +870,12 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 	}
 
 	// 6. 生成 JWT Access Token
-	accessToken, err := tokenService.GenerateAccessToken(user, clientID, scopes)
+	var roles *model.OIDCRoleSnapshot
+	if len(grants) > 0 && grants[0] != nil {
+		roles = grants[0].Roles
+		tokenService = tokenService.withDepartmentClaims(grants[0].Departments)
+	}
+	accessToken, err := tokenService.GenerateAccessToken(user, clientID, scopes, roles)
 	if err != nil {
 		return "", fmt.Errorf("生成 Access Token 失败: %w", err)
 	}
@@ -833,7 +884,7 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 }
 
 // generateClientCredentialsJWTAccessToken 生成客户端凭据流程的 JWT Access Token
-func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string) (string, error) {
+func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
 		// 只有应用未配置 tokenLifetime 时才回退到全局配置。
@@ -887,7 +938,7 @@ func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *
 	}
 
 	// 5. 生成客户端凭据的 JWT Access Token
-	accessToken, err := tokenService.GenerateClientCredentialsAccessToken(clientID, scopes)
+	accessToken, err := tokenService.GenerateClientCredentialsAccessToken(clientID, scopes, roleSnapshots...)
 	if err != nil {
 		return "", fmt.Errorf("生成 Access Token 失败: %w", err)
 	}
@@ -936,7 +987,11 @@ func (s *OIDCAuthorizationService) parseScopes(scopeStr string) []string {
 	if scopeStr == "" {
 		return []string{}
 	}
-	return strings.Split(scopeStr, " ")
+	scopes, err := model.ParseOIDCScopes(scopeStr)
+	if err != nil {
+		return []string{""}
+	} // Invalid sentinel is rejected at every authorization boundary.
+	return scopes
 }
 
 // ParseScopes 公开的解析scopes方法

@@ -83,7 +83,7 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 		return errors.New("客户端类型必须是 confidential 或 public")
 	}
 
-	return nil
+	return h.validateAuthorizationConfig(config)
 }
 
 // PrepareConfig 准备OIDC配置（生成ClientID；机密客户端额外生成ClientSecret）
@@ -399,28 +399,23 @@ func (h *OIDCProtocolHandler) ValidateResponseType(app *model.Application, respo
 
 // ValidateScopes 验证作用域
 func (h *OIDCProtocolHandler) ValidateScopes(app *model.Application, requestedScopes []string) error {
-	config := app.ProtocolConfig
-	scopes, ok := config["scopes"].([]interface{})
-	if !ok {
-		return errors.New("作用域配置错误")
+	c, err := model.DecodeOIDCAuthorizationConfig(app.ProtocolConfig)
+	if err != nil {
+		return err
 	}
-
-	// 转换为字符串数组
-	availableScopes := make(map[string]bool)
+	scopes, err := model.NormalizeOIDCScopes(requestedScopes)
+	if err != nil {
+		return err
+	}
+	allowed := map[string]bool{}
+	for _, scope := range c.Scopes {
+		allowed[scope] = true
+	}
 	for _, scope := range scopes {
-		scopeStr, ok := scope.(string)
-		if ok {
-			availableScopes[scopeStr] = true
+		if !allowed[scope] {
+			return fmt.Errorf("应用不支持作用域: %s", scope)
 		}
 	}
-
-	// 验证请求的作用域
-	for _, requestedScope := range requestedScopes {
-		if !availableScopes[requestedScope] {
-			return fmt.Errorf("应用不支持作用域: %s", requestedScope)
-		}
-	}
-
 	return nil
 }
 

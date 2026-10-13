@@ -2,6 +2,10 @@
 
 本项目已集成了完整的OIDC (OpenID Connect) 服务能力，支持标准的OAuth 2.0 + OIDC协议，可以作为身份提供商(Identity Provider, IdP)为其他应用提供单点登录(SSO)服务。
 
+## 角色、部门与细粒度授权
+
+支持按应用配置人员、部门、角色的 scope 授予规则，独立配置机器权限，并选择将角色或用户部门输出到 Access Token、ID Token 或 UserInfo。部门输出包含有效上级，按应用白名单筛选，并与角色分别保存签发快照。详情与 Pagnode 接入示例见 [OIDC 角色与 Scope 授权](docs/oidc-authorization.zh-CN.md)。Access Token 的 JWT 头使用 `typ: at+jwt`，ID Token 仍为 `JWT`。
+
 ## 功能特性
 
 ### 核心OIDC功能
@@ -30,6 +34,10 @@
 - ✅ 授权确认页面
 - ✅ 可嵌入 Iframe 的组件支持
 - ✅ 基于 Redis 的会话管理
+
+## 浏览器跨域接入
+
+Discovery/JWKS 支持无 Cookie 的公开跨域读取；Token、UserInfo、Revoke、Introspect 根据应用已登记的 HTTP/HTTPS 回调 Origin 放行，管理端继续使用全局白名单。配置说明、回归测试与 Kubernetes 发布后检查见 [OIDC CORS 接入与验收](docs/oidc-cors.zh-CN.md)。
 
 ## API 端点
 

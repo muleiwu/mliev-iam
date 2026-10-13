@@ -21,6 +21,10 @@ type LoginSessionService struct{ db *gorm.DB }
 func NewLoginSessionService(db *gorm.DB) *LoginSessionService { return &LoginSessionService{db: db} }
 
 func (s *LoginSessionService) Create(userID uint, method, ip, userAgent string, until time.Time) (*model.LoginSession, error) {
+	return s.CreateWithProof(userID, method, ip, userAgent, until, nil)
+}
+
+func (s *LoginSessionService) CreateWithProof(userID uint, method, ip, userAgent string, until time.Time, proof *TwoFactorProof) (*model.LoginSession, error) {
 	device, browser, os := loginDevice(userAgent)
 	now := time.Now()
 	session := &model.LoginSession{ID: uuid.NewString(), UserID: userID, LoginMethod: method, LoginIP: ip, LastIP: ip, Device: device, Browser: browser, OS: os, CreatedAt: now, LastActiveAt: now, ExpiresAt: until}
@@ -34,6 +38,17 @@ func (s *LoginSessionService) Create(userID uint, method, ip, userAgent string, 
 		}
 		if !user.CanLogin() {
 			return dao.ErrLoginSessionInvalid
+		}
+		if user.TwoFactorEnabled && !proof.validFor(&user) {
+			return ErrTwoFactorRequired
+		}
+		if proof != nil && !proof.validFor(&user) {
+			return ErrTwoFactorExpired
+		}
+		session.TwoFactorVersion = user.TwoFactorVersion
+		if proof != nil {
+			session.TwoFactorMethod = proof.method
+			session.TwoFactorAt = &proof.at
 		}
 		session.CreatedAt = time.Now()
 		session.LastActiveAt = session.CreatedAt

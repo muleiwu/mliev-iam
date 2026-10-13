@@ -1,6 +1,19 @@
 # 系统配置
 app:
   installed: false  # 系统是否已安装
+  # 管理 API 与登录页面接口的 CORS 白名单（精确匹配协议、主机、端口）。
+  # OIDC Discovery/JWKS 公开无 Cookie 读取；协议 API 自动信任应用回调地址的 Origin。
+  cors:
+    allowed_origins:
+      - "http://localhost:5173"
+      - "http://localhost:5174"
+      - "http://localhost:5777"
+      - "http://localhost:5211"
+    allowed_methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    allowed_headers: ["Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Trace-Id"]
+    expose_headers: ["Content-Length", "Content-Type", "X-Trace-Id"]
+    allow_credentials: true  # 为 true 时，allowed_origins 不能包含 "*"
+    max_age: 86400
 
 # 服务器配置
 server:
@@ -83,21 +96,6 @@ shortlink:
 rate_limit:
   requests_per_minute: 100
   burst: 10
-
-# CORS 配置
-cors:
-  allow_origins:
-    - "*"
-  allow_methods:
-    - "GET"
-    - "POST"
-    - "PUT"
-    - "DELETE"
-    - "OPTIONS"
-  allow_headers:
-    - "Origin"
-    - "Content-Type"
-    - "Authorization"
 
 # OIDC 配置
 oidc:

@@ -12,8 +12,13 @@
 确认协议后在提交的 `values` 中设置 `setupkit.agreements.mit-license` 为当前协议的 `digest`。
 缺失、布尔值或过期摘要会被后端拒绝；同意信息不写入配置或安装状态。
 
-支持 MySQL、PostgreSQL、SQLite；Redis 必选。管理员密码至少 12 个字符，
+支持独立选择 MySQL、MariaDB、PostgreSQL、SQLite，默认 MySQL；Redis 必选。管理员密码至少 12 个字符，
 保留姓名与可选手机号，使用系统现有 Argon2id 哈希。
+
+选择 MariaDB 时，安装 API 使用 `database.driver: mariadb` 和 `database.mariadb.*`
+连接字段。保存后的配置保留 `database.driver: mariadb`，连接参数写入 `database.host`、
+`database.port` 等通用字段；连接检查、安装迁移和运行时均复用 MySQL 驱动。
+环境变量 `DB_DRIVER=mariadb` 同样支持，运行时映射不会改写配置文件。
 
 安装检查与正式运行均支持 `database.tls`、`database.charset`、`redis.username`、
 `redis.tls`。TLS 使用系统 CA 验证证书与主机名，不支持跳过验证。
