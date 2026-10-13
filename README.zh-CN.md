@@ -87,8 +87,10 @@ docker run -p 8080:8080 mliev-iam
 ### 首次安装
 
 首次启动不要求数据库和 Redis 已配置就绪：访问 `/install/`，按内嵌向导
-（协议同意 → 数据库 → Redis → 管理员）完成安装。向导由二进制内的 setup-kit 提供，
-无需单独的安装前端。API 安装方式、TLS 选项与备份说明详见
+（协议同意 → 数据库 → Redis → 管理员）完成安装。向导由二进制内的 setup-kit v0.2.0 提供，
+无需单独的安装前端。通过安装专用 `IAM_SETUP_DB_*`、`IAM_SETUP_REDIS_*`、`IAM_SETUP_ADMIN_*`
+环境变量可预填字段（含密码），页面仍可修改，安装完成后忽略这些变量。
+完整变量表、Docker/Compose 示例、API 安装方式、TLS 选项与备份说明详见
 [docs/installation-guide.zh-CN.md](docs/installation-guide.zh-CN.md)。
 
 ## 配置与热重载
