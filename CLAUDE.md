@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MLiev IAM is an enterprise identity and access management system built in Go, supporting SSO via OIDC/OAuth2. Module path: `cnb.cool/mliev/iam/mliev-iam`.
 
-**Key tech**: Go 1.26, Gin, GORM, Redis, Zap, JWT, embed.FS for static assets. The HTTP stack, DI container, and process supervision come from the external framework module `cnb.cool/mliev/open/go-web` (v1.9.0); the guided installer comes from `cnb.cool/mliev/open/setup-kit` (v0.1.0).
+**Key tech**: Go 1.26, Gin, GORM, Redis, Zap, JWT, embed.FS for static assets. The HTTP stack, DI container, and process supervision come from the external framework module `cnb.cool/mliev/open/go-web` (v1.9.0); the guided installer comes from `cnb.cool/mliev/open/setup-kit` (v0.2.0).
 
 Interactive architecture diagrams (system, OIDC flow, request lifecycle, boot assembly; bilingual): `docs/archify/`.
 

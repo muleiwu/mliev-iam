@@ -124,11 +124,17 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool, option
 		if admin.Fields[i].Key == "admin.username" {
 			admin.Fields[i].Pattern = utils.UsernamePattern
 			admin.Fields[i].Help = "3–50 位字母、数字或下划线，纯数字账户保留前导零。"
+			admin.Fields[i].HelpKey = ""
 		}
 	}
 	admin.Fields = append(admin.Fields,
 		setupkit.Field{Key: "admin.realName", Label: "姓名", Type: "text", Required: true, MaxLength: 50},
 		setupkit.Field{Key: "admin.phone", Label: "手机号", Type: "text", MaxLength: 20})
+	redis := presets.Redis("redis", nil)
+	// Installation presets must not affect startup after configuration is saved.
+	if !installed {
+		bindSetupEnvironment(&db, &redis, &admin)
+	}
 	var agreements []setupkit.Agreement
 	// The standalone community entrypoint leaves Edition empty.
 	if edition == "" || edition == "community" {
@@ -142,7 +148,7 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool, option
 		Name: presentation.Name, Description: "配置数据库与 Redis，创建系统管理员。",
 		BasePath: "/install", RedirectURL: "/install/enter", Logo: "/install/logo.svg",
 		Store:      &installation.SetupStore{FileStore: setupkit.FileStore{ConfigPath: configPath}, InstalledAtStartup: installed},
-		Steps:      []setupkit.Step{db, presets.Redis("redis", nil), admin},
+		Steps:      []setupkit.Step{db, redis, admin},
 		Agreements: agreements,
 		Checkers: []setupkit.Checker{
 			setupMySQLChecker{Checker: mysqlcheck.New(), id: "mysql", title: "MySQL"},

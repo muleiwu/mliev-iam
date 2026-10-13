@@ -88,7 +88,10 @@ docker run -p 8080:8080 mliev-iam
 
 On first launch the app does not require a configured database or Redis: open `/install/` and
 follow the embedded wizard (license agreement → database → Redis → admin account). The wizard is
-provided by setup-kit inside the binary, so there is no separate installer frontend. For
+provided by setup-kit v0.2.0 inside the binary, so there is no separate installer frontend.
+Installation-only `IAM_SETUP_DB_*`, `IAM_SETUP_REDIS_*`, and `IAM_SETUP_ADMIN_*` environment
+variables prefill editable fields, including passwords. They are ignored after installation;
+existing runtime overrides remain independent. For the variable reference, Docker/Compose examples,
 API-driven installation, TLS options, and backup notes, see the detailed guide:
 [docs/installation-guide.zh-CN.md](docs/installation-guide.zh-CN.md) (Chinese).
 

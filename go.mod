@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	cnb.cool/mliev/open/go-web v1.9.0
-	cnb.cool/mliev/open/setup-kit v0.1.0
+	cnb.cool/mliev/open/setup-kit v0.2.0
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/aws/aws-sdk-go-v2 v1.47.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
