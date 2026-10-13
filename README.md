@@ -18,7 +18,7 @@ fine-grained RBAC, and enterprise directory integration in a single binary.
 - **Enterprise directory sync** — Feishu (Lark), WeCom, and DingTalk directories with event callbacks and sync automation
 - **RBAC with data scope** — roles, menu/button/API permissions, and four-level row-level data scoping
 - **Embedded frontends** — a Vben + Ant Design Vue admin console at `/admin` and a dedicated Vue 3 login/consent app at `/auth`, both baked into the binary via `go:embed`
-- **Flexible storage** — MySQL (default), PostgreSQL, or SQLite with goose versioned SQL migrations that run automatically at startup; Redis for sessions and caching; S3-compatible object storage for attachments
+- **Flexible storage** — MySQL (default), MariaDB (using the MySQL driver), PostgreSQL, or SQLite with goose versioned SQL migrations that run automatically at startup; Redis for sessions and caching; S3-compatible object storage for attachments
 - **Hot reload** — reload configuration via `SIGHUP` or the admin API without restarting the process
 - **Guided installation** — a built-in setup wizard (license → database → Redis → admin) with no separate frontend to build
 - **Single-binary deployment** — templates and static assets are embedded; debug mode serves them from disk for hot reloading

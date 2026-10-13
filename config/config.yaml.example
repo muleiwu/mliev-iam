@@ -19,7 +19,7 @@ http:
   static_dir: [admin, auth, install, static]
 
 database:
-  # 驱动：mysql | postgresql | sqlite
+  # 类型：mysql | mariadb | postgresql | sqlite；mariadb 在运行时使用 MySQL 驱动。
   driver: mysql
   host: 127.0.0.1
   port: 3306

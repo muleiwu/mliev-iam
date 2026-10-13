@@ -70,6 +70,18 @@ type SetupOptions struct {
 	EntryPath string
 }
 
+// MySQL and MariaDB have separate form identities but share connection checks.
+type setupMySQLChecker struct {
+	setupkit.Checker
+	id, title string
+}
+
+func (c setupMySQLChecker) Descriptor() setupkit.Driver {
+	driver := c.Checker.Descriptor()
+	driver.ID, driver.Title = c.id, c.title
+	return driver
+}
+
 func NewSetupInstaller(edition string, installed bool, ready func() bool, options ...SetupOptions) (*SetupInstaller, error) {
 	if len(options) > 1 {
 		return nil, fmt.Errorf("provide at most one setup options value")
@@ -101,10 +113,10 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool, option
 			return nil, err
 		}
 	}
-	db := presets.Database("database", "mysql", "postgresql", "sqlite")
+	db := presets.Database("database", "mysql", "mariadb", "postgresql", "sqlite")
 	db.Connections[0].ConfigKeys = map[string]string{"database": "database"}
 	db.Connections[0].Defaults = setupkit.Values{
-		"host": "localhost", "mysql.username": "root", "database": "mliev_iam",
+		"host": "localhost", "mysql.username": "root", "mariadb.username": "root", "database": "mliev_iam",
 		"sqlite.path": filepath.Join(filepath.Dir(configPath), "mliev_iam.db"),
 	}
 	admin := presets.Admin()
@@ -129,10 +141,14 @@ func NewSetupInstaller(edition string, installed bool, ready func() bool, option
 	kit, err := setupkit.New(setupkit.Options{
 		Name: presentation.Name, Description: "配置数据库与 Redis，创建系统管理员。",
 		BasePath: "/install", RedirectURL: "/install/enter", Logo: "/install/logo.svg",
-		Store:          &installation.SetupStore{FileStore: setupkit.FileStore{ConfigPath: configPath}, InstalledAtStartup: installed},
-		Steps:          []setupkit.Step{db, presets.Redis("redis", nil), admin},
-		Agreements:     agreements,
-		Checkers:       []setupkit.Checker{mysqlcheck.New(), pgcheck.New(), sqlitecheck.New(), redischeck.New()},
+		Store:      &installation.SetupStore{FileStore: setupkit.FileStore{ConfigPath: configPath}, InstalledAtStartup: installed},
+		Steps:      []setupkit.Step{db, presets.Redis("redis", nil), admin},
+		Agreements: agreements,
+		Checkers: []setupkit.Checker{
+			setupMySQLChecker{Checker: mysqlcheck.New(), id: "mysql", title: "MySQL"},
+			setupMySQLChecker{Checker: mysqlcheck.New(), id: "mariadb", title: "MariaDB"},
+			pgcheck.New(), sqlitecheck.New(), redischeck.New(),
+		},
 		AllowedOrigins: viper.GetStringSlice("install.allowed_origins"),
 		Actions: []setupkit.InstallAction{
 			{ID: "credentials", Title: "准备应用密钥", Run: func(ctx context.Context, in *setupkit.InstallInput) error {
@@ -185,7 +201,7 @@ func withSetupDatabase(ctx context.Context, connection setupkit.ConnectionValues
 	var sqlDB *sql.DB
 	var dialector gorm.Dialector
 	switch connection.Driver {
-	case "mysql":
+	case "mysql", "mariadb":
 		driverConfig, err := cfg.MySQLDriverConfig()
 		if err != nil {
 			return err
@@ -196,7 +212,14 @@ func withSetupDatabase(ctx context.Context, connection setupkit.ConnectionValues
 			return err
 		}
 		sqlDB = sql.OpenDB(connector)
-		dialector = mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true})
+		// GORM's own version query uses a background context. Read it here so
+		// MariaDB gets compatible JSON writes while installation stays cancellable.
+		var serverVersion string
+		if err := sqlDB.QueryRowContext(ctx, "SELECT VERSION()").Scan(&serverVersion); err != nil {
+			sqlDB.Close()
+			return err
+		}
+		dialector = mysql.New(mysql.Config{Conn: sqlDB, ServerVersion: serverVersion, SkipInitializeWithVersion: true})
 	case "postgresql":
 		driverConfig, err := cfg.PostgreSQLDriverConfig()
 		if err != nil {

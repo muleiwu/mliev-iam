@@ -21,6 +21,10 @@ func envOr(key, fallback string) string {
 func (receiver Database) InitConfig() map[string]any {
 	env := helper.GetEnv()
 	driver := envOr("DB_DRIVER", env.GetString("database.driver", "mysql"))
+	// Preserve MariaDB in the saved configuration; runtime consumers use MySQL.
+	if driver == "mariadb" {
+		driver = "mysql"
+	}
 
 	// sqlite 特例：go-web 的 sqlite 驱动把 DatabaseConfig.Host 当作 DSN（文件路径），
 	// 所以这里把 database.filepath 映射到 database.host，避免误用 IP/localhost 作为文件名。
