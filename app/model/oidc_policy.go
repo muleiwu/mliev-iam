@@ -35,13 +35,15 @@ type OIDCScopeAuthorization struct {
 }
 
 // OIDCAuthorizationConfig is the typed authorization subset of protocolConfig.
-// Absence retains legacy authorization behavior.
+// Absence retains legacy standard-scope behavior. Custom scopes always require
+// explicit global permission bindings and grants.
 type OIDCAuthorizationConfig struct {
-	Scopes             []string                   `json:"scopes"`
-	RoleClaims         OIDCRoleClaimsConfig       `json:"roleClaims"`
-	DepartmentClaims   OIDCDepartmentClaimsConfig `json:"departmentClaims"`
-	ScopeAuthorization OIDCScopeAuthorization     `json:"scopeAuthorization"`
-	ClientRoleIDs      []uint                     `json:"clientRoleIds"`
+	CustomPermissionIDs []uint                     `json:"customPermissionIds"`
+	Scopes              []string                   `json:"scopes"`
+	RoleClaims          OIDCRoleClaimsConfig       `json:"roleClaims"`
+	DepartmentClaims    OIDCDepartmentClaimsConfig `json:"departmentClaims"`
+	ScopeAuthorization  OIDCScopeAuthorization     `json:"scopeAuthorization"`
+	ClientRoleIDs       []uint                     `json:"clientRoleIds"`
 }
 
 func DecodeOIDCAuthorizationConfig(raw map[string]interface{}) (*OIDCAuthorizationConfig, error) {

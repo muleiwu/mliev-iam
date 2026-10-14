@@ -142,7 +142,8 @@ func TestOIDCDepartmentOutputDestinationsAndLegacyTokens(t *testing.T) {
 		if info.Departments != nil {
 			require.Equal(t, []string{"platform"}, *info.Departments)
 		}
-		discovery := NewOIDCDiscoveryService("https://issuer.example").GetDiscoveryDocument(f.app)
+		discovery, err := NewOIDCDiscoveryService("https://issuer.example", f.db).GetDiscoveryDocument(f.app)
+		require.NoError(t, err)
 		require.Equal(t, target != "access_token", containsPolicyString(discovery.ClaimsSupported, "departments"))
 	}
 	// Empty values serialize as [], while disabled/legacy snapshots omit the field.
@@ -164,7 +165,9 @@ func TestOIDCDepartmentOutputDestinationsAndLegacyTokens(t *testing.T) {
 	f.setConfig(t, model.OIDCDepartmentClaimsConfig{Enabled: false, DepartmentIDs: f.allIDs(), Targets: []string{"access_token", "id_token", "userinfo"}})
 	disabled := f.issue(t)
 	require.NotContains(t, departmentTokenClaims(t, disabled.AccessToken), "departments")
-	require.NotContains(t, NewOIDCDiscoveryService("https://issuer.example").GetDiscoveryDocument(f.app).ClaimsSupported, "departments")
+	discovery, err := NewOIDCDiscoveryService("https://issuer.example", f.db).GetDiscoveryDocument(f.app)
+	require.NoError(t, err)
+	require.NotContains(t, discovery.ClaimsSupported, "departments")
 }
 
 func TestOIDCDepartmentSnapshotSurvivesChangesAndRefreshRecomputes(t *testing.T) {

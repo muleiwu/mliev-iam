@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 )
 
@@ -13,6 +14,14 @@ func (h *OIDCProtocolHandler) validateAuthorizationConfig(raw map[string]interfa
 	}
 	if _, err := model.NormalizeOIDCScopes(c.Scopes); err != nil {
 		return err
+	}
+	if len(c.CustomPermissionIDs) > 0 {
+		if h.db == nil {
+			return fmt.Errorf("无法验证自定义权限")
+		}
+		if err := dao.LockCustomPermissionReferences(h.db, raw); err != nil {
+			return err
+		}
 	}
 	allowed := map[string]bool{}
 	for _, scope := range c.Scopes {

@@ -37,7 +37,7 @@ func policyFixture(t *testing.T) (*gorm.DB, *model.User, *model.Application, *mo
 		}
 	})
 	db, user, app, session := sessionFixture(t)
-	require.NoError(t, db.AutoMigrate(&model.Role{}, &model.UserRole{}, &model.Department{}, &model.UserDepartment{}))
+	require.NoError(t, db.AutoMigrate(&model.Role{}, &model.UserRole{}, &model.Department{}, &model.UserDepartment{}, &model.CustomPermission{}, &model.CustomPermissionGrant{}))
 	role := &model.Role{Name: "Pagnode administrator", Code: "pagnode-admin"}
 	require.NoError(t, db.Create(role).Error)
 	require.NoError(t, db.Create(&model.UserRole{UserID: user.ID, RoleID: role.ID, IsActive: true, ApprovalStatus: 1, ApplyScope: 1}).Error)
@@ -50,6 +50,7 @@ func policyFixture(t *testing.T) (*gorm.DB, *model.User, *model.Application, *mo
 		"pagnode:admin": {Description: "管理 Pagnode", UserAccess: access},
 	}}
 	app.ProtocolConfig["roleClaims"] = model.OIDCRoleClaimsConfig{Enabled: true, ClaimName: "roles", RoleIDs: []uint{role.ID}, Targets: []string{"access_token", "id_token", "userinfo"}}
+	syncPolicyTestGrants(t, db, app)
 	require.NoError(t, db.Save(app).Error)
 	return db, user, app, session, role
 }
@@ -103,6 +104,7 @@ func TestOIDCPolicySubjectRules(t *testing.T) {
 				delete(config.ScopeAuthorization.Rules, "pagnode:admin")
 			}
 			app.ProtocolConfig["scopeAuthorization"] = config.ScopeAuthorization
+			syncPolicyTestGrants(t, db, app)
 			require.NoError(t, db.Save(app).Error)
 			grant, err := NewOIDCAuthorizationService(db).evaluateOIDCGrant(app, user.ID, []string{"pagnode:admin"}, false)
 			if allowed {
@@ -169,6 +171,7 @@ func TestOIDCPolicyMachineAndJWKS(t *testing.T) {
 	rule.AllowClientCredentials = true
 	config.ScopeAuthorization.Rules["pagnode:admin"] = rule
 	app.ProtocolConfig["scopeAuthorization"] = config.ScopeAuthorization
+	syncPolicyTestGrants(t, db, app)
 	require.NoError(t, db.Save(app).Error)
 	keys := NewApplicationKeyService(db)
 	key, err := keys.GenerateKeyForApplication(app.ID, "RS256", 2048)
@@ -261,7 +264,8 @@ func TestOIDCPolicyConfigAndIndependentOutputs(t *testing.T) {
 		info, err := NewOIDCUserInfoService(db).GetUserInfo(response.AccessToken)
 		require.NoError(t, err)
 		require.Equal(t, target == "userinfo", info.Groups != nil)
-		discovery := NewOIDCDiscoveryService("https://issuer.example").GetDiscoveryDocument(app)
+		discovery, err := NewOIDCDiscoveryService("https://issuer.example", db).GetDiscoveryDocument(app)
+		require.NoError(t, err)
 		require.Contains(t, discovery.ScopesSupported, "pagnode:admin")
 		require.Equal(t, target != "access_token", containsPolicyString(discovery.ClaimsSupported, "groups"))
 	}
@@ -318,6 +322,7 @@ func TestOIDCPolicyPersonGrantDoesNotManufactureRoles(t *testing.T) {
 	rule.UserAccess.UserIDs = []uint{user.ID}
 	config.ScopeAuthorization.Rules["pagnode:admin"] = rule
 	app.ProtocolConfig["scopeAuthorization"] = config.ScopeAuthorization
+	syncPolicyTestGrants(t, db, app)
 	require.NoError(t, db.Save(app).Error)
 	grant, err := NewOIDCAuthorizationService(db).evaluateOIDCGrant(app, user.ID, []string{"pagnode:admin"}, false)
 	require.NoError(t, err)
@@ -361,6 +366,49 @@ func TestOIDCPolicyRoleWhitelistAndLegacyDefaults(t *testing.T) {
 	require.NoError(t, db.Save(app).Error)
 	require.NoError(t, db.Where("user_id = ?", user.ID).Delete(&model.UserRole{}).Error)
 	grant, err = svc.evaluateOIDCGrant(app, user.ID, []string{"pagnode:admin"}, false)
+	require.ErrorIs(t, err, constants.ErrAccessDenied, "compatibility mode cannot bypass global custom grants")
+	grant, err = svc.evaluateOIDCGrant(app, user.ID, []string{"openid"}, false)
 	require.NoError(t, err)
-	require.Nil(t, grant.Roles, "legacy applications retain their allowlist behavior without exposing roles")
+	require.Nil(t, grant.Roles)
+}
+
+// Keep the original subject/claim regression scenarios, now provisioning the
+// global records explicitly instead of authorizing via app-local JSON.
+func syncPolicyTestGrants(t *testing.T, db *gorm.DB, app *model.Application) {
+	t.Helper()
+	var p model.CustomPermission
+	result := db.Where("code = ?", "pagnode:admin").Find(&p)
+	require.NoError(t, result.Error)
+	if p.ID == 0 {
+		p = model.CustomPermission{Code: "pagnode:admin", Name: "Pagnode 管理", Description: "管理 Pagnode", Enabled: true}
+		require.NoError(t, db.Create(&p).Error)
+	}
+	app.ProtocolConfig["customPermissionIds"] = []uint{p.ID}
+	require.NoError(t, db.Where("permission_id = ?", p.ID).Delete(&model.CustomPermissionGrant{}).Error)
+	config, err := model.DecodeOIDCAuthorizationConfig(app.ProtocolConfig)
+	require.NoError(t, err)
+	rule, exists := config.ScopeAuthorization.Rules[p.Code]
+	if !exists {
+		return
+	}
+	add := func(kind string, id uint) {
+		require.NoError(t, db.Create(&model.CustomPermissionGrant{PermissionID: p.ID, SubjectType: kind, SubjectID: id, IncludeSubDepartments: kind == "department" && rule.UserAccess.IncludeSubDepartments}).Error)
+	}
+	if rule.UserAccess != nil {
+		if rule.UserAccess.IsPublic != nil && *rule.UserAccess.IsPublic {
+			add("everyone", 0)
+		}
+		for _, id := range rule.UserAccess.UserIDs {
+			add("user", id)
+		}
+		for _, id := range rule.UserAccess.RoleIDs {
+			add("role", id)
+		}
+		for _, id := range rule.UserAccess.DepartmentIDs {
+			add("department", id)
+		}
+	}
+	if rule.AllowClientCredentials {
+		add("client", app.ID)
+	}
 }

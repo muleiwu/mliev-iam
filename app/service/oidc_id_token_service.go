@@ -90,13 +90,14 @@ type AccessTokenClaims struct {
 
 // OIDCIDTokenService ID Token生成服务
 type OIDCIDTokenService struct {
-	departmentClaims *model.OIDCDepartmentSnapshot
-	algorithm        string             // 签名算法: "RS256" 或 "HS256"
-	rsaKeyManager    *jwt.RSAKeyManager // RS256 使用
-	hmacSecret       []byte             // HS256 使用
-	keyID            string             // 密钥ID
-	issuer           string
-	tokenLifetime    int // 秒
+	accessTokenExpiry time.Time
+	departmentClaims  *model.OIDCDepartmentSnapshot
+	algorithm         string             // 签名算法: "RS256" 或 "HS256"
+	rsaKeyManager     *jwt.RSAKeyManager // RS256 使用
+	hmacSecret        []byte             // HS256 使用
+	keyID             string             // 密钥ID
+	issuer            string
+	tokenLifetime     int // 秒
 }
 
 // withDepartmentClaims returns a request-local copy so a reused signer cannot
@@ -104,6 +105,14 @@ type OIDCIDTokenService struct {
 func (s *OIDCIDTokenService) withDepartmentClaims(snapshot *model.OIDCDepartmentSnapshot) *OIDCIDTokenService {
 	copy := *s
 	copy.departmentClaims = snapshot
+	return &copy
+}
+
+// withAccessTokenExpiry uses an absolute deadline; zero/negative remaining
+// lifetime must never trigger the constructor's default lifetime fallback.
+func (s *OIDCIDTokenService) withAccessTokenExpiry(expiry time.Time) *OIDCIDTokenService {
+	copy := *s
+	copy.accessTokenExpiry = expiry
 	return &copy
 }
 
@@ -222,6 +231,12 @@ func leftMostHash(value, alg string) string {
 func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID string, scopes []string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
+	if !s.accessTokenExpiry.IsZero() {
+		exp = s.accessTokenExpiry
+	}
+	if exp.Unix() <= now.Unix() {
+		return "", fmt.Errorf("授权已到期，无法签发访问令牌")
+	}
 
 	// 生成唯一标识符
 	jti := generateUUID()
@@ -257,6 +272,12 @@ func (s *OIDCIDTokenService) GenerateAccessToken(user *model.User, clientID stri
 func (s *OIDCIDTokenService) GenerateClientCredentialsAccessToken(clientID string, scopes []string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
+	if !s.accessTokenExpiry.IsZero() {
+		exp = s.accessTokenExpiry
+	}
+	if exp.Unix() <= now.Unix() {
+		return "", fmt.Errorf("授权已到期，无法签发访问令牌")
+	}
 
 	// 生成唯一标识符
 	jti := generateUUID()

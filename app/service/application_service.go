@@ -102,6 +102,11 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 
 	// 9. 使用事务确保应用和协议特定资源一起创建
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if app.ProtocolType == "oidc" {
+			if err := dao.LockCustomPermissionReferences(tx, app.ProtocolConfig); err != nil {
+				return err
+			}
+		}
 		// 9.1 先保存应用到数据库（获取ID）
 		if err := tx.Create(app).Error; err != nil {
 			return fmt.Errorf("保存应用失败: %w", err)
@@ -156,6 +161,16 @@ func (s *ApplicationService) GetApplicationByClientID(clientID string) (*model.A
 
 // UpdateApplication 更新应用
 func (s *ApplicationService) UpdateApplication(id uint, req *dto.UpdateApplicationRequest) (*dto.ApplicationResponse, error) {
+	var response *dto.ApplicationResponse
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		response, err = NewApplicationService(tx).updateApplication(id, req)
+		return err
+	})
+	return response, err
+}
+
+func (s *ApplicationService) updateApplication(id uint, req *dto.UpdateApplicationRequest) (*dto.ApplicationResponse, error) {
 	app, err := s.appDAO.GetByID(id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -207,6 +222,14 @@ func (s *ApplicationService) UpdateApplication(id uint, req *dto.UpdateApplicati
 		}
 	}
 
+	if app.ProtocolType == "oidc" {
+		if err := model.CleanLegacyCustomScopes(app.ProtocolConfig); err != nil {
+			return nil, err
+		}
+		if err := dao.LockCustomPermissionReferences(s.db, app.ProtocolConfig); err != nil {
+			return nil, err
+		}
+	}
 	// 保存到数据库
 	if err := s.appDAO.Update(app); err != nil {
 		return nil, fmt.Errorf("保存应用失败: %w", err)

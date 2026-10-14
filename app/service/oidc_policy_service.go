@@ -13,10 +13,12 @@ import (
 )
 
 type oidcGrant struct {
-	App         *model.Application
-	Scopes      []string
-	Roles       *model.OIDCRoleSnapshot
-	Departments *model.OIDCDepartmentSnapshot
+	ValidUntil           *time.Time
+	AccessTokenExpiresAt time.Time
+	App                  *model.Application
+	Scopes               []string
+	Roles                *model.OIDCRoleSnapshot
+	Departments          *model.OIDCDepartmentSnapshot
 }
 
 func (g *oidcGrant) attributes() map[string]interface{} {
@@ -34,12 +36,19 @@ func (s *OIDCAuthorizationService) CheckUserScopeAuthorization(app *model.Applic
 	if err != nil {
 		return constants.ErrServerError
 	}
-	if !config.ScopeAuthorization.Enabled {
-		return nil
-	}
 	scopes, err := model.ParseOIDCScopes(rawScope)
 	if err != nil {
 		return constants.ErrInvalidScope
+	}
+	// Preserve the standard-scope browser compatibility path. Unbound custom
+	// strings are rejected even when the legacy policy switch is off.
+	if !config.ScopeAuthorization.Enabled && len(config.CustomPermissionIDs) == 0 {
+		for _, scope := range scopes {
+			if !model.IsStandardOIDCScope(scope) {
+				return constants.ErrInvalidScope
+			}
+		}
+		return nil
 	}
 	_, err = s.evaluateOIDCGrant(app, userID, scopes, false)
 	return err
@@ -66,8 +75,12 @@ func (s *OIDCAuthorizationService) evaluateOIDCGrant(app *model.Application, use
 	if err != nil {
 		return nil, constants.ErrInvalidScope
 	}
+	effective, custom, err := dao.ResolveOIDCScopes(s.db, c)
+	if err != nil {
+		return nil, constants.ErrServerError
+	}
 	allowed := map[string]bool{}
-	for _, scope := range c.Scopes {
+	for _, scope := range effective {
 		allowed[scope] = true
 	}
 	for _, scope := range scopes {
@@ -78,7 +91,7 @@ func (s *OIDCAuthorizationService) evaluateOIDCGrant(app *model.Application, use
 	if machine && current.ProtocolConfig["clientType"] != "confidential" {
 		return nil, constants.ErrUnauthorizedClient
 	}
-	if machine && c.ScopeAuthorization.Enabled && len(scopes) == 0 {
+	if machine && (c.ScopeAuthorization.Enabled || len(c.CustomPermissionIDs) > 0) && len(scopes) == 0 {
 		return nil, constants.ErrInvalidScope
 	}
 	if !machine {
@@ -96,7 +109,7 @@ func (s *OIDCAuthorizationService) evaluateOIDCGrant(app *model.Application, use
 	roles := []model.Role{}
 	needsRoles := c.RoleClaims.Enabled
 	for _, scope := range scopes {
-		if rule, ok := c.ScopeAuthorization.Rules[scope]; c.ScopeAuthorization.Enabled && ok && rule.UserAccess != nil && len(rule.UserAccess.RoleIDs) > 0 {
+		if rule, ok := c.ScopeAuthorization.Rules[scope]; model.IsStandardOIDCScope(scope) && c.ScopeAuthorization.Enabled && ok && rule.UserAccess != nil && len(rule.UserAccess.RoleIDs) > 0 {
 			needsRoles = true
 		}
 	}
@@ -108,6 +121,9 @@ func (s *OIDCAuthorizationService) evaluateOIDCGrant(app *model.Application, use
 	}
 	if c.ScopeAuthorization.Enabled {
 		for _, scope := range scopes {
+			if !model.IsStandardOIDCScope(scope) {
+				continue
+			}
 			rule, ok := c.ScopeAuthorization.Rules[scope]
 			if !ok {
 				return nil, constants.ErrInvalidScope
@@ -127,7 +143,11 @@ func (s *OIDCAuthorizationService) evaluateOIDCGrant(app *model.Application, use
 			}
 		}
 	}
-	grant := &oidcGrant{App: &current, Scopes: scopes}
+	until, err := s.evaluateCustomPermissions(&current, userID, scopes, custom, machine, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	grant := &oidcGrant{App: &current, Scopes: scopes, ValidUntil: until}
 	if c.RoleClaims.Enabled {
 		whitelist := map[uint]bool{}
 		for _, id := range c.RoleClaims.RoleIDs {
@@ -239,16 +259,4 @@ func oidcRoleAttributes(snapshot *model.OIDCRoleSnapshot) map[string]interface{}
 		attrs[model.OIDCRoleSnapshotAttribute] = snapshot
 	}
 	return attrs
-}
-
-// OIDCScopeDescription is shared by both consent response formats.
-func OIDCScopeDescription(app *model.Application, scope string) string {
-	if app == nil {
-		return ""
-	}
-	c, err := model.DecodeOIDCAuthorizationConfig(app.ProtocolConfig)
-	if err != nil {
-		return ""
-	}
-	return c.ScopeAuthorization.Rules[scope].Description
 }

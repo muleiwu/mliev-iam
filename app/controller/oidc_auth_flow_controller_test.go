@@ -651,16 +651,21 @@ func (c *testRouterContext) ResponseWriter() http.ResponseWriter { return nil }
 
 func TestCheckOIDCUserAccessReportsScopeFailureBeforeLogin(t *testing.T) {
 	db := registerControllerTestDatabase(t)
-	if err := db.AutoMigrate(&model.User{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.CustomPermission{}, &model.CustomPermissionGrant{}); err != nil {
 		t.Fatal(err)
 	}
 	user := &model.User{Username: "scope-browser-user", Status: model.UserStatusActive, IsActivated: true}
 	if err := db.Create(user).Error; err != nil {
 		t.Fatal(err)
 	}
+	permission := model.CustomPermission{Code: "pagnode:admin", Name: "Pagnode 管理", Description: "管理 Pagnode 控制面", Enabled: true}
+	if err := db.Create(&permission).Error; err != nil {
+		t.Fatal(err)
+	}
 	restricted := false
 	app := &model.Application{UUID: "scope-browser-client", Name: "Scope browser", ProtocolType: "oidc", IsActive: true, ProtocolConfig: map[string]interface{}{
-		"clientId": "scope-browser-client", "redirectUris": []interface{}{"https://client.example/callback"}, "scopes": []interface{}{"pagnode:admin"},
+		"customPermissionIds": []uint{permission.ID},
+		"clientId":            "scope-browser-client", "redirectUris": []interface{}{"https://client.example/callback"}, "scopes": []interface{}{"pagnode:admin"},
 		"scopeAuthorization": model.OIDCScopeAuthorization{Enabled: true, Rules: map[string]model.OIDCScopeRule{"pagnode:admin": {Description: "管理 Pagnode 控制面", UserAccess: &model.ApplicationAccessScope{IsPublic: &restricted}}}},
 	}}
 	if err := db.Create(app).Error; err != nil {
@@ -678,7 +683,10 @@ func TestCheckOIDCUserAccessReportsScopeFailureBeforeLogin(t *testing.T) {
 	if !strings.Contains(failure.Description, "授权范围") {
 		t.Fatal(failure.Description)
 	}
-	descriptions := (OIDCAuthFlowController{}).parseScopesForFlow(session.Scope, app)
+	descriptions, descErr := (OIDCAuthFlowController{}).parseScopesForFlow(session.Scope, app)
+	if descErr != nil {
+		t.Fatal(descErr)
+	}
 	if len(descriptions) != 1 || descriptions[0].Description != "管理 Pagnode 控制面" {
 		t.Fatalf("configured description missing: %+v", descriptions)
 	}

@@ -64,19 +64,20 @@ func (*Application) TableName() string {
 
 // OIDCProtocolConfig OIDC协议特定配置
 type OIDCProtocolConfig struct {
-	DepartmentClaims   *OIDCDepartmentClaimsConfig `json:"departmentClaims,omitempty"`
-	RoleClaims         *OIDCRoleClaimsConfig       `json:"roleClaims,omitempty"`
-	ScopeAuthorization *OIDCScopeAuthorization     `json:"scopeAuthorization,omitempty"`
-	ClientRoleIDs      []uint                      `json:"clientRoleIds,omitempty"`
-	ClientID           string                      `json:"clientId"`
-	ClientSecret       string                      `json:"clientSecret"`
-	RedirectURIs       []string                    `json:"redirectUris"`
-	GrantTypes         []string                    `json:"grantTypes"`
-	ResponseTypes      []string                    `json:"responseTypes"`
-	Scopes             []string                    `json:"scopes"`
-	ClientType         string                      `json:"clientType"` // confidential, public
-	RequirePKCE        bool                        `json:"requirePkce"`
-	TokenLifetime      int                         `json:"tokenLifetime"` // 令牌有效期（秒）
+	CustomPermissionIDs []uint                      `json:"customPermissionIds"`
+	DepartmentClaims    *OIDCDepartmentClaimsConfig `json:"departmentClaims,omitempty"`
+	RoleClaims          *OIDCRoleClaimsConfig       `json:"roleClaims,omitempty"`
+	ScopeAuthorization  *OIDCScopeAuthorization     `json:"scopeAuthorization,omitempty"`
+	ClientRoleIDs       []uint                      `json:"clientRoleIds,omitempty"`
+	ClientID            string                      `json:"clientId"`
+	ClientSecret        string                      `json:"clientSecret"`
+	RedirectURIs        []string                    `json:"redirectUris"`
+	GrantTypes          []string                    `json:"grantTypes"`
+	ResponseTypes       []string                    `json:"responseTypes"`
+	Scopes              []string                    `json:"scopes"`
+	ClientType          string                      `json:"clientType"` // confidential, public
+	RequirePKCE         bool                        `json:"requirePkce"`
+	TokenLifetime       int                         `json:"tokenLifetime"` // 令牌有效期（秒）
 }
 
 // SAMLProtocolConfig SAML协议特定配置

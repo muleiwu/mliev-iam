@@ -1,12 +1,12 @@
 # OIDC 角色与 Scope 授权
 
-IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相关角色、用户部门输出到 Access Token、ID Token 或 UserInfo。Audience 仍为应用的客户端 UUID。本功能使用现有应用 `protocolConfig` 和令牌 `Attributes` JSON 字段，无需数据库表迁移。
+IAM 支持全局自定义权限授权，以及按应用配置标准 scope、角色和部门输出。Audience 仍为应用的客户端 UUID。自定义权限使用独立数据库表，配置及升级步骤见 [全局自定义权限与授权有效期](custom-permissions.zh-CN.md)。角色与部门输出仍使用现有 JSON 字段。
 
 ## 配置入口
 
-在「应用管理 → 创建/编辑 OIDC 应用 → 授权范围与角色」中配置。应用详情显示同一份只读配置。原有应用未开启策略时继续使用应用 scope 允许列表；新建应用的管理界面默认开启策略，标准身份 scope 允许应用内用户，新业务 scope 默认不授予任何用户或机器。
+在「应用管理 → 创建/编辑 OIDC 应用 → 授权范围与角色」中配置。应用详情显示同一份只读配置。该入口仅编辑标准 scope 策略，并选择全局自定义权限。自定义权限定义和授权移至「访问控制 → 自定义权限」；旧应用内自定义配置不再生效，需要重建后重新选择。标准 scope 保留原兼容模式，新业务权限始终执行全局授权校验。
 
-应用访问范围与 scope 规则分别生效：用户首先必须能访问应用，再满足请求的每一个 scope 规则。指定人员、部门和角色之间为“任一条件匹配”；部门可包含子部门。限制模式下所有条件为空代表拒绝用户访问。申请任一无权 scope 会拒绝整次授权，不静默缩减。
+应用访问范围与 scope 规则分别生效：用户首先必须能访问应用，再满足请求的每一个标准 scope 规则或全局自定义权限授权。指定人员、部门和角色之间为“任一条件匹配”；部门可包含子部门。限制模式下所有条件为空代表拒绝用户访问。申请任一无权 scope 会拒绝整次授权，不静默缩减。
 
 通过人员或部门条件获得 scope 不会自动赋予角色。角色来自已启用、已审批、未过期的全局角色分配；非全局、部门/组织限定的分配不参与外部角色输出或 scope 的角色条件。角色层级不自动继承。
 
@@ -14,16 +14,18 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
 
 沿用应用创建和更新 API 的 `protocolConfig`，支持以下字段：
 
-- `scopeAuthorization`：`enabled` 开关与按 scope 名索引的 `rules`。每条包含授权说明 `description`、用户范围 `userAccess`、机器授权开关 `allowClientCredentials`。
+- `customPermissionIds`：应用接入的全局自定义权限 ID。
+- `scopeAuthorization`：仅用于标准 scope 的 `enabled` 开关及 `rules`；不影响全局自定义权限校验。每条包含说明、用户范围和机器开关。
 - `roleClaims`：`enabled`、`claimName`（`roles` 或 `groups`）、输出角色白名单 `roleIds`、输出位置 `targets`（`access_token`、`id_token`、`userinfo`）。省略名称及位置时分别默认 `roles` 和 `access_token`；默认不开启。
 - `clientRoleIds`：单独分配给机密客户端的机器角色。
 - `departmentClaims`：用户部门输出开关、部门白名单 `departmentIds` 和输出位置 `targets`，见下节。
 
-下面是 Pagnode 示例中的相关配置。`42` 代表事先创建的 `pagnode-admin` 角色 ID，需替换为实际值。更新既有应用时可仅提交需要修改的 `protocolConfig` 顶层字段；未提交字段会保留。提交 `scopeAuthorization` 或 `roleClaims` 时应提供该对象的完整配置。
+下面是 Pagnode 示例中的相关配置。`42` 是角色 ID，`7` 是事先在全局目录创建的 `pagnode:admin` 权限 ID；请先在全局授权管理中授予角色 42 此权限，再替换为实际 ID。更新既有应用时可仅提交需要修改的 `protocolConfig` 顶层字段；未提交字段会保留。提交 `scopeAuthorization` 或 `roleClaims` 时应提供该对象的完整配置。
 
 ```json
 {
-  "scopes": ["openid", "profile", "pagnode:admin"],
+  "scopes": ["openid", "profile"],
+  "customPermissionIds": [7],
   "tokenLifetime": 300,
   "roleClaims": {
     "enabled": true,
@@ -43,17 +45,6 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
         "description": "访问您的基本资料",
         "userAccess": {"isPublic": true},
         "allowClientCredentials": false
-      },
-      "pagnode:admin": {
-        "description": "管理 Pagnode 控制面",
-        "userAccess": {
-          "isPublic": false,
-          "userIds": [],
-          "departmentIds": [],
-          "roleIds": [42],
-          "includeSubDepartments": false
-        },
-        "allowClientCredentials": false
       }
     }
   },
@@ -61,7 +52,7 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
 }
 ```
 
-开启策略后，`scopes` 中的每个范围都必须有规则；规则不能引用允许列表之外的 scope。`userAccess.isPublic` 必须明确设置，引用的人员、部门、角色必须存在。角色输出只包含主体实际拥有且在输出白名单中的角色代码，去重排序；开启输出但未匹配角色时返回空数组。
+开启标准范围策略后，`scopes` 中的每个标准范围都必须有规则；规则不能引用允许列表之外的标准 scope。自定义权限始终由 `customPermissionIds` 解析和校验。`userAccess.isPublic` 必须明确设置，引用的人员、部门、角色必须存在。角色输出只包含主体实际拥有且在输出白名单中的角色代码，去重排序；开启输出但未匹配角色时返回空数组。
 
 `groups` 是兼容性字段映射，其值仍为所选角色代码字符串数组。它不代表新建了组织用户组。首期不支持 `realm_access.roles` 等嵌套路径、任意 Claim 或脚本映射。
 
@@ -117,11 +108,11 @@ IAM 支持按应用配置用户与机器的 scope 授予策略，并将应用相
 机器调用须另外完成以下配置：
 
 1. 使用机密客户端，允许 `client_credentials` grant。
-2. 将 `pagnode:admin` 规则的 `allowClientCredentials` 设为 `true`。
+2. 在全局授权管理中为该应用创建 `pagnode:admin` 的机器客户端授权，并设置有效期。
 3. 如资源端还要求角色，将角色 `42` 加入 `clientRoleIds`，并保留在角色输出白名单中。
 4. 向令牌端点显式请求 `grant_type=client_credentials&scope=pagnode:admin`，使用该客户端自己的凭据。
 
-机器不继承创建者角色，也不使用用户范围规则。启用策略时省略 scope 会失败；机器令牌没有 ID Token、Refresh Token 或 UserInfo。
+机器不继承创建者角色，也不使用用户范围规则。接入自定义权限或启用标准策略时省略 scope 会失败；机器令牌没有 ID Token、Refresh Token 或 UserInfo。
 
 ## Pagnode 接入
 
@@ -142,7 +133,7 @@ Pagnode 用该 issuer 的 Discovery/JWKS 验证 Access Token 的签名、issuer�
 
 ## 撤权、错误和上线
 
-角色与部门关系、应用规则变更会在下次签发、授权码兑换和刷新时重新检查。刷新可以显式缩小原 scope，但不能扩大；仍申请已失去权限的范围会失败，失败事务不会消费原刷新令牌。旧 JWT 是签发时的快照；Pagnode 离线验签时，它通常可使用到到期。管理 API 建议设置 300 秒有效期。
+角色与部门关系、应用标准规则和全局自定义授权会在签发、授权码兑换和刷新时重新检查；访问令牌期限同时受所需自定义授权截止时间约束。刷新可以显式缩小原 scope，但不能扩大；仍申请已失去权限的范围会失败，失败事务不会消费原刷新令牌。旧 JWT 是签发时的快照；Pagnode 离线验签时，它通常可使用到到期。管理 API 建议设置 300 秒有效期。
 
 UserInfo 的角色来自该 Access Token 签发时保存的快照，后续新增角色不会扩充旧令牌。已签发令牌的输出字段和位置也保持原配置，下一次签发才应用配置变化。
 
