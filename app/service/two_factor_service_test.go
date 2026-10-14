@@ -32,7 +32,7 @@ func twoFactorFixture(t *testing.T) (*TwoFactorService, *model.User, *model.Logi
 	require.NoError(t, err)
 	sql.SetMaxOpenConns(1)
 	t.Cleanup(func() { sql.Close() })
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.LoginSession{}, &model.TwoFactorMethod{}, &model.TwoFactorRecoveryCode{}, &model.TwoFactorEvent{}, &model.OIDCToken{}, &model.AuthorizationCode{}, &model.Role{}, &model.UserRole{}, &model.ExternalPrincipal{}, &model.ExternalIdentifier{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.LoginSession{}, &model.TwoFactorMethod{}, &model.TwoFactorRecoveryCode{}, &model.TwoFactorEvent{}, &model.OIDCToken{}, &model.AuthorizationCode{}, &model.Role{}, &model.UserRole{}, &model.ExternalPrincipal{}, &model.ExternalIdentifier{}, &model.Passkey{}, &model.IdentityConnection{}))
 	now := time.Now()
 	email, phone := "factor@example.test", "+8613800138000"
 	u := &model.User{Username: "factor-user", IsActivated: true, Status: model.UserStatusActive, Email: &email, Phone: &phone, EmailVerifiedAt: &now, PhoneVerifiedAt: &now}
@@ -86,14 +86,23 @@ func TestTwoFactorEnrollmentAndSessionAssurance(t *testing.T) {
 	require.NoError(t, err)
 	codes, renewed, err := s.ConfirmEnrollment(ctx, tr, proof, "192.0.2.1")
 	require.NoError(t, err)
+	require.Empty(t, codes, "binding alone does not enable two-step verification")
+	require.NoError(t, s.db.First(&current, u.ID).Error)
+	require.False(t, current.TwoFactorEnabled)
+	boundSession, err := NewLoginSessionService(s.db).CreateWithProof(u.ID, "security_change", "", "", time.Now().Add(time.Hour), renewed)
+	require.NoError(t, err)
+	op, _, err := s.Reauthenticate(ctx, u.ID, boundSession.ID, "current-password", "browser", "user")
+	require.NoError(t, err)
+	codes, renewed, err = s.Mutate(ctx, u.ID, boundSession.ID, op, "enable", "", "192.0.2.1", false)
+	require.NoError(t, err)
 	require.Len(t, codes, 10)
 	_, err = dao.NewLoginSessionDAO(s.db).Valid(old.ID, u.ID)
 	require.Error(t, err)
 	_, err = NewLoginSessionService(s.db).Create(u.ID, "password", "", "", time.Now().Add(time.Hour))
 	require.ErrorIs(t, err, ErrTwoFactorRequired)
-	fresh, err := NewLoginSessionService(s.db).CreateWithProof(u.ID, "password", "", "", time.Now().Add(time.Hour), renewed)
+	fresh, err := NewLoginSessionService(s.db).CreateWithProof(u.ID, "security_change", "", "", time.Now().Add(time.Hour), renewed)
 	require.NoError(t, err)
-	require.Equal(t, "totp", fresh.TwoFactorMethod)
+	require.Equal(t, "password", fresh.TwoFactorMethod)
 	_, err = dao.NewLoginSessionDAO(s.db).Valid(fresh.ID, u.ID)
 	require.NoError(t, err)
 	stored, err := dao.NewTwoFactorDAO(s.db).Method(u.ID, "totp")
@@ -269,7 +278,7 @@ func TestTwoFactorDisableRegenerateAndAudit(t *testing.T) {
 	require.NoError(t, err)
 	op, err = s.Operation(ctx, u.ID, session.ID, "user", proof)
 	require.NoError(t, err)
-	_, renewed, err = s.Mutate(ctx, u.ID, session.ID, op, "remove", "email", "192.0.2.1", true)
+	_, renewed, err = s.Mutate(ctx, u.ID, session.ID, op, "disable", "", "192.0.2.1", true)
 	require.NoError(t, err)
 	status, err := s.Status(u.ID)
 	require.NoError(t, err)
@@ -283,7 +292,7 @@ func TestTwoFactorDisableRegenerateAndAudit(t *testing.T) {
 	require.NoError(t, s.db.Order("id").Find(&events).Error)
 	require.Len(t, events, 2)
 	require.Equal(t, "regenerate", events[0].Action)
-	require.Equal(t, "remove", events[1].Action)
+	require.Equal(t, "disable", events[1].Action)
 }
 func TestTwoFactorTOTPTimeWindow(t *testing.T) {
 	s, u, _ := twoFactorFixture(t)
@@ -312,6 +321,7 @@ func TestTwoFactorTOTPTimeWindow(t *testing.T) {
 
 func TestTwoFactorAdminResetRequiresFreshAdminProof(t *testing.T) {
 	s, target, _ := twoFactorFixture(t)
+	require.NoError(t, s.db.Create(&model.Passkey{UserID: target.ID, RPID: "localhost", UserHandle: target.UUID, CredentialIDHash: "preserved", CredentialID: "preserved", CredentialData: "{}", Name: "Keep this login method"}).Error)
 	ctx := context.Background()
 	codes := enableTestFactor(t, s, target, "email")
 	pending, err := s.BeginLogin(ctx, target.ID, "account", "password", "", false, "target-browser")
@@ -335,6 +345,9 @@ func TestTwoFactorAdminResetRequiresFreshAdminProof(t *testing.T) {
 	require.NoError(t, err)
 	require.Error(t, s.Reset(ctx, admin.ID, target.ID, session.ID, op, "", "192.0.2.1"))
 	require.NoError(t, s.Reset(ctx, admin.ID, target.ID, session.ID, op, "identity verified via support", "192.0.2.1"))
+	var passkeys int64
+	require.NoError(t, s.db.Model(&model.Passkey{}).Where("user_id = ?", target.ID).Count(&passkeys).Error)
+	require.Equal(t, int64(1), passkeys, "administrator reset preserves primary Passkeys")
 	status, err := s.Status(target.ID)
 	require.NoError(t, err)
 	require.False(t, status.Enabled)
@@ -356,6 +369,7 @@ func TestTwoFactorPasswordlessEnrollmentAndUnavailableChannels(t *testing.T) {
 	s, u, session := twoFactorFixture(t)
 	ctx := context.Background()
 	require.NoError(t, s.db.Model(u).Updates(map[string]any{"password_hash": "", "salt": ""}).Error)
+	require.NoError(t, s.db.Model(session).Update("login_method", "external").Error)
 	op, _, err := s.Reauthenticate(ctx, u.ID, session.ID, "", "browser", "user")
 	require.NoError(t, err, "recent upstream login can reauthenticate a passwordless user")
 	_, err = s.Enroll(ctx, u.ID, session.ID, op, "phone", "browser")
@@ -368,9 +382,10 @@ func TestTwoFactorPasswordlessEnrollmentAndUnavailableChannels(t *testing.T) {
 	require.NoError(t, err)
 	view, err := s.View(ctx, pending)
 	require.NoError(t, err)
-	require.Len(t, view.Methods, 2)
+	require.Len(t, view.Methods, 3)
 	require.False(t, view.Methods[0].Available)
-	require.Equal(t, "recovery", view.Methods[1].Method)
+	require.False(t, view.Methods[1].Available)
+	require.Equal(t, "recovery", view.Methods[2].Method)
 }
 
 func TestTwoFactorContactReplacementRequiresExistingFactor(t *testing.T) {
@@ -430,7 +445,7 @@ func TestTwoFactorDefersExternalBindingUntilVerification(t *testing.T) {
 	require.Error(t, auth.CompleteTwoFactorBinding(ctx, continuation, csrf, proof))
 }
 
-func TestTwoFactorEnrollDeliveryMethods(t *testing.T) {
+func TestTwoFactorDeliveryMethodsAreAutomaticallyReady(t *testing.T) {
 	for _, method := range []string{"email", "phone"} {
 		t.Run(method, func(t *testing.T) {
 			s, u, session := twoFactorFixture(t)
@@ -444,30 +459,25 @@ func TestTwoFactorEnrollDeliveryMethods(t *testing.T) {
 			}
 			op, _, err := s.Reauthenticate(ctx, u.ID, session.ID, "current-password", "browser", "user")
 			require.NoError(t, err)
-			enrollment, err := s.Enroll(ctx, u.ID, session.ID, op, method, "browser")
-			require.NoError(t, err)
-			require.Empty(t, enrollment.Secret)
-			require.Empty(t, enrollment.QRCode)
-			tr, err := s.Read(ctx, enrollment.TwoFactorChallenge.ID, "browser")
-			require.NoError(t, err)
+			_, err = s.Enroll(ctx, u.ID, session.ID, op, method, "browser")
+			require.ErrorContains(t, err, "联系方式")
 			status, err := s.Status(u.ID)
 			require.NoError(t, err)
 			require.False(t, status.Enabled)
-			_, err = s.SendCode(ctx, tr, method)
-			require.NoError(t, err)
-			proof, err := s.Verify(ctx, tr, method, code, "192.0.2.1")
-			require.NoError(t, err)
-			codes, renewed, err := s.ConfirmEnrollment(ctx, tr, proof, "192.0.2.1")
+			require.True(t, status.CanEnable)
+			codes, renewed, err := s.Mutate(ctx, u.ID, session.ID, op, "enable", "", "192.0.2.1", false)
 			require.NoError(t, err)
 			require.Len(t, codes, 10)
-			_, err = NewLoginSessionService(s.db).CreateWithProof(u.ID, "password", "", "", time.Now().Add(time.Hour), renewed)
+			_, err = NewLoginSessionService(s.db).CreateWithProof(u.ID, "security_change", "", "", time.Now().Add(time.Hour), renewed)
 			require.NoError(t, err)
-			status, err = s.Status(u.ID)
+			tr, err := s.BeginLogin(ctx, u.ID, "account", "password", "", false, "browser")
 			require.NoError(t, err)
-			require.True(t, status.Enabled)
-			factor, err := dao.NewTwoFactorDAO(s.db).Method(u.ID, method)
+			_, err = s.SendCode(ctx, tr, method)
 			require.NoError(t, err)
-			require.Equal(t, verifiedFactorReceiver(u, method), factor.Receiver)
+			_, err = s.Verify(ctx, tr, method, code, "192.0.2.1")
+			require.NoError(t, err)
+			_, err = dao.NewTwoFactorDAO(s.db).Method(u.ID, method)
+			require.ErrorIs(t, err, gorm.ErrRecordNotFound, "no duplicate channel enrollment is needed")
 		})
 	}
 }

@@ -406,30 +406,51 @@ func (s *ExternalAuthService) ListUserIdentities(userID uint) ([]dto.ExternalIde
 }
 
 func (s *ExternalAuthService) Unbind(userID, principalID uint) error {
-	var principal model.ExternalPrincipal
-	if err := s.db.First(&principal, principalID).Error; err != nil {
-		return fmt.Errorf("外部身份不存在")
-	}
-	if principal.UserID == nil || *principal.UserID != userID {
-		return fmt.Errorf("无权解绑该外部身份")
-	}
-	user, err := s.userDAO.GetByID(userID)
-	if err != nil {
-		return err
-	}
-	var count int64
-	if err := s.db.Model(&model.ExternalPrincipal{}).Where("user_id = ? AND status = ?", userID, model.PrincipalStatusActive).Count(&count).Error; err != nil {
-		return err
-	}
-	if user.PasswordHash == "" && count <= 1 {
-		return fmt.Errorf("这是您唯一的登录方式，请先设置密码或绑定其他账号")
-	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	_, err := s.UnbindWithSession(userID, principalID, "", NewTwoFactorService(s.db, s.redis, nil))
+	return err
+}
+
+// UnbindWithSession preserves the caller's verified browser session while revoking old grants.
+func (s *ExternalAuthService) UnbindWithSession(userID, principalID uint, sid string, factors *TwoFactorService) (*TwoFactorProof, error) {
+	var proof *TwoFactorProof
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := dao.LockLoginUser(tx, userID); err != nil {
+			return err
+		}
+		var user model.User
+		if err := tx.First(&user, userID).Error; err != nil {
+			return err
+		}
+		proofMethod := "external"
+		if sid != "" {
+			session, err := dao.NewLoginSessionDAO(tx).Valid(sid, userID)
+			if err != nil {
+				return err
+			}
+			proofMethod = session.LoginMethod
+			if session.TwoFactorMethod != "" {
+				proofMethod = session.TwoFactorMethod
+			}
+		}
+		var current model.ExternalPrincipal
+		if err := tx.Where("id = ? AND user_id = ?", principalID, userID).First(&current).Error; err != nil {
+			return fmt.Errorf("外部身份不存在或无权解绑")
+		}
 		if err := tx.Where("principal_id = ?", principalID).Delete(&model.ExternalIdentifier{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&principal).Error
+		if err := tx.Delete(&current).Error; err != nil {
+			return err
+		}
+		verifier := factors.withDB(tx)
+		if err := verifier.validateLoginPath(userID); err != nil {
+			return err
+		}
+		var err error
+		proof, err = verifier.changeConfiguration(tx, &user, userID, "external_identity_removed", "external", "", "", proofMethod)
+		return err
 	})
+	return proof, err
 }
 
 func (s *ExternalAuthService) enabledAdapter(identifier string) (*model.IdentityConnection, protocol.AuthenticationAdapter, error) {

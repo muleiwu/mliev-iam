@@ -60,6 +60,7 @@ func (receiver Config) Get() []interfaces.InitConfig {
 		autoload.DatabaseSafety{},
 		autoload.Redis{},
 		autoload.Push{},
+		autoload.Passkey{},
 		autoload.Middleware{Extra: middleware},
 		autoload.Router{ExtraRoutes: routes, Capabilities: capabilities, Setup: func() *service.SetupInstaller { return container.MustGet[*service.SetupInstaller]() }},
 	}

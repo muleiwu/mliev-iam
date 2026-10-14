@@ -45,7 +45,7 @@ func TestTwoFactorHTTPLoginEnrollmentOIDCAndExternal(t *testing.T) {
 	require.NoError(t, err)
 	sql.SetMaxOpenConns(1)
 	t.Cleanup(func() { sql.Close() })
-	require.NoError(t, db.AutoMigrate(&model.Setting{}, &model.User{}, &model.LoginSession{}, &model.Role{}, &model.UserRole{}, &model.CaptchaConfig{}, &model.OIDCToken{}, &model.AuthorizationCode{}, &model.TwoFactorMethod{}, &model.TwoFactorRecoveryCode{}, &model.TwoFactorEvent{}, &model.ApplicationOIDCKey{}))
+	require.NoError(t, db.AutoMigrate(&model.Setting{}, &model.User{}, &model.LoginSession{}, &model.Role{}, &model.UserRole{}, &model.CaptchaConfig{}, &model.OIDCToken{}, &model.AuthorizationCode{}, &model.TwoFactorMethod{}, &model.TwoFactorRecoveryCode{}, &model.TwoFactorEvent{}, &model.ApplicationOIDCKey{}, &model.ExternalPrincipal{}, &model.IdentityConnection{}, &model.Passkey{}))
 	server := miniredis.RunT(t)
 	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { redisClient.Close() })
@@ -76,6 +76,7 @@ func TestTwoFactorHTTPLoginEnrollmentOIDCAndExternal(t *testing.T) {
 	protected.GET("/profile", UserController{}.GetUserProfile)
 	protected.POST("/2fa/reauthenticate", TwoFactorController{}.Reauthenticate)
 	protected.POST("/2fa/enroll", TwoFactorController{}.Enroll)
+	protected.POST("/2fa/enable", TwoFactorController{}.Mutate)
 	// Exercise the shared external/miniprogram completion gate after upstream identity verification.
 	router.POST("/external-auth/test-completion", func(c httpInterfaces.RouterContextInterface) {
 		profile, err := userService.GetUserByID(user.ID)
@@ -114,6 +115,11 @@ func TestTwoFactorHTTPLoginEnrollmentOIDCAndExternal(t *testing.T) {
 	rec, result := request(setup, "POST", "/api/2fa/challenges/"+id+"/verify", map[string]any{"method": "totp", "code": code})
 	require.Equal(t, 200, rec.Code, rec.Body.String())
 	require.Equal(t, true, result["twoFactorUpdated"])
+	require.Empty(t, result["recoveryCodes"])
+	rec, auth = request(setup, "POST", "/api/user/2fa/reauthenticate", map[string]any{"password": "correct-password"})
+	require.Equal(t, 200, rec.Code, rec.Body.String())
+	rec, result = request(setup, "POST", "/api/user/2fa/enable", map[string]any{"operationToken": auth["operationToken"]})
+	require.Equal(t, 200, rec.Code, rec.Body.String())
 	recovery := result["recoveryCodes"].([]any)
 	require.Len(t, recovery, 10)
 	rec, _ = request(setup, "GET", "/api/user/profile", nil)

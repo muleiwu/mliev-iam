@@ -419,7 +419,11 @@ func (ec ExternalAuthController) DeleteUserIdentity(c httpInterfaces.RouterConte
 		ec.Error(c, constants.ErrCodeBadRequest, "无效的外部身份 ID")
 		return
 	}
-	if err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).Unbind(userID, uint(id)); err != nil {
+	proof, err := service.NewExternalAuthService(helper.GetDatabase(), helper.GetRedis()).UnbindWithSession(userID, uint(id), middleware.GetCurrentSessionID(c), twoFactorService())
+	if err == nil {
+		err = renewTwoFactorSession(c, userID, proof)
+	}
+	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return
 	}

@@ -33,6 +33,7 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatal(openErr)
 	}
 	assertCustomPermissionSchema(t, gormDB)
+	assertPasskeySchema(t, gormDB)
 
 	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at", "failure_count"} {
 		var count int
@@ -105,7 +106,7 @@ func TestSqliteSmoke(t *testing.T) {
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const latestSchemaVersion int64 = 20261014000000
+	const latestSchemaVersion int64 = 20261014010000
 	if maxV != latestSchemaVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", latestSchemaVersion, maxV)
 	}

@@ -41,6 +41,11 @@ func (s *startupChecks) Assembly() (any, error) {
 	if !cfg.GetBool("app.installed", false) {
 		return readyState{}, nil
 	}
+	if passkey := service.ReadPasskeyConfig(); passkey.Enabled {
+		if _, err := passkey.WebAuthn(); err != nil {
+			return nil, err
+		}
+	}
 	if err := installation.EnsureCredentialKey(true); err != nil {
 		return nil, err
 	}

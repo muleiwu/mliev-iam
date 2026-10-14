@@ -50,18 +50,38 @@ func (s *TwoFactorService) Reauthenticate(ctx context.Context, userID uint, sid,
 	if kind == "admin" && !session.HasAdminAccess {
 		return "", nil, ErrTwoFactorExpired
 	}
-	if u.TwoFactorEnabled {
+	// The old password request remains supported, but all other ready methods
+	// are offered by a management challenge, including when 2FA is disabled.
+	if !u.TwoFactorEnabled && password != "" {
+		tr, e := s.newTransaction(ctx, u, "manage", kind, "", "", sid, false, binding, nil)
+		if e != nil {
+			return "", nil, e
+		}
+		proof, e := s.Verify(ctx, tr, "password", password, "reauth:"+sid)
+		if e != nil {
+			return "", nil, e
+		}
+		token, e := s.Operation(ctx, u.ID, sid, kind, proof)
+		return token, nil, e
+	}
+	status, err := s.Status(userID)
+	if err != nil {
+		return "", nil, err
+	}
+	ready := false
+	for _, m := range status.Methods {
+		if m.Enabled && m.Available {
+			ready = true
+		}
+	}
+	if u.TwoFactorEnabled || ready {
 		tr, e := s.newTransaction(ctx, u, "manage", kind, "", "", sid, false, binding, nil)
 		return "", tr, e
 	}
-	if u.PasswordHash != "" {
-		profile, e := NewUserService(s.db).ValidateUserForLogin(u.Username, password)
-		if e != nil || profile.ID != u.ID {
-			return "", nil, errors.New("当前密码错误")
-		}
-	} else if s.now().Sub(session.CreatedAt) > twoFactorTTL {
+	if session.LoginMethod != "external" || s.now().Sub(session.CreatedAt) > twoFactorTTL {
 		return "", nil, errors.New("请通过原应用重新登录，并在 5 分钟内返回本页确认身份")
 	}
+
 	op, err := s.Operation(ctx, u.ID, sid, kind, &TwoFactorProof{userID: u.ID, version: u.TwoFactorVersion, method: session.LoginMethod, at: s.now()})
 	return op, nil, err
 }
@@ -125,8 +145,11 @@ func (s *TwoFactorService) consumeOperation(ctx context.Context, token string, u
 }
 
 func (s *TwoFactorService) Enroll(ctx context.Context, userID uint, sid, token, method, binding string) (*TwoFactorEnrollment, error) {
-	if method != "totp" && method != "phone" && method != "email" {
-		return nil, errors.New("不支持的验证方式")
+	if method == "phone" || method == "email" {
+		return nil, errors.New("短信和邮箱现由已验证联系方式自动参与，请前往个人资料管理联系方式")
+	}
+	if method != "totp" {
+		return nil, errors.New("请在对应的凭据管理入口绑定该方式")
 	}
 	op, err := s.consumeOperation(ctx, token, userID, sid, "user")
 	if err != nil {
@@ -141,35 +164,29 @@ func (s *TwoFactorService) Enroll(ctx context.Context, userID uint, sid, token, 
 	}
 	factor := &model.TwoFactorMethod{UserID: userID, Method: method, CreatedAt: s.now()}
 	result := &TwoFactorEnrollment{}
-	if method == "totp" {
-		cipher, err := credentialcrypto.FromEnvironment()
-		if err != nil {
-			return nil, err
-		}
-		key, err := totp.Generate(totp.GenerateOpts{Issuer: "MLiev IAM", AccountName: u.Username, Period: 30, SecretSize: 20, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
-		if err != nil {
-			return nil, err
-		}
-		envelope, err := cipher.Encrypt([]byte(key.Secret()), credentialcrypto.AAD(userID, "two_factor_totp", cipher.ActiveKeyVersion()))
-		if err != nil {
-			return nil, err
-		}
-		factor.Ciphertext, factor.Nonce, factor.Algorithm, factor.KeyVersion = envelope.Ciphertext, envelope.Nonce, envelope.Algorithm, envelope.KeyVersion
-		image, err := key.Image(240, 240)
-		if err != nil {
-			return nil, err
-		}
-		var buffer bytes.Buffer
-		if err = png.Encode(&buffer, image); err != nil {
-			return nil, err
-		}
-		result.Secret, result.OTPAuthURI, result.QRCode = key.Secret(), key.URL(), "data:image/png;base64,"+base64.StdEncoding.EncodeToString(buffer.Bytes())
-	} else {
-		factor.Receiver = verifiedFactorReceiver(u, method)
-		if factor.Receiver == "" || !s.channelAvailable(method) {
-			return nil, errors.New("请先验证联系方式，并配置对应的消息推送渠道")
-		}
+	cipher, err := credentialcrypto.FromEnvironment()
+	if err != nil {
+		return nil, err
 	}
+	key, err := totp.Generate(totp.GenerateOpts{Issuer: "MLiev IAM", AccountName: u.Username, Period: 30, SecretSize: 20, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
+	if err != nil {
+		return nil, err
+	}
+	envelope, err := cipher.Encrypt([]byte(key.Secret()), credentialcrypto.AAD(userID, "two_factor_totp", cipher.ActiveKeyVersion()))
+	if err != nil {
+		return nil, err
+	}
+	factor.Ciphertext, factor.Nonce, factor.Algorithm, factor.KeyVersion = envelope.Ciphertext, envelope.Nonce, envelope.Algorithm, envelope.KeyVersion
+	image, err := key.Image(240, 240)
+	if err != nil {
+		return nil, err
+	}
+	var buffer bytes.Buffer
+	if err = png.Encode(&buffer, image); err != nil {
+		return nil, err
+	}
+	result.Secret, result.OTPAuthURI, result.QRCode = key.Secret(), key.URL(), "data:image/png;base64,"+base64.StdEncoding.EncodeToString(buffer.Bytes())
+
 	tr, err := s.newTransaction(ctx, u, "enroll", "user", "", "", sid, false, binding, factor)
 	if err != nil {
 		return nil, err
@@ -205,14 +222,6 @@ func (s *TwoFactorService) ConfirmEnrollment(ctx context.Context, tr *TwoFactorT
 		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "method"}}, UpdateAll: true}).Create(&factor).Error; err != nil {
 			return err
 		}
-		if !u.TwoFactorEnabled {
-			var err error
-			codes, err = replaceRecoveryCodes(tx, u.ID)
-			if err != nil {
-				return err
-			}
-		}
-		u.TwoFactorEnabled = true
 		var err error
 		renewed, err = s.changeConfiguration(tx, &u, u.ID, "enroll", tr.Pending.Method, "", ip, proof.method)
 		return err
@@ -276,32 +285,40 @@ func (s *TwoFactorService) Mutate(ctx context.Context, userID uint, sid, token, 
 			return err
 		}
 		switch action {
-		case "remove":
-			if method != "totp" && method != "phone" && method != "email" {
-				return errors.New("不支持的验证方式")
+		case "enable":
+			if u.TwoFactorEnabled {
+				return errors.New("两步验证已开启")
 			}
-			var count int64
-			if err := tx.Model(&model.TwoFactorMethod{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			status, err := s.withDB(tx).Status(userID)
+			if err != nil {
 				return err
 			}
-			if count <= 1 && !confirmDisable {
-				return errors.New("移除最后一种方式会关闭 2FA，请确认关闭")
+			if !status.CanEnable {
+				return errors.New("请先配置两种不同的可用认证方式")
+			}
+			u.TwoFactorEnabled = true
+			codes, err = replaceRecoveryCodes(tx, userID)
+			if err != nil {
+				return err
+			}
+		case "remove":
+			if method == "phone" || method == "email" {
+				return errors.New("短信和邮箱现由已验证联系方式自动参与，请前往个人资料管理联系方式")
+			}
+			if method != "totp" {
+				return errors.New("请在对应的凭据管理入口移除该方式")
 			}
 			if err := tx.Where("user_id = ? AND method = ?", userID, method).Delete(&model.TwoFactorMethod{}).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&model.TwoFactorMethod{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+			if err := s.withDB(tx).validateLoginPath(userID); err != nil {
 				return err
 			}
-			u.TwoFactorEnabled = count > 0
 		case "disable":
 			if !confirmDisable {
-				return errors.New("请确认关闭 2FA")
+				return errors.New("请确认关闭两步验证")
 			}
 			u.TwoFactorEnabled = false
-			if err := tx.Where("user_id = ?", userID).Delete(&model.TwoFactorMethod{}).Error; err != nil {
-				return err
-			}
 		case "regenerate":
 			if !u.TwoFactorEnabled {
 				return errors.New("请先开启 2FA")
