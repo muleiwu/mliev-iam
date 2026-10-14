@@ -205,13 +205,19 @@ func (s *OIDCUserInfoService) hasScope(scopes []string, targetScope string) bool
 
 // OIDCDiscoveryService OIDC发现服务
 type OIDCDiscoveryService struct {
+	db      *gorm.DB
 	baseURL string
 }
 
 // NewOIDCDiscoveryService 创建新的OIDC发现服务
-func NewOIDCDiscoveryService(baseURL string) *OIDCDiscoveryService {
+func NewOIDCDiscoveryService(baseURL string, databases ...*gorm.DB) *OIDCDiscoveryService {
+	var db *gorm.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	}
 	return &OIDCDiscoveryService{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
+		db:      db,
 	}
 }
 
@@ -224,7 +230,7 @@ func NewOIDCDiscoveryService(baseURL string) *OIDCDiscoveryService {
 //     refresh_token / client_credentials)
 //   - code_challenge_methods_supported 跟随 oidc.pkce.allow_plain 动态生成，
 //     plain 默认禁用时只声明 S256
-func (s *OIDCDiscoveryService) GetDiscoveryDocument(apps ...*model.Application) *dto.OIDCDiscoveryResponse {
+func (s *OIDCDiscoveryService) GetDiscoveryDocument(apps ...*model.Application) (*dto.OIDCDiscoveryResponse, error) {
 	codeChallengeMethods := []string{"S256"}
 	if pkcePlainAllowed() {
 		codeChallengeMethods = append(codeChallengeMethods, "plain")
@@ -259,7 +265,11 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument(apps ...*model.Application) 
 	}
 	if len(apps) > 0 && apps[0] != nil {
 		if config, err := model.DecodeOIDCAuthorizationConfig(apps[0].ProtocolConfig); err == nil {
-			response.ScopesSupported = config.Scopes
+			scopes, _, err := dao.ResolveOIDCScopes(s.db, config)
+			if err != nil {
+				return nil, err
+			}
+			response.ScopesSupported = scopes
 			for _, output := range []struct {
 				enabled bool
 				name    string
@@ -278,10 +288,12 @@ func (s *OIDCDiscoveryService) GetDiscoveryDocument(apps ...*model.Application) 
 					}
 				}
 			}
+		} else {
+			return nil, err
 		}
 	}
 
-	return response
+	return response, nil
 }
 
 // OIDCManagementService OIDC管理服务（已废弃，使用ApplicationService代替）

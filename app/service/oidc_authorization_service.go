@@ -197,18 +197,15 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 	if handler.IsPublicClient(app) {
 		return nil, constants.ErrUnauthorizedClient
 	}
-	if config.ScopeAuthorization.Enabled && req.Scope == "" {
+	if (config.ScopeAuthorization.Enabled || len(config.CustomPermissionIDs) > 0) && req.Scope == "" {
 		return nil, constants.ErrInvalidScope
 	}
 	scopes := s.parseScopes(req.Scope)
 	if len(scopes) == 0 {
-		// 如果没有指定scope，使用应用配置的默认scopes
-		if appScopes, ok := app.ProtocolConfig["scopes"].([]interface{}); ok {
-			for _, scope := range appScopes {
-				if scopeStr, ok := scope.(string); ok {
-					scopes = append(scopes, scopeStr)
-				}
-			}
+		var resolveErr error
+		scopes, _, resolveErr = dao.ResolveOIDCScopes(s.db, config)
+		if resolveErr != nil {
+			return nil, constants.ErrServerError
 		}
 	}
 
@@ -224,13 +221,15 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		return nil, err
 	}
 	app, scopes = grant.App, grant.Scopes
+	if err := s.grantAccessTokenExpiry(grant); err != nil {
+		return nil, err
+	}
 	// 6. 生成 JWT 格式的访问令牌（不含refresh_token和id_token）
-	accessToken, err := s.generateClientCredentialsJWTAccessToken(app, scopes, issuer, grant.Roles)
+	accessToken, err := s.generateClientCredentialsJWTAccessToken(app, scopes, issuer, grant)
 	if err != nil {
 		return nil, constants.ErrServerError
 	}
 	clientID := s.getClientIDFromApp(app)
-	tokenLifetime := s.getTokenLifetimeFromApp(app)
 
 	// 创建令牌记录（userID为0表示客户端凭据流程，不关联用户）
 	token := &model.OIDCToken{
@@ -239,7 +238,7 @@ func (s *OIDCAuthorizationService) ExchangeClientCredentials(req *dto.TokenReque
 		ClientID:    clientID,
 		UserID:      0, // 客户端凭据流程不关联用户
 		Scopes:      scopes,
-		ExpiresAt:   time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		ExpiresAt:   grant.AccessTokenExpiresAt,
 		Attributes:  grant.attributes(),
 	}
 
@@ -676,6 +675,9 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		return nil, err
 	}
 	app, scopes = grant.App, grant.Scopes
+	if err := s.grantAccessTokenExpiry(grant); err != nil {
+		return nil, err
+	}
 	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer, grant)
 	if err != nil {
 		return nil, fmt.Errorf("生成访问令牌失败: %w", err)
@@ -683,7 +685,6 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 	refreshToken := s.generateRefreshToken()
 
 	clientID := s.getClientIDFromApp(app)
-	tokenLifetime := s.getTokenLifetimeFromApp(app)
 
 	token := &model.OIDCToken{
 		LoginSessionID:      sessionID,
@@ -694,7 +695,7 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 		UserID:              userID,
 		Scopes:              scopes,
 		RefreshToken:        &refreshToken,
-		ExpiresAt:           time.Now().Add(time.Duration(tokenLifetime) * time.Second),
+		ExpiresAt:           grant.AccessTokenExpiresAt,
 		Attributes:          grant.attributes(),
 	}
 
@@ -873,7 +874,7 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 	var roles *model.OIDCRoleSnapshot
 	if len(grants) > 0 && grants[0] != nil {
 		roles = grants[0].Roles
-		tokenService = tokenService.withDepartmentClaims(grants[0].Departments)
+		tokenService = tokenService.withDepartmentClaims(grants[0].Departments).withAccessTokenExpiry(grants[0].AccessTokenExpiresAt)
 	}
 	accessToken, err := tokenService.GenerateAccessToken(user, clientID, scopes, roles)
 	if err != nil {
@@ -884,7 +885,7 @@ func (s *OIDCAuthorizationService) generateJWTAccessToken(app *model.Application
 }
 
 // generateClientCredentialsJWTAccessToken 生成客户端凭据流程的 JWT Access Token
-func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string, roleSnapshots ...*model.OIDCRoleSnapshot) (string, error) {
+func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *model.Application, scopes []string, issuer string, grant *oidcGrant) (string, error) {
 	accessTokenLifetime := s.getTokenLifetimeFromApp(app)
 	if accessTokenLifetime <= 0 {
 		// 只有应用未配置 tokenLifetime 时才回退到全局配置。
@@ -938,7 +939,8 @@ func (s *OIDCAuthorizationService) generateClientCredentialsJWTAccessToken(app *
 	}
 
 	// 5. 生成客户端凭据的 JWT Access Token
-	accessToken, err := tokenService.GenerateClientCredentialsAccessToken(clientID, scopes, roleSnapshots...)
+	tokenService = tokenService.withAccessTokenExpiry(grant.AccessTokenExpiresAt)
+	accessToken, err := tokenService.GenerateClientCredentialsAccessToken(clientID, scopes, grant.Roles)
 	if err != nil {
 		return "", fmt.Errorf("生成 Access Token 失败: %w", err)
 	}

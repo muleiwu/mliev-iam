@@ -235,3 +235,16 @@ func joinRoute(prefix, path string) string {
 	}
 	return strings.TrimRight(prefix, "/") + path
 }
+
+func TestCustomPermissionRoutesRequireAdmin(t *testing.T) {
+	router := newRecordingRouter()
+	Router{}.InitConfig()["http.router"].(func(httpInterfaces.RouterInterface))(router)
+	for _, group := range []string{"/api/admin/custom-permissions", "/api/admin/custom-permission-grants"} {
+		for _, route := range []struct{ method, path string }{{"GET", ""}, {"POST", ""}, {"PUT", "/:id"}, {"DELETE", "/:id"}} {
+			router.assertRoute(t, route.method, group+route.path)
+		}
+		if router.middlewarePrefixes[group] == 0 {
+			t.Fatalf("%s requires AdminAuthMiddleware", group)
+		}
+	}
+}

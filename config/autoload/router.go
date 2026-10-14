@@ -124,6 +124,20 @@ func (receiver Router) InitConfig() map[string]any {
 			adminRoles.GET("/stats", AdminController.RoleController{}.GetRoleStats)
 
 			// 管理员权限管理
+			customPermissions := admin.Group("/custom-permissions")
+			customPermissions.Use(middleware.AdminAuthMiddleware())
+			customPermissions.GET("", AdminController.CustomPermissionController{}.List)
+			customPermissions.POST("", AdminController.CustomPermissionController{}.Create)
+			customPermissions.GET("/:id", AdminController.CustomPermissionController{}.Get)
+			customPermissions.PUT("/:id", AdminController.CustomPermissionController{}.Update)
+			customPermissions.DELETE("/:id", AdminController.CustomPermissionController{}.Delete)
+			customGrants := admin.Group("/custom-permission-grants")
+			customGrants.Use(middleware.AdminAuthMiddleware())
+			customGrants.GET("", AdminController.CustomPermissionController{}.ListGrants)
+			customGrants.POST("", AdminController.CustomPermissionController{}.CreateGrant)
+			customGrants.PUT("/:id", AdminController.CustomPermissionController{}.UpdateGrant)
+			customGrants.DELETE("/:id", AdminController.CustomPermissionController{}.RevokeGrant)
+
 			adminPermissions := admin.Group("/permissions")
 			adminPermissions.Use(middleware.AdminAuthMiddleware())
 			adminPermissions.POST("", AdminController.PermissionController{}.CreatePermission)

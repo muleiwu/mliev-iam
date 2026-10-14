@@ -28,6 +28,12 @@ func TestSqliteSmoke(t *testing.T) {
 		t.Fatalf("goose up 失败: %v", err)
 	}
 
+	gormDB, openErr := openGormOnSQLDB(db, "sqlite")
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	assertCustomPermissionSchema(t, gormDB)
+
 	for _, col := range []string{"uuid", "email_verified_at", "phone_verified_at", "failure_count"} {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = ?`, col).Scan(&count); err != nil {
@@ -47,7 +53,7 @@ func TestSqliteSmoke(t *testing.T) {
 	}
 
 	for _, table := range []string{
-		"two_factor_methods", "two_factor_recovery_codes", "two_factor_events", "login_sessions", "captcha_configs", "identity_connections", "identity_connection_credentials",
+		"custom_permissions", "custom_permission_grants", "two_factor_methods", "two_factor_recovery_codes", "two_factor_events", "login_sessions", "captcha_configs", "identity_connections", "identity_connection_credentials",
 		"external_principals", "external_identifiers", "attachments",
 		"directory_sync_policies", "external_org_units", "external_memberships",
 		"directory_sync_runs", "directory_sync_changes",
@@ -99,7 +105,7 @@ func TestSqliteSmoke(t *testing.T) {
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const latestSchemaVersion int64 = 20261008000000
+	const latestSchemaVersion int64 = 20261014000000
 	if maxV != latestSchemaVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", latestSchemaVersion, maxV)
 	}

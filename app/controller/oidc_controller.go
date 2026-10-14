@@ -319,13 +319,17 @@ func (oc OIDCController) Discovery(c httpInterfaces.RouterContextInterface) {
 	// 构建基础URL，支持反向代理场景
 	baseURL := utils.GetBaseURL(c, fmt.Sprintf("/oidc/%s", clientId))
 
-	discoveryService := service.NewOIDCDiscoveryService(baseURL)
+	discoveryService := service.NewOIDCDiscoveryService(baseURL, helper.GetDatabase())
 	app, err := service.NewApplicationService(helper.GetDatabase()).GetApplicationByClientID(clientId)
 	if err != nil || !app.IsActive {
 		c.JSON(http.StatusNotFound, map[string]any{"error": "invalid_client"})
 		return
 	}
-	response := discoveryService.GetDiscoveryDocument(app)
+	response, err := discoveryService.GetDiscoveryDocument(app)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, map[string]any{"error": "server_error"})
+		return
+	}
 
 	c.JSON(http.StatusOK, response)
 }

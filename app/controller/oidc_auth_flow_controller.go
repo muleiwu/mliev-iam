@@ -141,11 +141,8 @@ type AuthInfoResponse struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	} `json:"client"`
-	Scopes []struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	} `json:"scopes"`
-	User struct {
+	Scopes []FlowStatusScope `json:"scopes"`
+	User   struct {
 		ID       uint   `json:"id"`
 		Username string `json:"username"`
 		RealName string `json:"realName"`
@@ -1028,7 +1025,11 @@ func (c OIDCAuthFlowController) GetAuthInfo(ctx httpInterfaces.RouterContextInte
 	response.Client.Description = app.Description
 
 	// 解析scopes并提供描述
-	response.Scopes = c.parseScopesWithDescription(session.Scope, app)
+	response.Scopes, err = c.parseScopesWithDescription(session.Scope, app)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "读取权限说明失败")
+		return
+	}
 
 	response.User.ID = user.ID
 	response.User.Username = user.Username
@@ -1063,46 +1064,40 @@ func (c OIDCAuthFlowController) checkMissingUserInfo(scopeStr string, user *dto.
 }
 
 // parseScopesWithDescription 解析scopes并返回带描述的列表
-func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string, apps ...*model.Application) []struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-} {
-	scopeDescriptions := map[string]string{
-		"openid":         "验证您的身份",
-		"profile":        "访问您的基本资料（昵称、头像等）",
-		"email":          "访问您的电子邮件地址",
-		"phone":          "访问您的手机号码",
-		"address":        "访问您的地址信息",
-		"offline_access": "在您离线时访问您的数据",
-	}
-
-	scopes := []struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}{}
-
-	// 解析scope字符串
-	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
-	for _, scope := range scopeList {
-		description, ok := scopeDescriptions[scope]
-		if len(apps) > 0 {
-			if custom := service.OIDCScopeDescription(apps[0], scope); custom != "" {
-				description, ok = custom, true
+func (c OIDCAuthFlowController) parseScopesWithDescription(scopeStr string, apps ...*model.Application) ([]FlowStatusScope, error) {
+	descriptions := map[string]string{"openid": "验证您的身份", "profile": "访问您的基本资料（昵称、头像等）", "email": "访问您的电子邮件地址", "phone": "访问您的手机号码", "address": "访问您的地址信息", "offline_access": "在您离线时访问您的数据"}
+	custom := map[string]model.CustomPermission{}
+	if len(apps) > 0 && apps[0] != nil {
+		config, err := model.DecodeOIDCAuthorizationConfig(apps[0].ProtocolConfig)
+		if err != nil {
+			return nil, err
+		}
+		_, custom, err = dao.ResolveOIDCScopes(helper.GetDatabase(), config)
+		if err != nil {
+			return nil, err
+		}
+		for code, rule := range config.ScopeAuthorization.Rules {
+			if model.IsStandardOIDCScope(code) && rule.Description != "" {
+				descriptions[code] = rule.Description
 			}
 		}
-		if !ok {
-			description = "访问 " + scope + " 权限"
-		}
-		scopes = append(scopes, struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-		}{
-			Name:        scope,
-			Description: description,
-		})
 	}
-
-	return scopes
+	result := []FlowStatusScope{}
+	scopes, err := model.ParseOIDCScopes(scopeStr)
+	if err != nil {
+		return nil, err
+	}
+	for _, code := range scopes {
+		item := FlowStatusScope{Name: code, Description: descriptions[code]}
+		if p, ok := custom[code]; ok {
+			item.DisplayName, item.Description = p.Name, p.Description
+		}
+		if item.Description == "" {
+			item.Description = "访问 " + code + " 权限"
+		}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func newVerificationCodeTraceID() string {
@@ -1815,6 +1810,7 @@ type FlowStatusUser struct {
 
 // FlowStatusScope 流程状态中的授权范围信息
 type FlowStatusScope struct {
+	DisplayName string `json:"displayName,omitempty"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
@@ -1992,7 +1988,11 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 	}
 
 	// 8. 信息完整，需要授权确认
-	scopes := c.parseScopesForFlow(session.Scope, app)
+	scopes, scopeErr := c.parseScopesForFlow(session.Scope, app)
+	if scopeErr != nil {
+		c.Error(ctx, constants.ErrCodeInternal, "读取权限说明失败")
+		return
+	}
 	c.Success(ctx, FlowStatusResponse{
 		SessionID:   sessionID,
 		Status:      "needs_consent",
@@ -2006,31 +2006,8 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 }
 
 // parseScopesForFlow 解析 scope 并返回流程状态所需的描述列表
-func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string, apps ...*model.Application) []FlowStatusScope {
-	scopeDescriptions := map[string]string{
-		"openid":         "验证您的身份",
-		"profile":        "访问您的基本资料（昵称、头像等）",
-		"email":          "访问您的电子邮件地址",
-		"phone":          "访问您的手机号码",
-		"address":        "访问您的地址信息",
-		"offline_access": "在您离线时访问您的数据",
-	}
-
-	var result []FlowStatusScope
-	scopeList := service.NewOIDCAuthorizationService(nil).ParseScopes(scopeStr)
-	for _, scope := range scopeList {
-		desc, ok := scopeDescriptions[scope]
-		if len(apps) > 0 {
-			if custom := service.OIDCScopeDescription(apps[0], scope); custom != "" {
-				desc, ok = custom, true
-			}
-		}
-		if !ok {
-			desc = "访问 " + scope + " 权限"
-		}
-		result = append(result, FlowStatusScope{Name: scope, Description: desc})
-	}
-	return result
+func (c OIDCAuthFlowController) parseScopesForFlow(scopeStr string, apps ...*model.Application) ([]FlowStatusScope, error) {
+	return c.parseScopesWithDescription(scopeStr, apps...)
 }
 
 // InitSessionRequest 初始化OIDC会话请求（用于iframe嵌入方式，无需浏览器跳转）

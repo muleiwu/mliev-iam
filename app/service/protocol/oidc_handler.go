@@ -29,6 +29,9 @@ func NewOIDCProtocolHandler(db *gorm.DB) *OIDCProtocolHandler {
 
 // ValidateConfig 验证OIDC配置
 func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) error {
+	if err := model.CleanLegacyCustomScopes(config); err != nil {
+		return err
+	}
 	// 验证重定向URI
 	redirectUris, ok := config["redirectUris"].([]interface{})
 	if !ok || len(redirectUris) == 0 {
@@ -192,14 +195,15 @@ func (h *OIDCProtocolHandler) GetProtocolDetails(app *model.Application) (interf
 
 	// 构造OIDC配置响应（不包含ClientSecret）
 	details := map[string]interface{}{
-		"clientId":      config["clientId"],
-		"redirectUris":  config["redirectUris"],
-		"grantTypes":    config["grantTypes"],
-		"responseTypes": config["responseTypes"],
-		"scopes":        config["scopes"],
-		"clientType":    config["clientType"],
-		"requirePkce":   config["requirePkce"],
-		"tokenLifetime": config["tokenLifetime"],
+		"clientId":            config["clientId"],
+		"redirectUris":        config["redirectUris"],
+		"grantTypes":          config["grantTypes"],
+		"responseTypes":       config["responseTypes"],
+		"scopes":              config["scopes"],
+		"customPermissionIds": config["customPermissionIds"],
+		"clientType":          config["clientType"],
+		"requirePkce":         config["requirePkce"],
+		"tokenLifetime":       config["tokenLifetime"],
 	}
 
 	return details, nil
@@ -407,8 +411,12 @@ func (h *OIDCProtocolHandler) ValidateScopes(app *model.Application, requestedSc
 	if err != nil {
 		return err
 	}
+	effective, _, err := dao.ResolveOIDCScopes(h.db, c)
+	if err != nil {
+		return err
+	}
 	allowed := map[string]bool{}
-	for _, scope := range c.Scopes {
+	for _, scope := range effective {
 		allowed[scope] = true
 	}
 	for _, scope := range scopes {
