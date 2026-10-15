@@ -19,8 +19,10 @@ async page => {
     await page.getByRole('button', { name: '添加 Passkey', exact: true }).waitFor();
   };
   const verifyPassword = async () => {
-    const choice = page.getByRole('button', { name: '密码', exact: true });
-    if (await choice.count()) await choice.click();
+    const choice = page.getByRole('button', { name: '账户密码', exact: true });
+    await choice.waitFor();
+    if (await page.locator('input[id^="two-factor-code-"]').count()) throw new Error('Verification input appeared before choosing a method');
+    await choice.click();
     await page.locator('input[id^="two-factor-code-"]').fill('correct-password');
     await page.getByRole('button', { name: '验证并继续', exact: true }).click();
   };
@@ -62,11 +64,22 @@ async page => {
   await page.getByLabel('密码', { exact: true }).fill('correct-password');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await page.waitForURL('**/auth/#/two-factor?**');
-  if (await page.getByRole('button', { name: '密码', exact: true }).count()) throw new Error('Primary password was offered a second time');
+  if (await page.getByRole('button', { name: '账户密码', exact: true }).count()) throw new Error('Primary password was offered a second time');
   await page.getByRole('button', { name: 'Passkey', exact: true }).click();
   await page.getByRole('button', { name: '验证并继续', exact: true }).click();
   await page.waitForURL('**/auth/#/account');
   steps.push('Password then Passkey');
+  await logout();
+  const secondFactorTransaction = await page.evaluate(async () => (await (await fetch('/__test/oidc')).json()).data);
+  await page.goto(`${base}/auth/#/oidc/login?session_id=${secondFactorTransaction.sessionId}`);
+  await page.getByRole('button', { name: '使用 Passkey 登录' }).click();
+  await page.waitForURL('**/auth/#/two-factor?**');
+  if (await page.getByRole('button', { name: 'Passkey', exact: true }).count()) throw new Error('OIDC offered the primary Passkey again');
+  await verifyPassword();
+  await page.waitForURL(url => !url.hash.startsWith('#/two-factor'));
+  const secondFactorFlow = await page.evaluate(async id => (await (await fetch(`/api/oidc/flow-status?session_id=${id}`)).json()), secondFactorTransaction.sessionId);
+  if (secondFactorFlow.code !== 0 || ['needs_login', 'needs_two_factor', 'error'].includes(secondFactorFlow.data.status)) throw new Error(`OIDC two-factor not authenticated ${JSON.stringify(secondFactorFlow)}`);
+  steps.push('OIDC Passkey then password with explicit method selection');
   await security();
   await page.getByRole('button', { name: '关闭两步验证', exact: true }).click();
   await page.getByRole('checkbox').check();
