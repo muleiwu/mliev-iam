@@ -97,6 +97,7 @@ func beginTwoFactorLogin(c httpInterfaces.RouterContextInterface, user *dto.User
 		}
 		session.PendingTwoFactorID = tr.ID
 		session.IsAuthenticated = false
+		session.HasLoginInteraction = false
 		session.UserID = nil
 		session.LoginSessionID = ""
 		session.IsConsentGranted = false
@@ -273,7 +274,7 @@ func (tc TwoFactorController) complete(c httpInterfaces.RouterContextInterface, 
 				tc.failure(c, err)
 				return
 			}
-			response, err := (OIDCAuthFlowController{}).completeOIDCLogin(c, sessions, session, tr.OIDCSessionID, user, tr.RememberMe)
+			response, err := (OIDCAuthFlowController{}).completeOIDCLogin(c, sessions, session, tr.OIDCSessionID, user, oidcLoginOptions{RememberMe: tr.RememberMe})
 			if err != nil {
 				tc.failure(c, err)
 				return

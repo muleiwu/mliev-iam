@@ -1,11 +1,15 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
@@ -23,6 +27,7 @@ func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
 		CodeChallengeMethod: "S256",
 		UserID:              &userID,
 		IsAuthenticated:     true,
+		HasLoginInteraction: true,
 		IsConsentGranted:    true,
 		AuthTime:            authTime,
 		Error: &dto.AuthorizationFailure{
@@ -37,7 +42,7 @@ func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
 		t.Fatalf("reset authentication state: %v", err)
 	}
 
-	if session.UserID != nil || session.IsAuthenticated || session.IsConsentGranted {
+	if session.UserID != nil || session.IsAuthenticated || session.IsConsentGranted || session.HasLoginInteraction {
 		t.Fatalf("authentication state was not cleared: %+v", session)
 	}
 	if !session.AuthTime.IsZero() {
@@ -55,6 +60,33 @@ func TestResetAuthenticationStatePreservesAuthorizationRequest(t *testing.T) {
 		session.CodeChallengeMethod != "S256" {
 		t.Fatalf("authorization request was changed: %+v", session)
 	}
+}
+
+func TestOIDCLoginInteractionLifecycle(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { client.Close() })
+	sessions := NewOIDCSessionService(client)
+	ctx := context.Background()
+	session, err := sessions.CreateSession(ctx, "client", "https://rp.example/callback", "openid", "state", "nonce", "code", "", "", "")
+	require.NoError(t, err)
+	require.False(t, session.HasLoginInteraction)
+	read := func(want bool) {
+		t.Helper()
+		stored, err := sessions.GetSession(ctx, session.SessionID)
+		require.NoError(t, err)
+		require.Equal(t, want, stored.HasLoginInteraction)
+	}
+	require.NoError(t, sessions.MarkAsAuthenticated(ctx, session.SessionID, 1, "login", true))
+	read(true)
+	require.NoError(t, sessions.ResetAuthentication(ctx, session.SessionID))
+	read(false)
+	require.NoError(t, sessions.MarkAsAuthenticated(ctx, session.SessionID, 1, "login", true))
+	require.NoError(t, sessions.MarkAsFailed(ctx, session.SessionID, &dto.AuthorizationFailure{Code: "access_denied"}))
+	read(false)
+	require.NoError(t, sessions.MarkAsAuthenticated(ctx, session.SessionID, 1, "login", true))
+	require.NoError(t, sessions.MarkAsAuthenticated(ctx, session.SessionID, 1, "login", false))
+	read(false)
 }
 
 func TestApplyOIDCRegistrationChoice(t *testing.T) {

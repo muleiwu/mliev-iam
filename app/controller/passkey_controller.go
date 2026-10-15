@@ -165,7 +165,7 @@ func (pc PasskeyController) LoginVerify(c httpInterfaces.RouterContextInterface)
 	c.Set("primary_auth_method", "passkey")
 	c.Set("primary_passkey_proof", proof)
 	if oidc != nil {
-		result, err := (OIDCAuthFlowController{}).completeOIDCLogin(c, sessions, oidc, tr.OIDCSessionID, user, tr.RememberMe)
+		result, err := (OIDCAuthFlowController{}).completeOIDCLogin(c, sessions, oidc, tr.OIDCSessionID, user, oidcLoginOptions{RememberMe: tr.RememberMe})
 		if err != nil {
 			(TwoFactorController{}).failure(c, err)
 			return

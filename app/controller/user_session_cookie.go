@@ -50,7 +50,7 @@ func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.User
 		return err
 	}
 	if oidcID != "" {
-		if err := sessions.MarkAsAuthenticated(ctx.Request().Context(), oidcID, user.ID, sid); err != nil {
+		if err := sessions.MarkAsAuthenticated(ctx.Request().Context(), oidcID, user.ID, sid, true); err != nil {
 			_ = service.NewLoginSessionService(helper.GetDatabase()).Revoke(user.ID, sid, "", "login_failed", nil)
 			return err
 		}

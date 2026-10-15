@@ -400,7 +400,7 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 		return
 	}
 
-	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
+	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, oidcLoginOptions{RememberMe: req.RememberMe})
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, err.Error())
 		return
@@ -409,7 +409,15 @@ func (c OIDCAuthFlowController) Login(ctx httpInterfaces.RouterContextInterface)
 	c.Success(ctx, response)
 }
 
-func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterContextInterface, sessionService *service.OIDCSessionService, session *service.OIDCSession, sessionID string, user *dto.UserResponse, rememberMe bool) (*LoginResponse, error) {
+type oidcLoginOptions struct {
+	RememberMe bool
+	// Only the explicit current-account choice reuses a browser login. A previous
+	// registration choice must not classify a later credential login as SSO.
+	ReuseCurrentLogin bool
+}
+
+func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterContextInterface, sessionService *service.OIDCSessionService, session *service.OIDCSession, sessionID string, user *dto.UserResponse, options oidcLoginOptions) (*LoginResponse, error) {
+	rememberMe := options.RememberMe
 	// 应用访问范围是登录事务的授权闸门。必须在标记会话、写 Cookie 和
 	// 签发任何应用 Token 之前完成，避免无权用户获得已认证事务。
 	app, failure, err := checkOIDCUserAccess(session, user.ID)
@@ -427,7 +435,7 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 		}, nil
 	}
 
-	if session.RegistrationDecision != service.OIDCRegistrationChoiceCurrent {
+	if !options.ReuseCurrentLogin {
 		if err := beginTwoFactorLogin(ctx, user, "oidc", sessionID, rememberMe); err != nil {
 			var pending *twoFactorPending
 			if errors.As(err, &pending) {
@@ -438,7 +446,7 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 	}
 	// 在改变当前浏览器的账号前，先准备新账号的全部凭据。
 	inheritSID := ""
-	if session.RegistrationDecision == service.OIDCRegistrationChoiceCurrent {
+	if options.ReuseCurrentLogin {
 		if raw, err := ctx.Cookie(middleware.UserCookieName); err == nil {
 			if claims, err := middleware.ValidateUserSessionToken(raw); err == nil && claims.UserID == user.ID {
 				inheritSID = claims.SessionID
@@ -471,7 +479,8 @@ func (c OIDCAuthFlowController) completeOIDCLogin(ctx httpInterfaces.RouterConte
 
 	// 标记会话为已认证
 	expectedChallenge, _ := ctx.Get("two_factor_challenge_id").(string)
-	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID, loginSID, expectedChallenge); err != nil {
+	hasLoginInteraction := !options.ReuseCurrentLogin
+	if err := sessionService.MarkAsAuthenticated(ctx.Request().Context(), sessionID, user.ID, loginSID, hasLoginInteraction, expectedChallenge); err != nil {
 		_ = dao.NewOIDCTokenDAO(helper.GetDatabase()).RevokeByRefreshToken(tokenResponse.RefreshToken)
 		return nil, fmt.Errorf("更新会话失败: %w", err)
 	}
@@ -594,7 +603,7 @@ func (c OIDCAuthFlowController) LoginByCode(ctx httpInterfaces.RouterContextInte
 	}
 
 	ctx.Set("primary_auth_method", req.Type)
-	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, req.RememberMe)
+	response, err := c.completeOIDCLogin(ctx, sessionService, session, req.SessionID, user, oidcLoginOptions{RememberMe: req.RememberMe})
 	if err != nil {
 		c.Error(ctx, constants.ErrCodeInternal, err.Error())
 		return
@@ -761,7 +770,7 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 	// 6. 如果有会话，自动登录并衔接授权流程（生成 token、写 refresh_token cookie、返回 NextURL）
 	if req.SessionID != "" && oidcSession != nil {
 		sessionService := service.NewOIDCSessionService(helper.GetRedis())
-		loginResp, err := c.completeOIDCLogin(ctx, sessionService, oidcSession, req.SessionID, userResponse, req.RememberMe)
+		loginResp, err := c.completeOIDCLogin(ctx, sessionService, oidcSession, req.SessionID, userResponse, oidcLoginOptions{RememberMe: req.RememberMe})
 		if err != nil {
 			// 注册成功但自动登录失败，降级为手动登录
 			response := RegisterResponse{
@@ -1690,7 +1699,7 @@ func (c OIDCAuthFlowController) continueWithCurrentRegistrationUser(
 		c.registrationChoiceError(ctx, err)
 		return
 	}
-	loginResponse, err := c.completeOIDCLogin(ctx, sessions, updated, req.SessionID, currentUser, true)
+	loginResponse, err := c.completeOIDCLogin(ctx, sessions, updated, req.SessionID, currentUser, oidcLoginOptions{RememberMe: true, ReuseCurrentLogin: true})
 	if err != nil {
 		_ = sessions.ResetRegistrationChoice(ctx.Request().Context(), req.SessionID)
 		c.Error(ctx, constants.ErrCodeInternal, "使用当前账号失败: "+err.Error())
@@ -1998,7 +2007,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		Status:      "needs_consent",
 		Prompt:      session.Prompt,
 		CsrfToken:   session.CsrfToken,
-		AutoApprove: service.ApplicationAutoApprovesConsent(app),
+		AutoApprove: service.OIDCSessionAutoApprovesConsent(app, session),
 		Client:      clientInfo,
 		User:        userInfo,
 		Scopes:      scopes,
