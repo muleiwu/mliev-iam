@@ -35,10 +35,12 @@ const twoFactorTTL = 5 * time.Minute
 // TwoFactorProof can only be constructed by this package after verification.
 // It is never serialized or accepted from an HTTP request.
 type TwoFactorProof struct {
-	userID  uint
-	version uint64
-	method  string
-	at      time.Time
+	userID           uint
+	version          uint64
+	method           string
+	at               time.Time
+	primaryPasskeyID uint
+	stamp            string
 }
 
 func (p *TwoFactorProof) validFor(u *model.User) bool {
@@ -70,6 +72,7 @@ type TwoFactorTransaction struct {
 	Purpose          string
 	Kind             string
 	PrimaryMethod    string
+	PrimaryPasskeyID uint
 	OIDCSessionID    string
 	ParentSessionID  string
 	RememberMe       bool
@@ -81,9 +84,10 @@ type TwoFactorTransaction struct {
 }
 
 type TwoFactorService struct {
-	db     *gorm.DB
-	redis  *redis.Client
-	config *VerificationCodeConfig
+	db            *gorm.DB
+	redis         *redis.Client
+	config        *VerificationCodeConfig
+	passkeyConfig *PasskeyConfig
 	// send is injectable for integration tests; production uses the configured PushService.
 	send func(context.Context, string, string, string, time.Duration) error
 	now  func() time.Time
@@ -107,7 +111,7 @@ func twoFactorHash(value string) string {
 }
 
 func twoFactorCredentialStamp(u *model.User) string {
-	return twoFactorHash(fmt.Sprintf("%s:%s:%v", u.PasswordHash, u.Salt, u.SessionRevokedAt))
+	return twoFactorHash(fmt.Sprintf("%s:%s:%v:%s:%v:%s:%v", u.PasswordHash, u.Salt, u.SessionRevokedAt, stringPointerValue(u.Email), u.EmailVerifiedAt, stringPointerValue(u.Phone), u.PhoneVerifiedAt))
 }
 
 func (s *TwoFactorService) user(id uint) (*model.User, error) {
@@ -160,23 +164,46 @@ func (s *TwoFactorService) Status(userID uint) (*dto.TwoFactorStatus, error) {
 		return nil, err
 	}
 	status := &dto.TwoFactorStatus{Enabled: u.TwoFactorEnabled, HasPassword: u.PasswordHash != "", Methods: []dto.TwoFactorMethodInfo{}}
-	for _, method := range []string{"totp", "phone", "email"} {
+	for _, method := range []string{"password", "passkey", "totp", "phone", "email"} {
 		info := dto.TwoFactorMethodInfo{Method: method}
-		if method == "totp" {
+		switch method {
+		case "password":
+			info.Enabled = u.PasswordHash != ""
+			info.Available = info.Enabled
+		case "passkey":
+			cfg := s.passkeySettings()
+			if cfg.Enabled {
+				if _, e := cfg.WebAuthn(); e == nil {
+					var count int64
+					if err := s.db.Model(&model.Passkey{}).Where("user_id = ? AND rp_id = ? AND user_handle = ?", userID, cfg.RPID, u.UUID).Count(&count).Error; err != nil {
+						return nil, err
+					}
+					info.Enabled = count > 0
+					info.Available = info.Enabled
+				}
+			}
+		case "totp":
 			_, e := credentialcrypto.FromEnvironment()
 			info.Available = e == nil
-		} else {
-			info.Available = verifiedFactorReceiver(u, method) != "" && s.channelAvailable(method)
-			info.MaskedReceiver = MaskVerificationReceiver(verifiedFactorReceiver(u, method))
-		}
-		for _, f := range factors {
-			if f.Method == method {
-				info.Enabled = true
-				info.Available = s.methodAvailable(u, f)
-				info.MaskedReceiver = MaskVerificationReceiver(f.Receiver)
+			for _, f := range factors {
+				if f.Method == method {
+					info.Enabled = true
+					info.Available = s.methodAvailable(u, f)
+				}
 			}
+		default:
+			receiver := verifiedFactorReceiver(u, method)
+			info.Enabled = receiver != ""
+			info.Available = info.Enabled && s.channelAvailable(method)
+			info.MaskedReceiver = MaskVerificationReceiver(receiver)
 		}
 		status.Methods = append(status.Methods, info)
+	}
+
+	// Computing eligibility also accounts for external-only accounts.
+	_, status.CanEnable, err = s.loginPath(userID, status.Methods)
+	if err != nil {
+		return nil, err
 	}
 	err = s.db.Model(&model.TwoFactorRecoveryCode{}).Where("user_id = ? AND used_at IS NULL", userID).Count(&status.RecoveryCodesRemaining).Error
 	return status, err
@@ -278,7 +305,7 @@ func (s *TwoFactorService) View(ctx context.Context, tr *TwoFactorTransaction) (
 				out.Methods = append(out.Methods, m)
 			}
 		}
-		if status.RecoveryCodesRemaining > 0 {
+		if status.Enabled && status.RecoveryCodesRemaining > 0 {
 			out.Methods = append(out.Methods, dto.TwoFactorMethodInfo{Method: "recovery", Enabled: true, Available: true})
 		}
 	}
@@ -372,6 +399,17 @@ for i=1,3 do local n=redis.call('INCR',KEYS[i]); if n==1 then redis.call('EXPIRE
 return 1`)
 
 func (s *TwoFactorService) Verify(ctx context.Context, tr *TwoFactorTransaction, method, code, ip string) (*TwoFactorProof, error) {
+	if method == "passkey" {
+		return nil, errors.New("请使用 Passkey 验证接口")
+	}
+	return s.verifyWith(ctx, tr, method, code, ip, nil)
+}
+
+func (s *TwoFactorService) verifyWith(ctx context.Context, tr *TwoFactorTransaction, method, code, ip string, assertion func(*gorm.DB, *model.User) error) (*TwoFactorProof, error) {
+	if s.redis == nil {
+		return nil, ErrTwoFactorExpired
+	}
+
 	if err := s.allowed(ctx, tr, method); err != nil {
 		return nil, err
 	}
@@ -388,7 +426,9 @@ func (s *TwoFactorService) Verify(ctx context.Context, tr *TwoFactorTransaction,
 		return nil, errors.New("验证正在处理中，请稍后重试")
 	}
 	defer func() { _, _ = twoFactorConsume.Run(ctx, s.redis, []string{lockKey}, lockToken).Result() }()
-	if exists, err := s.redis.Exists(ctx, "2fa:challenge:"+tr.ID).Result(); err != nil || exists != 1 {
+	stored, err := s.redis.Get(ctx, "2fa:challenge:"+tr.ID).Bytes()
+	expected, marshalErr := json.Marshal(tr)
+	if err != nil || marshalErr != nil || string(stored) != string(expected) || !tr.ExpiresAt.After(s.now()) {
 		return nil, ErrTwoFactorExpired
 	}
 
@@ -425,6 +465,27 @@ func (s *TwoFactorService) Verify(ctx context.Context, tr *TwoFactorTransaction,
 			if _, err := dao.NewLoginSessionDAO(tx).Valid(tr.ParentSessionID, u.ID); err != nil {
 				return ErrTwoFactorExpired
 			}
+		}
+		if tr.PrimaryPasskeyID != 0 {
+			p := &PasskeyProof{userID: u.ID, credentialID: tr.PrimaryPasskeyID, version: tr.Version, stamp: tr.CredentialStamp, at: tr.CreatedAt}
+			if err := p.validate(tx, &u); err != nil {
+				return err
+			}
+		}
+		if assertion != nil {
+			return assertion(tx, &u)
+		}
+		if method == "password" {
+			if u.PasswordHash == "" || !NewUserService(tx).verifyPassword(code, u.Salt, u.PasswordHash) {
+				return errors.New("密码错误")
+			}
+			return nil
+		}
+		if method == "phone" || method == "email" {
+			if verifiedFactorReceiver(&u, method) == "" || !s.channelAvailable(method) {
+				return ErrTwoFactorExpired
+			}
+			return nil
 		}
 		if method == "recovery" {
 			now := s.now()
@@ -480,7 +541,7 @@ func (s *TwoFactorService) Verify(ctx context.Context, tr *TwoFactorTransaction,
 	for _, key := range keys[1:] {
 		_ = s.redis.Decr(ctx, key).Err()
 	}
-	return &TwoFactorProof{userID: tr.UserID, version: tr.Version, method: method, at: s.now()}, nil
+	return &TwoFactorProof{userID: tr.UserID, version: tr.Version, method: method, at: s.now(), primaryPasskeyID: tr.PrimaryPasskeyID, stamp: tr.CredentialStamp}, nil
 }
 
 func factorEnvelope(f model.TwoFactorMethod) credentialcrypto.Envelope {

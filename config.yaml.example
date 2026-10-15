@@ -178,3 +178,12 @@ push:
   emailChannelId: 2
   # 短信签名
   smsSignature: "【您的签名】"
+
+# Passkey / WebAuthn：启用前显式配置固定的 RP ID 和可信前端 Origin。
+# 生产使用 HTTPS；本地可使用 localhost。不要随请求 Host 改变 RP ID。
+passkey:
+  enabled: false
+  rp_id: "localhost"
+  rp_origins:
+    - "http://localhost:8080"
+  rp_display_name: "MLiev IAM"

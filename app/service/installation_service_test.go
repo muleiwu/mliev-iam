@@ -35,6 +35,9 @@ func TestInstallationRetryPreservesAdministrator(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("retry duplicated users: %d", count)
 	}
+	if err := db.Model(&model.Application{}).Where("uuid = ? AND is_protected = ?", AccountCenterApplicationUUID, true).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("installation must create one protected personal center: count=%d err=%v", count, err)
+	}
 	if err := initializeInstallationOnce(db, admin, uuid.NewString()); err == nil {
 		t.Fatal("another installation must not take over initialized data")
 	}

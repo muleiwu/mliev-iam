@@ -566,7 +566,7 @@ func (oc OIDCController) trySSO(
 		return false
 	}
 
-	if err := sessionService.MarkAsAuthenticated(rctx, session.SessionID, userID, loginSID); err != nil {
+	if err := sessionService.MarkAsAuthenticated(rctx, session.SessionID, userID, loginSID, false); err != nil {
 		return false
 	}
 	previousRefresh := ""

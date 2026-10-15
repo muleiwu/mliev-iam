@@ -36,6 +36,9 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	router.assertNoRoute(t, "GET", "/oidc/:client_id/token")
 
 	// 个人中心：资料/密码/绑定管理
+	router.assertRoute(t, "GET", "/api/user/auth/authorize")
+	router.assertRoute(t, "GET", "/api/user/auth/callback")
+	router.assertRoute(t, "POST", "/api/user/login")
 	router.assertRoute(t, "GET", "/api/user/profile")
 	router.assertRoute(t, "PUT", "/api/user/profile")
 	router.assertRoute(t, "PUT", "/api/user/password")

@@ -16,9 +16,11 @@ import (
 const (
 	// AdminConsoleApplicationUUID is UUIDv5(URL, "https://cnb.cool/mliev/iam/mliev-iam/admin-console").
 	// It is deliberately stable so every deployment can identify the built-in client.
-	AdminConsoleApplicationUUID = model.BuiltinAdminConsoleApplicationUUID
-	AdminConsoleApplicationName = "木雷坞 IAM 管理后台"
-	AdminConsoleCallbackPath    = model.BuiltinAdminConsoleCallbackPath
+	AdminConsoleApplicationUUID  = model.BuiltinAdminConsoleApplicationUUID
+	AdminConsoleApplicationName  = "木雷坞 IAM 管理后台"
+	AdminConsoleCallbackPath     = model.BuiltinAdminConsoleCallbackPath
+	AccountCenterApplicationUUID = firstparty.AccountID
+	AccountCenterCallbackPath    = firstparty.AccountCallbackPath
 )
 
 // IsAdminConsoleApplication limits first-party behavior to the single built-in,
@@ -27,9 +29,21 @@ func IsAdminConsoleApplication(app *model.Application) bool {
 	return app != nil && app.UUID == AdminConsoleApplicationUUID && app.IsProtected
 }
 
+// ApplicationAutoApprovesConsent is limited to these two built-in surfaces.
+// Registered extension clients retain their own consent policy.
+func ApplicationAutoApprovesConsent(app *model.Application) bool {
+	return app != nil && app.IsProtected &&
+		(app.UUID == AdminConsoleApplicationUUID || app.UUID == AccountCenterApplicationUUID)
+}
+
+// EnsureAccountCenterApplication allows all existing users, without admin roles.
+func EnsureAccountCenterApplication(db *gorm.DB) (*model.Application, error) {
+	return EnsureFirstPartyApplication(db, AccountCenterApplicationUUID, nil)
+}
+
 // ApplicationAllowsRegistration is the single policy used by the public
 // client configuration and every server-side registration entry point.
-// The built-in admin console only accepts existing super administrators.
+// Built-in clients accept existing accounts; admin access is checked separately.
 func ApplicationAllowsRegistration(app *model.Application) bool {
 	if app == nil {
 		return false
@@ -97,10 +111,10 @@ func EnsureFirstPartyApplication(db *gorm.DB, clientID string, scope *model.Appl
 				AccessScope:    scope,
 			}
 			if err := tx.Create(&app).Error; err != nil {
-				return fmt.Errorf("创建内置管理后台应用失败: %w", err)
+				return fmt.Errorf("创建内置认证应用失败: %w", err)
 			}
 		case err != nil:
-			return fmt.Errorf("检查内置管理后台应用失败: %w", err)
+			return fmt.Errorf("检查内置认证应用失败: %w", err)
 		default:
 			app.ProtocolType = string(model.ProtocolTypeOIDC)
 			app.ProtocolConfig = protocolConfig
@@ -110,16 +124,16 @@ func EnsureFirstPartyApplication(db *gorm.DB, clientID string, scope *model.Appl
 			app.AccessScope = scope
 			app.DeletedAt = gorm.DeletedAt{}
 			if err := tx.Unscoped().Save(&app).Error; err != nil {
-				return fmt.Errorf("修复内置管理后台应用失败: %w", err)
+				return fmt.Errorf("修复内置认证应用失败: %w", err)
 			}
 		}
 
 		if _, err := dao.NewApplicationOIDCKeyDAO(tx).GetPrimaryByApplicationID(app.ID); err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("检查内置管理后台签名密钥失败: %w", err)
+				return fmt.Errorf("检查内置认证签名密钥失败: %w", err)
 			}
 			if err := protocol.NewOIDCProtocolHandler(tx).CreateApplication(&app); err != nil {
-				return fmt.Errorf("初始化内置管理后台签名密钥失败: %w", err)
+				return fmt.Errorf("初始化内置认证签名密钥失败: %w", err)
 			}
 		}
 
@@ -141,7 +155,10 @@ func (*SystemApplicationServer) Run() error {
 	if !helper.GetConfig().GetBool("app.installed", false) {
 		return nil
 	}
-	_, err := EnsureAdminConsoleApplication(helper.GetDatabase(), 0)
+	if _, err := EnsureAdminConsoleApplication(helper.GetDatabase(), 0); err != nil {
+		return err
+	}
+	_, err := EnsureAccountCenterApplication(helper.GetDatabase())
 	return err
 }
 

@@ -309,19 +309,33 @@ func (receiver Router) InitConfig() map[string]any {
 			adminMigration.GET("/legacy-users/:id", AdminController.MigrationController{}.GetLegacyUser)
 
 			// === 普通用户路由 ===
-			// 公开：/api/user/login
+			// 公开：统一认证入口与回调，以及兼容的密码登录接口。
 			userPublic := api.Group("/user")
 			userPublic.POST("/login", controller.UserController{}.ValidateLogin)
+			userPublic.GET("/auth/authorize", controller.AccountAuthController{}.Authorize)
+			userPublic.GET("/auth/callback", controller.AccountAuthController{}.Callback)
 
+			passkey := api.Group("/passkey")
+			passkey.GET("/config", controller.PasskeyController{}.Config)
+			passkey.POST("/login/options", controller.PasskeyController{}.LoginOptions)
+			passkey.POST("/login/verify", controller.PasskeyController{}.LoginVerify)
 			twoFactor := api.Group("/2fa/challenges")
 			twoFactor.GET("/:id", controller.TwoFactorController{}.Get)
 			twoFactor.POST("/:id/send-code", controller.TwoFactorController{}.Send)
 			twoFactor.POST("/:id/verify", controller.TwoFactorController{}.Verify)
 			twoFactor.POST("/:id/cancel", controller.TwoFactorController{}.Cancel)
+			twoFactor.POST("/:id/passkey/options", controller.PasskeyController{}.SecondOptions)
+			twoFactor.POST("/:id/passkey/verify", controller.PasskeyController{}.SecondVerify)
 
 			// 受保护：/api/user/*
 			userAuth := api.Group("/user")
 			userAuth.Use(middleware.UserAuthMiddleware())
+			userAuth.GET("/passkeys", controller.PasskeyController{}.List)
+			userAuth.POST("/passkeys/registration/options", controller.PasskeyController{}.RegistrationOptions)
+			userAuth.POST("/passkeys/registration/verify", controller.PasskeyController{}.RegistrationVerify)
+			userAuth.PATCH("/passkeys/:id", controller.PasskeyController{}.Rename)
+			userAuth.DELETE("/passkeys/:id", controller.PasskeyController{}.Delete)
+			userAuth.POST("/2fa/enable", controller.TwoFactorController{}.Mutate)
 			userAuth.GET("/2fa", controller.TwoFactorController{}.Status)
 			userAuth.POST("/2fa/reauthenticate", controller.TwoFactorController{}.Reauthenticate)
 			userAuth.POST("/2fa/enroll", controller.TwoFactorController{}.Enroll)

@@ -1288,7 +1288,31 @@ func (s *DirectorySyncService) applyUserChange(change *model.DirectorySyncChange
 			updates["phone"] = stringValue(change.AfterData["phone"])
 		}
 		if len(updates) > 0 {
-			if err := s.db.Model(&model.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+			if err := s.db.Transaction(func(tx *gorm.DB) error {
+				if err := dao.LockLoginUser(tx, userID); err != nil {
+					return err
+				}
+				var current model.User
+				if err := tx.First(&current, userID).Error; err != nil {
+					return err
+				}
+				contactChanged := false
+				if value, exists := updates["email"]; exists && value != stringPointerValue(current.Email) {
+					updates["email_verified_at"] = nil
+					contactChanged = true
+				}
+				if value, exists := updates["phone"]; exists && value != stringPointerValue(current.Phone) {
+					updates["phone_verified_at"] = nil
+					contactChanged = true
+				}
+				if err := tx.Model(&model.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+					return err
+				}
+				if contactChanged {
+					return InvalidateAuthenticationConfiguration(tx, userID, "directory_contact_changed")
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 		}

@@ -1,18 +1,18 @@
-# 双因素认证（2FA）
+# 两步验证（2FA）
 
-用户在个人中心的「安全设置 → 双因素认证」中自行开启验证器（TOTP）、短信或邮箱。三种方式独立绑定；首次成功绑定会生成 10 组一次性恢复码。恢复码只展示一次，请保存到安全位置。
+用户在个人中心「安全设置」中绑定 Passkey、验证器（TOTP），并单独开启两步验证。已设置密码、有效 Passkey、已验证且消息渠道可用的短信／邮箱、已绑定 TOTP 自动参与。开启需要存在两种不同方式组成的完整登录路径，并生成 10 组一次性恢复码；恢复码只展示一次。完整的 Passkey 配置、接口和升级说明见 [Passkey 与统一两步验证](passkeys.zh-CN.md)。
 
 ## 登录与恢复
 
 个人中心、OIDC、管理后台统一登录、企业身份源、社交登录、小程序及扫码登录均执行同一认证规则：完成第一步验证后，已开启 2FA 的用户必须完成二次验证，才会创建登录会话和签发 Cookie、令牌或授权码。外部身份绑定到已有本地账户的操作也延后至二次验证通过。
 
-短信／邮箱免密登录会排除第一步使用的同一渠道。可以使用另一已绑定方式或恢复码；没有可用方式时，改用密码登录，或由管理员核验身份后重置。已完成 2FA 的有效会话可继续用于 SSO，无需每个应用重复验证。机器 `client_credentials` 授权不受影响。
+第二步排除第一步使用的同类方式：密码、Passkey、短信、邮箱均可互相验证；两个不同 Passkey 仍算同类方式。TOTP 和恢复码只用于第二步。可以使用另一已绑定方式或恢复码；没有可用方式时，改用密码登录，或由管理员核验身份后重置。已完成 2FA 的有效会话可继续用于 SSO，无需每个应用重复验证。机器 `client_credentials` 授权不受影响。
 
-更换联系方式、移除验证方式、关闭 2FA、重新生成恢复码，都需要重新验证已有方式或恢复码。首次开启需要当前密码；无密码用户须在通过原应用重新登录后的 5 分钟内操作。移除最后一种方式需要明确确认关闭 2FA。
+更换联系方式、移除验证方式、关闭 2FA、重新生成恢复码，都需要重新验证已有方式或恢复码。绑定与开启均需要重新确认身份；没有本地可用方式的无密码用户须在通过原应用重新登录后的 5 分钟内操作。移除方式后仍需存在完整登录路径，否则须先添加替代方式或独立关闭两步验证。关闭保留 Passkey、TOTP、密码和联系方式，同时作废恢复码。
 
-配置变更会更新配置版本、撤销旧登录会话和关联应用令牌，并令未完成挑战失效。当前浏览器获得新的个人会话；同一会话上的有效管理员访问也随之轮换。其他浏览器需要重新登录。管理员或目录同步更改联系方式不会自动将新地址绑定为 2FA；不再匹配的旧渠道将不可用，账户仍要求二次验证。
+配置变更会更新配置版本、撤销旧登录会话和关联应用令牌，并令未完成挑战失效。当前浏览器获得新的个人会话；同一会话上的有效管理员访问也随之轮换。其他浏览器需要重新登录。管理员或目录同步更改联系方式会清除旧验证状态并撤销会话和挑战；管理员显式确认新地址已验证时可重新参与认证。账户的两步验证开关保持不变。
 
-管理员可在用户列表查看 2FA 状态并执行「重置 2FA」。此操作需要重新确认管理员身份，并填写身份核验及重置原因。重置会关闭目标账户的 2FA、清除全部因子及恢复码、撤销全部会话，用户可以重新登录并自行开启。管理员对自己的设置使用个人中心的关闭流程。
+管理员可在用户列表查看 2FA 状态并执行「重置 2FA」。此操作需要重新确认管理员身份，并填写身份核验及重置原因。重置会关闭目标账户的两步验证、清除 TOTP 及恢复码、保留 Passkey、密码和联系方式、撤销全部会话，用户可以重新登录并自行开启。管理员对自己的设置使用个人中心的关闭流程。
 
 ## 部署配置
 
@@ -23,7 +23,7 @@
 - 挑战有效期为 5 分钟，每个挑战最多 5 次错误尝试；账号每 15 分钟最多 10 次，IP 每 15 分钟最多 50 次。成功验证释放账号/IP 的本次尝试额度。短信／邮箱重发间隔为同一用户、同一渠道 60 秒。
 - 密钥、验证码、恢复码及操作凭据不得写入业务日志。TOTP 密钥以 AES-256-GCM 加密；恢复码使用 128 位随机值并仅保存 SHA-256 哈希；短期验证码以挑战专属哈希保存在 Redis，通过原子比较删除消费。
 
-迁移版本为 `20261008000000`，覆盖 MySQL、PostgreSQL、SQLite。升级前备份数据库与凭据密钥，停止旧节点后统一部署后端、两个前端及内嵌资源。存量用户默认未开启 2FA。该迁移拒绝自动 Down，避免删除已绑定凭据、审计记录并静默取消认证要求；回退需协调恢复应用和数据库备份。
+原两步验证迁移版本为 `20261008000000`，统一认证与 Passkey 升级为 `20261014010000`，覆盖 MySQL、PostgreSQL、SQLite。升级前备份数据库与凭据密钥，停止旧节点后统一部署后端、两个前端及内嵌资源。存量用户默认未开启 2FA。该迁移拒绝自动 Down，避免删除已绑定凭据、审计记录并静默取消认证要求；回退需协调恢复应用和数据库备份。
 
 ## 接口约定
 
@@ -53,18 +53,19 @@
 |---|---|
 | `GET /api/2fa/challenges/:id` | 读取当前挑战及可用方式 |
 | `POST /api/2fa/challenges/:id/send-code` | `{method: "phone"或"email"}`；服务端选择已绑定接收地址，返回 `retryAfter` |
-| `POST /api/2fa/challenges/:id/verify` | `{method, code}`；登录挑战返回原入口的登录完成响应，OIDC 返回原 `LoginResponse` |
+| `POST /api/2fa/challenges/:id/verify` | `{method, code}` 或 `{method: "password", password}`；登录挑战返回原入口的登录完成响应，OIDC 返回原 `LoginResponse` |
 | `POST /api/2fa/challenges/:id/cancel` | `{}`；撤销挑战 |
-| `GET /api/user/2fa` | 返回 `enabled`、`hasPassword`、各方式启用及可用状态、剩余恢复码数量 |
+| `GET /api/user/2fa` | 返回 `enabled`、`canEnable`、`hasPassword`、各方式启用及可用状态、剩余恢复码数量 |
 | `POST /api/user/2fa/reauthenticate` | `{password?}`；未开启者验证第一步凭据，已开启者返回 `purpose: "manage"` 挑战 |
-| `POST /api/user/2fa/enroll` | `{method, operationToken}`；返回 `purpose: "enroll"` 挑战，TOTP 还返回一次性的 `secret`、`otpAuthUri`、`qrCode` |
-| `POST /api/user/2fa/methods/:method/remove` | `{operationToken, confirmDisable?}`；移除最后一种方式必须传 `confirmDisable: true` |
+| `POST /api/user/2fa/enroll` | `{method: "totp", operationToken}`；返回绑定挑战及一次性的 `secret`、`otpAuthUri`、`qrCode`；绑定成功不会自动开启两步验证 |
+| `POST /api/user/2fa/enable` | `{operationToken}`；独立开启并生成恢复码 |
+| `POST /api/user/2fa/methods/:method/remove` | `{operationToken}`；仅用于移除 TOTP，不能破坏剩余完整登录路径 |
 | `POST /api/user/2fa/disable` | `{operationToken, confirmDisable: true}` |
 | `POST /api/user/2fa/recovery-codes/regenerate` | `{operationToken}`；返回新恢复码，旧码全部失效 |
 | `POST /api/admin/auth/2fa/reauthenticate` | `{password?}`；验证管理员自己的身份，签发管理员操作凭据 |
 | `POST /api/admin/users/:id/2fa/reset` | `{operationToken, reason}`；超级管理员权限，原因 3–500 字 |
 
-方式枚举为 `totp`、`phone`、`email`、`recovery`，其中恢复码不可作为独立绑定方式。管理挑战验证成功后返回一次性、有效期 5 分钟的 `operationToken`，绑定用户、会话、配置版本和用户／管理员用途。绑定挑战验证成功后才保存因子，并返回 `twoFactorUpdated: true`；首次开启还返回 `recoveryCodes`。任何配置变更后，前端应丢弃旧应用 access token 并使用新 Cookie 会话。
+方式枚举为 `password`、`passkey`、`totp`、`phone`、`email`、`recovery`，其中恢复码不可作为独立绑定方式。管理挑战验证成功后返回一次性、有效期 5 分钟的 `operationToken`，绑定用户、会话、配置版本和用户／管理员用途。绑定挑战验证成功后才保存因子，并返回 `twoFactorUpdated: true`；独立开启接口返回 `recoveryCodes`。任何配置变更后，前端应丢弃旧应用 access token 并使用新 Cookie 会话。
 
 已有 `PUT /api/user/email`、`PUT /api/user/phone` 在用户已开启 2FA 时新增必需的 `operationToken`，并继续要求发往新地址的验证码。授权流程的补充资料接口不允许替换已绑定的 2FA 联系方式，应通过个人中心完成安全改绑。
 

@@ -238,11 +238,27 @@ func (s *UserService) GetUserModelByID(id uint) (*model.User, error) {
 
 // UpdateUser 更新用户信息
 func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.UserResponse, error) {
+	var result *dto.UserResponse
+	err := s.database.Transaction(func(tx *gorm.DB) error {
+		if err := dao.LockLoginUser(tx, id); err != nil {
+			return err
+		}
+		var err error
+		result, err = NewUserService(tx).updateUser(id, req)
+		return err
+	})
+	return result, err
+}
+
+func (s *UserService) updateUser(id uint, req *dto.UpdateUserRequest) (*dto.UserResponse, error) {
 	// 获取用户
 	user, err := s.userDao.GetByID(id)
 	if err != nil {
 		return nil, err
 	}
+
+	originalEmail, originalPhone := stringPointerValue(user.Email), stringPointerValue(user.Phone)
+	originalStamp := twoFactorCredentialStamp(user)
 
 	// 验证邮箱是否已存在（排除自己）
 	if req.Email != "" {
@@ -324,6 +340,12 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 			revokeAccess = true
 		}
 	}
+	if originalEmail != stringPointerValue(user.Email) {
+		user.EmailVerifiedAt = nil
+	}
+	if originalPhone != stringPointerValue(user.Phone) {
+		user.PhoneVerifiedAt = nil
+	}
 	if req.EmailVerified != nil {
 		if *req.EmailVerified {
 			if user.EmailVerifiedAt == nil {
@@ -346,12 +368,15 @@ func (s *UserService) UpdateUser(id uint, req *dto.UpdateUserRequest) (*dto.User
 	}
 
 	// 保存更新；停用账号时必须与会话、OIDC Token 撤销处于同一事务。
-	if revokeAccess {
+	if revokeAccess || originalStamp != twoFactorCredentialStamp(user) {
 		if err := s.database.Transaction(func(tx *gorm.DB) error {
 			if err := dao.NewUserDao(tx).Update(user); err != nil {
 				return err
 			}
-			return revokeUserAccess(tx, []uint{id})
+			if revokeAccess {
+				return revokeUserAccess(tx, []uint{id})
+			}
+			return InvalidateAuthenticationConfiguration(tx, id, "contact_changed")
 		}); err != nil {
 			return nil, err
 		}

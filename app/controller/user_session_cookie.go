@@ -50,7 +50,7 @@ func completeUserLogin(ctx httpInterfaces.RouterContextInterface, user *dto.User
 		return err
 	}
 	if oidcID != "" {
-		if err := sessions.MarkAsAuthenticated(ctx.Request().Context(), oidcID, user.ID, sid); err != nil {
+		if err := sessions.MarkAsAuthenticated(ctx.Request().Context(), oidcID, user.ID, sid, true); err != nil {
 			_ = service.NewLoginSessionService(helper.GetDatabase()).Revoke(user.ID, sid, "", "login_failed", nil)
 			return err
 		}
@@ -117,7 +117,8 @@ func prepareUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *d
 			method = primary
 		}
 		proof, _ := ctx.Get("two_factor_proof").(*service.TwoFactorProof)
-		session, createErr := service.NewLoginSessionService(helper.GetDatabase()).CreateWithProof(user.ID, method, ctx.ClientIP(), ctx.GetHeader("User-Agent"), time.Now().Add(jwtService.GetConfig().AccessTokenTTL), proof)
+		primary, _ := ctx.Get("primary_passkey_proof").(*service.PasskeyProof)
+		session, createErr := service.NewLoginSessionService(helper.GetDatabase()).CreateWithProof(user.ID, method, ctx.ClientIP(), ctx.GetHeader("User-Agent"), time.Now().Add(jwtService.GetConfig().AccessTokenTTL), proof, primary)
 		if createErr != nil {
 			return "", 0, "", createErr
 		}

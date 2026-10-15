@@ -41,6 +41,10 @@ type OIDCSession struct {
 	CreatedAt                   time.Time                 `json:"created_at"`
 	ExpiresAt                   time.Time                 `json:"expires_at"`
 
+	// HasLoginInteraction is set only by a successful login in this authorization
+	// transaction. Reusing a browser login must never inherit it.
+	HasLoginInteraction bool `json:"has_login_interaction,omitempty"`
+
 	// CsrfToken 绑定到会话的一次性 CSRF 令牌。注册意图选择后会轮换，
 	// 后续授权确认使用新令牌，防止选择请求重放。
 	CsrfToken string `json:"csrf_token"`
@@ -368,7 +372,7 @@ func oidcSessionPromptHas(prompt, value string) bool {
 }
 
 // MarkAsAuthenticated 标记会话为已认证
-func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint, loginID string, expectedChallenges ...string) error {
+func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID string, userID uint, loginID string, hasLoginInteraction bool, expectedChallenges ...string) error {
 	session, err := s.GetSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -388,6 +392,7 @@ func (s *OIDCSessionService) MarkAsAuthenticated(ctx context.Context, sessionID 
 	session.PendingTwoFactorID = ""
 	session.UserID = &userID
 	session.IsAuthenticated = true
+	session.HasLoginInteraction = hasLoginInteraction
 	session.AuthTime = time.Now()
 	session.Error = nil
 	session.ExpiresAt = time.Now().Add(30 * time.Minute)
@@ -430,6 +435,7 @@ func (s *OIDCSessionService) MarkAsFailed(ctx context.Context, sessionID string,
 	session.PendingTwoFactorID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
+	session.HasLoginInteraction = false
 	session.IsConsentGranted = false
 	session.AuthTime = time.Time{}
 	session.Error = failure
@@ -517,6 +523,7 @@ func resetAuthenticationState(session *OIDCSession) error {
 	session.PendingTwoFactorID = ""
 	session.UserID = nil
 	session.IsAuthenticated = false
+	session.HasLoginInteraction = false
 	session.IsConsentGranted = false
 	session.AuthTime = time.Time{}
 	session.Error = nil

@@ -21,5 +21,6 @@ type TwoFactorStatus struct {
 	Enabled                bool                  `json:"enabled"`
 	Methods                []TwoFactorMethodInfo `json:"methods"`
 	RecoveryCodesRemaining int64                 `json:"recoveryCodesRemaining"`
+	CanEnable              bool                  `json:"canEnable"`
 	HasPassword            bool                  `json:"hasPassword"`
 }

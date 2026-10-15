@@ -78,6 +78,14 @@ func beginTwoFactorLogin(c httpInterfaces.RouterContextInterface, user *dto.User
 	if err != nil {
 		return err
 	}
+	if tr == nil {
+		return nil
+	}
+	if primary, _ := c.Get("primary_passkey_proof").(*service.PasskeyProof); primary != nil {
+		if err := svc.BindPrimaryPasskey(c.Request().Context(), tr, primary); err != nil {
+			return err
+		}
+	}
 	if oidcID != "" {
 		sessions := service.NewOIDCSessionService(helper.GetRedis())
 		session, err := getBoundOIDCSession(c, sessions, oidcID)
@@ -89,6 +97,7 @@ func beginTwoFactorLogin(c httpInterfaces.RouterContextInterface, user *dto.User
 		}
 		session.PendingTwoFactorID = tr.ID
 		session.IsAuthenticated = false
+		session.HasLoginInteraction = false
 		session.UserID = nil
 		session.LoginSessionID = ""
 		session.IsConsentGranted = false
@@ -193,8 +202,9 @@ func (tc TwoFactorController) Verify(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 	var req struct {
-		Method string `json:"method" binding:"required"`
-		Code   string `json:"code" binding:"required,max=80"`
+		Method   string `json:"method" binding:"required"`
+		Code     string `json:"code" binding:"max=80"`
+		Password string `json:"password" binding:"max=1024"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		tc.failure(c, err)
@@ -206,11 +216,20 @@ func (tc TwoFactorController) Verify(c httpInterfaces.RouterContextInterface) {
 		return
 	}
 	svc := twoFactorService()
-	proof, err := svc.Verify(c.Request().Context(), tr, req.Method, req.Code, c.ClientIP())
+	value := req.Code
+	if req.Method == "password" {
+		value = req.Password
+	}
+	proof, err := svc.Verify(c.Request().Context(), tr, req.Method, value, c.ClientIP())
 	if err != nil {
 		tc.failure(c, err)
 		return
 	}
+	tc.complete(c, tr, proof)
+}
+
+func (tc TwoFactorController) complete(c httpInterfaces.RouterContextInterface, tr *service.TwoFactorTransaction, proof *service.TwoFactorProof) {
+	svc := twoFactorService()
 	switch tr.Purpose {
 	case "manage":
 		token, err := svc.Operation(c.Request().Context(), tr.UserID, tr.ParentSessionID, tr.Kind, proof)
@@ -226,7 +245,7 @@ func (tc TwoFactorController) Verify(c httpInterfaces.RouterContextInterface) {
 			tc.failure(c, err)
 			return
 		}
-		if err = renewTwoFactorSession(c, tr.UserID, renewed); err != nil {
+		if err := renewTwoFactorSession(c, tr.UserID, renewed); err != nil {
 			tc.failure(c, err)
 			return
 		}
@@ -255,7 +274,7 @@ func (tc TwoFactorController) Verify(c httpInterfaces.RouterContextInterface) {
 				tc.failure(c, err)
 				return
 			}
-			response, err := (OIDCAuthFlowController{}).completeOIDCLogin(c, sessions, session, tr.OIDCSessionID, user, tr.RememberMe)
+			response, err := (OIDCAuthFlowController{}).completeOIDCLogin(c, sessions, session, tr.OIDCSessionID, user, oidcLoginOptions{RememberMe: tr.RememberMe})
 			if err != nil {
 				tc.failure(c, err)
 				return
@@ -402,6 +421,9 @@ func (tc TwoFactorController) Mutate(c httpInterfaces.RouterContextInterface) {
 	}
 	action := "remove"
 	path := c.Request().URL.Path
+	if strings.HasSuffix(path, "/enable") {
+		action = "enable"
+	}
 	if strings.HasSuffix(path, "/disable") {
 		action = "disable"
 	}

@@ -24,7 +24,7 @@ func (s *LoginSessionService) Create(userID uint, method, ip, userAgent string, 
 	return s.CreateWithProof(userID, method, ip, userAgent, until, nil)
 }
 
-func (s *LoginSessionService) CreateWithProof(userID uint, method, ip, userAgent string, until time.Time, proof *TwoFactorProof) (*model.LoginSession, error) {
+func (s *LoginSessionService) CreateWithProof(userID uint, method, ip, userAgent string, until time.Time, proof *TwoFactorProof, primary ...*PasskeyProof) (*model.LoginSession, error) {
 	device, browser, os := loginDevice(userAgent)
 	now := time.Now()
 	session := &model.LoginSession{ID: uuid.NewString(), UserID: userID, LoginMethod: method, LoginIP: ip, LastIP: ip, Device: device, Browser: browser, OS: os, CreatedAt: now, LastActiveAt: now, ExpiresAt: until}
@@ -39,11 +39,28 @@ func (s *LoginSessionService) CreateWithProof(userID uint, method, ip, userAgent
 		if !user.CanLogin() {
 			return dao.ErrLoginSessionInvalid
 		}
-		if user.TwoFactorEnabled && !proof.validFor(&user) {
+		if user.TwoFactorEnabled && (!proof.validFor(&user) || proof.method == method) {
 			return ErrTwoFactorRequired
+		}
+		if method == "passkey" && (len(primary) == 0 || primary[0] == nil) && (proof == nil || proof.primaryPasskeyID == 0) {
+			return ErrPasskeyInvalid
 		}
 		if proof != nil && !proof.validFor(&user) {
 			return ErrTwoFactorExpired
+		}
+		if len(primary) > 0 && primary[0] != nil {
+			if err := primary[0].validate(tx, &user); err != nil {
+				return err
+			}
+		}
+		if proof != nil && proof.stamp != "" && proof.stamp != twoFactorCredentialStamp(&user) {
+			return ErrTwoFactorExpired
+		}
+		if proof != nil && proof.primaryPasskeyID != 0 {
+			p := &PasskeyProof{userID: user.ID, credentialID: proof.primaryPasskeyID, version: proof.version, stamp: proof.stamp, at: proof.at}
+			if err := p.validate(tx, &user); err != nil {
+				return err
+			}
 		}
 		session.TwoFactorVersion = user.TwoFactorVersion
 		if proof != nil {
