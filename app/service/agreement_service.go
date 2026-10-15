@@ -6,10 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -77,6 +81,38 @@ func normalizeAgreementCode(code string) string {
 func validateApplicationAgreementCode(code string) error {
 	if !agreementCodePattern.MatchString(code) {
 		return fmt.Errorf("协议代码只能包含小写字母、数字、下划线和中划线，且长度为2-64个字符")
+	}
+	return nil
+}
+
+func applyApplicationAgreementSource(agreement *model.Agreement, req *dto.AgreementUpsertRequest) error {
+	if req.ContentType != nil {
+		agreement.ContentType = *req.ContentType
+	} else if agreement.ContentType == "" {
+		agreement.ContentType = model.AgreementContentTypeMarkdown
+	}
+	if agreement.ContentType != model.AgreementContentTypeMarkdown && agreement.ContentType != model.AgreementContentTypeURL {
+		return fmt.Errorf("不支持的协议内容类型")
+	}
+	if req.ContentURL != nil {
+		agreement.ContentURL = strings.TrimSpace(*req.ContentURL)
+	}
+	if utf8.RuneCountInString(agreement.ContentURL) > 2048 {
+		return fmt.Errorf("协议 URL 不能超过2048个字符")
+	}
+	if agreement.UsesURL() {
+		parsed, err := url.Parse(agreement.ContentURL)
+		invalidCharacters := strings.Contains(agreement.ContentURL, "\\") || strings.IndexFunc(agreement.ContentURL, func(r rune) bool {
+			return unicode.IsSpace(r) || unicode.IsControl(r)
+		}) >= 0
+		if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || invalidCharacters {
+			return fmt.Errorf("请输入有效的 HTTP/HTTPS 协议 URL")
+		}
+		if port := parsed.Port(); port != "" {
+			if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+				return fmt.Errorf("请输入有效的 HTTP/HTTPS 协议 URL")
+			}
+		}
 	}
 	return nil
 }
@@ -151,6 +187,9 @@ func (s *AgreementService) UpsertGlobalAgreement(code string, req *dto.Agreement
 	if !isGlobalAgreementCode(code) {
 		return nil, fmt.Errorf("不支持的全局协议代码: %s", code)
 	}
+	if (req.ContentType != nil && *req.ContentType != model.AgreementContentTypeMarkdown) || (req.ContentURL != nil && strings.TrimSpace(*req.ContentURL) != "") {
+		return nil, fmt.Errorf("全局协议仅支持 Markdown 内容")
+	}
 	if err := s.ensureGlobalAgreements(); err != nil {
 		return nil, fmt.Errorf("初始化全局协议失败: %w", err)
 	}
@@ -172,6 +211,8 @@ func (s *AgreementService) UpsertGlobalAgreement(code string, req *dto.Agreement
 		return nil, fmt.Errorf("协议标题不能为空")
 	}
 	agreement.ContentMD = req.ContentMD
+	agreement.ContentType = model.AgreementContentTypeMarkdown
+	agreement.ContentURL = ""
 	agreement.Enabled = req.Enabled
 	agreement.Sort = req.Sort
 
@@ -235,6 +276,9 @@ func (s *AgreementService) CreateApplicationAgreement(appID uint, req *dto.Agree
 		Enabled:       req.Enabled,
 		Sort:          req.Sort,
 	}
+	if err := applyApplicationAgreementSource(agreement, req); err != nil {
+		return nil, err
+	}
 	if err := s.agreementDAO.Create(agreement); err != nil {
 		return nil, err
 	}
@@ -275,6 +319,9 @@ func (s *AgreementService) UpdateApplicationAgreement(appID, agreementID uint, r
 
 	agreement.Code = code
 	agreement.Title = title
+	if err := applyApplicationAgreementSource(agreement, req); err != nil {
+		return nil, err
+	}
 	agreement.ContentMD = req.ContentMD
 	agreement.Enabled = req.Enabled
 	agreement.Sort = req.Sort
@@ -381,6 +428,9 @@ func applicationIDPtr(app *model.Application) *uint {
 }
 
 func (s *AgreementService) publicURLForAgreement(agreement *model.Agreement, app *model.Application) string {
+	if agreement.UsesURL() {
+		return agreement.ContentURL
+	}
 	if agreement.Scope == string(model.AgreementScopeApplication) {
 		clientID := ""
 		if app != nil {
@@ -492,7 +542,11 @@ func (s *AgreementService) RecordAcceptances(userID uint, appID *uint, agreement
 	acceptedAt := time.Now()
 	records := make([]model.AgreementAcceptance, 0, len(agreements))
 	for _, agreement := range agreements {
-		hash := sha256.Sum256([]byte(agreement.ContentMD))
+		content := agreement.ContentMD
+		if agreement.UsesURL() {
+			content = "url\n" + agreement.ContentURL
+		}
+		hash := sha256.Sum256([]byte(content))
 		records = append(records, model.AgreementAcceptance{
 			UserID:        userID,
 			ApplicationID: applicationID,
@@ -515,6 +569,8 @@ func (s *AgreementService) toAgreementResponse(agreement *model.Agreement) dto.A
 		Code:          agreement.Code,
 		Title:         agreement.Title,
 		ContentMD:     agreement.ContentMD,
+		ContentType:   agreementContentType(agreement),
+		ContentURL:    agreement.ContentURL,
 		Enabled:       agreement.Enabled,
 		Sort:          agreement.Sort,
 		CreatedAt:     agreement.CreatedAt.Format(time.RFC3339),
@@ -531,13 +587,26 @@ func (s *AgreementService) toAgreementResponses(agreements []*model.Agreement) [
 }
 
 func (s *AgreementService) toPublicResponse(agreement *model.Agreement, appName, appIcon string) *dto.AgreementPublicResponse {
-	return &dto.AgreementPublicResponse{
-		Scope:     agreement.Scope,
-		Code:      agreement.Code,
-		Title:     agreement.Title,
-		ContentMD: agreement.ContentMD,
-		UpdatedAt: agreement.UpdatedAt.Format(time.RFC3339),
-		AppName:   appName,
-		AppIcon:   appIcon,
+	response := &dto.AgreementPublicResponse{
+		Scope:       agreement.Scope,
+		Code:        agreement.Code,
+		Title:       agreement.Title,
+		ContentType: agreementContentType(agreement),
+		UpdatedAt:   agreement.UpdatedAt.Format(time.RFC3339),
+		AppName:     appName,
+		AppIcon:     appIcon,
 	}
+	if agreement.UsesURL() {
+		response.ContentURL = agreement.ContentURL
+	} else {
+		response.ContentMD = agreement.ContentMD
+	}
+	return response
+}
+
+func agreementContentType(agreement *model.Agreement) string {
+	if agreement.UsesURL() {
+		return model.AgreementContentTypeURL
+	}
+	return model.AgreementContentTypeMarkdown
 }

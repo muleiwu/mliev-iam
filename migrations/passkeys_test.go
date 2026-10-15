@@ -63,6 +63,6 @@ func assertPasskeyUpgrade(t *testing.T, db *sql.DB, driver string) {
 	require.Equal(t, int64(2), factors)
 	require.NoError(t, gdb.Model(&model.TwoFactorRecoveryCode{}).Count(&recovery).Error)
 	require.Equal(t, int64(1), recovery)
-	require.Error(t, goose.Down(db, dirByDriver[driver]))
+	require.Error(t, goose.DownTo(db, dirByDriver[driver], 20261014000000))
 	require.True(t, gdb.Migrator().HasTable(&model.Passkey{}))
 }

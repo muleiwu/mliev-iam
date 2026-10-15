@@ -1,11 +1,14 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -20,6 +23,154 @@ func newAgreementServiceTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate agreement tables: %v", err)
 	}
 	return db
+}
+
+func agreementTestString(value string) *string { return &value }
+
+func newAgreementTestApplication(t *testing.T, db *gorm.DB) *model.Application {
+	t.Helper()
+	app := &model.Application{
+		UUID: "agreement-client", Name: "协议测试应用", IsActive: true,
+		ProtocolType:   string(model.ProtocolTypeOIDC),
+		ProtocolConfig: map[string]interface{}{"clientId": "agreement-client"},
+	}
+	require.NoError(t, db.Create(app).Error)
+	return app
+}
+
+func TestAgreementServiceURLModePreservesSources(t *testing.T) {
+	db := newAgreementServiceTestDB(t)
+	app := newAgreementTestApplication(t, db)
+	svc := NewAgreementService(db)
+	req := &dto.AgreementUpsertRequest{
+		Code: "external-policy", Title: "外部协议", ContentMD: "# 留存正文", Enabled: true,
+		ContentType: agreementTestString("url"), ContentURL: agreementTestString("  https://example.com/policy?version=2#terms  "),
+	}
+	created, err := svc.CreateApplicationAgreement(app.ID, req)
+	require.NoError(t, err)
+	const target = "https://example.com/policy?version=2#terms"
+	require.Equal(t, target, created.ContentURL)
+	require.Equal(t, "url", created.ContentType)
+	require.Equal(t, req.ContentMD, created.ContentMD)
+
+	links, err := svc.BuildClientAgreementLinks(app)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, target, links[0].URL)
+	require.Equal(t, "application:external-policy", links[0].Key)
+	public, err := svc.GetPublicApplicationAgreement(app.UUID, req.Code)
+	require.NoError(t, err)
+	require.Equal(t, target, public.ContentURL)
+	require.Empty(t, public.ContentMD, "inactive Markdown must not be public")
+	require.Equal(t, app.Name, public.AppName)
+
+	// Old clients omit the new fields; updates must retain the active URL source.
+	req.ContentType, req.ContentURL = nil, nil
+	updated, err := svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+	require.NoError(t, err)
+	require.Equal(t, "url", updated.ContentType)
+	require.Equal(t, target, updated.ContentURL)
+
+	req.ContentType = agreementTestString("markdown")
+	updated, err = svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+	require.NoError(t, err)
+	require.Equal(t, target, updated.ContentURL)
+	require.Equal(t, req.ContentMD, updated.ContentMD)
+	public, err = svc.GetPublicApplicationAgreement(app.UUID, req.Code)
+	require.NoError(t, err)
+	require.Equal(t, "markdown", public.ContentType)
+	require.Equal(t, req.ContentMD, public.ContentMD)
+	require.Empty(t, public.ContentURL, "inactive URL must not be public")
+	links, err = svc.BuildClientAgreementLinks(app)
+	require.NoError(t, err)
+	require.Equal(t, "/auth/#/agreements/application?client_id=agreement-client&code=external-policy", links[0].URL)
+
+	req.ContentType = agreementTestString("url")
+	_, err = svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+	require.NoError(t, err)
+	listed, err := svc.ListApplicationAgreements(app.ID, true)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, "url", listed[0].ContentType)
+	require.Equal(t, target, listed[0].ContentURL)
+	require.Equal(t, req.ContentMD, listed[0].ContentMD)
+
+	required, err := svc.ListRequiredRegistrationAgreements(&app.ID)
+	require.NoError(t, err)
+	require.Error(t, svc.EnsureAgreementsAccepted(required, nil))
+	require.NoError(t, svc.EnsureAgreementsAccepted(required, []string{links[0].Key}))
+	require.NoError(t, svc.RecordAcceptances(7, &app.ID, required))
+	var acceptance model.AgreementAcceptance
+	require.NoError(t, db.First(&acceptance).Error)
+	hash := sha256.Sum256([]byte("url\n" + target))
+	require.Equal(t, hex.EncodeToString(hash[:]), acceptance.ContentSHA256)
+
+	req.Enabled = false
+	_, err = svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+	require.NoError(t, err)
+	_, err = svc.GetPublicApplicationAgreement(app.UUID, req.Code)
+	require.ErrorIs(t, err, ErrAgreementDisabled)
+	links, err = svc.BuildClientAgreementLinks(app)
+	require.NoError(t, err)
+	require.Empty(t, links)
+	req.Enabled = true
+	_, err = svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+	require.NoError(t, err)
+	require.NoError(t, db.Model(app).Update("is_active", false).Error)
+	_, err = svc.GetPublicApplicationAgreement(app.UUID, req.Code)
+	require.ErrorIs(t, err, ErrApplicationDisabled)
+}
+
+func TestAgreementServiceURLValidation(t *testing.T) {
+	db := newAgreementServiceTestDB(t)
+	app := newAgreementTestApplication(t, db)
+	svc := NewAgreementService(db)
+	req := &dto.AgreementUpsertRequest{
+		Code: "test-policy", Title: "协议", ContentMD: "# Terms", Enabled: true,
+	}
+	created, err := svc.CreateApplicationAgreement(app.ID, req)
+	require.NoError(t, err)
+	require.Equal(t, "markdown", created.ContentType)
+	require.Empty(t, created.ContentURL)
+
+	req.ContentType = agreementTestString("url")
+	for _, invalid := range []string{"", "  ", "/terms", "//example.com/terms", "javascript:alert(1)", "data:text/html,test", "file:///terms", "ftp://example.com", "https://", "https://exa mple.com", "https://example.com:65536/policy", "https://example.com/line\nbreak", "https://example.com\\@evil.test", "https://example.com/" + strings.Repeat("x", 2048)} {
+		t.Run(invalid, func(t *testing.T) {
+			req.ContentURL = &invalid
+			_, err := svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+			require.Error(t, err)
+			req.Code = "invalid-create"
+			_, err = svc.CreateApplicationAgreement(app.ID, req)
+			require.Error(t, err)
+			req.Code = "test-policy"
+		})
+	}
+	var persisted model.Agreement
+	require.NoError(t, db.First(&persisted, created.ID).Error)
+	require.Equal(t, "markdown", persisted.ContentType)
+	require.Empty(t, persisted.ContentURL)
+	for _, valid := range []string{"http://localhost:3000/terms", "https://example.com/terms?q=a%20b#section", "HTTPS://EXAMPLE.COM/policy", "https://例子.测试/协议"} {
+		req.ContentURL = &valid
+		_, err := svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+		require.NoError(t, err)
+	}
+	req.ContentType = agreementTestString("html")
+	_, err = svc.UpdateApplicationAgreement(app.ID, created.ID, req)
+	require.Error(t, err)
+	req.ContentType = agreementTestString("url")
+	_, err = svc.UpsertGlobalAgreement("terms", req)
+	require.Error(t, err, "global agreements must remain Markdown-only")
+}
+
+func TestAgreementServiceMarkdownAcceptanceHashUnchanged(t *testing.T) {
+	db := newAgreementServiceTestDB(t)
+	svc := NewAgreementService(db)
+	agreement := &model.Agreement{Scope: "global", Code: "terms", Title: "协议", ContentMD: "# Terms", ContentURL: "https://example.com/unused"}
+	require.NoError(t, svc.RecordAcceptances(1, nil, []*model.Agreement{agreement}))
+	var acceptance model.AgreementAcceptance
+	require.NoError(t, db.First(&acceptance).Error)
+	hash := sha256.Sum256([]byte(agreement.ContentMD))
+	require.Equal(t, hex.EncodeToString(hash[:]), acceptance.ContentSHA256)
 }
 
 func TestAgreementServiceRegistrationAcceptance(t *testing.T) {

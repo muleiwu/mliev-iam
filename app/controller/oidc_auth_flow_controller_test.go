@@ -263,6 +263,12 @@ func TestGetClientConfigReturnsEnabledAgreementLinks(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create app agreement: %v", err)
 	}
+	contentType, contentURL := "url", "https://example.com/external-policy"
+	if _, err := service.NewAgreementService(db).CreateApplicationAgreement(app.ID, &dto.AgreementUpsertRequest{
+		Code: "external-policy", Title: "外部协议", ContentType: &contentType, ContentURL: &contentURL, Enabled: true, Sort: 2,
+	}); err != nil {
+		t.Fatalf("create URL agreement: %v", err)
+	}
 
 	ctx := newTestRouterContext(map[string]string{"client_id": "client-a"})
 	OIDCAuthFlowController{}.GetClientConfig(ctx)
@@ -278,11 +284,14 @@ func TestGetClientConfigReturnsEnabledAgreementLinks(t *testing.T) {
 	if data.TermsURL != "/auth/#/agreements/terms" {
 		t.Fatalf("termsUrl = %q", data.TermsURL)
 	}
-	if len(data.Agreements) != 2 {
-		t.Fatalf("agreements len = %d, want 2: %+v", len(data.Agreements), data.Agreements)
+	if len(data.Agreements) != 3 {
+		t.Fatalf("agreements len = %d, want 3: %+v", len(data.Agreements), data.Agreements)
 	}
 	if data.Agreements[0].Key != "global:terms" || data.Agreements[1].Key != "application:extra-policy" {
 		t.Fatalf("unexpected agreement order: %+v", data.Agreements)
+	}
+	if data.Agreements[2].URL != contentURL || data.Agreements[2].Key != "application:external-policy" {
+		t.Fatalf("unexpected external agreement: %+v", data.Agreements[2])
 	}
 }
 

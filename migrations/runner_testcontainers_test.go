@@ -36,6 +36,11 @@ func TestMigrationDialects(t *testing.T) {
 		{name: "postgresql-16", driver: "postgresql", open: openPostgreSQL16},
 	}
 	for _, fixture := range fixtures {
+		t.Run(fixture.name+"/agreement-url-upgrade", func(t *testing.T) {
+			db := fixture.open(t)
+			setMigrationIntegrationKey(t)
+			assertAgreementURLUpgrade(t, db, fixture.driver)
+		})
 		t.Run(fixture.name+"/empty", func(t *testing.T) {
 			db := fixture.open(t)
 			assertBadKeyDoesNotTouchSchema(t, db, fixture.driver)
@@ -241,7 +246,7 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 			t.Fatalf("硬切后仍存在旧表 %s", oldTable)
 		}
 	}
-	const expectedVersion int64 = 20261014010000
+	const expectedVersion int64 = 20261015000000
 	version, err := goose.GetDBVersion(db)
 	if err != nil || version != expectedVersion {
 		t.Fatalf("迁移版本错误: got=%d want=%d err=%v", version, expectedVersion, err)
@@ -268,12 +273,12 @@ func assertOIDCRefreshTokenUniqueness(t *testing.T, sqlDB *sql.DB, db *gorm.DB, 
 	if err := db.Exec(insert, "refresh-b-"+suffix, "refresh-b-"+suffix, "machine-"+suffix, "duplicate-"+suffix).Error; err == nil {
 		t.Fatal("重复非空刷新令牌应被唯一索引拒绝")
 	}
-	if err := goose.Down(sqlDB, dirByDriver[driver]); err == nil {
+	if err := goose.DownTo(sqlDB, dirByDriver[driver], 20261014000000); err == nil {
 		t.Fatal("不可逆迁移的 Down 应拒绝执行")
 	}
 	version, err := goose.GetDBVersion(sqlDB)
 	if err != nil || version != 20261014010000 {
-		t.Fatalf("拒绝 Down 后迁移版本应保持不变: version=%d err=%v", version, err)
+		t.Fatalf("回滚应停留在不可逆迁移版本: version=%d err=%v", version, err)
 	}
 }
 
