@@ -51,6 +51,9 @@ func (s *InstallService) CreateInitialData(adminInfo dto.AdminAccountInfo) error
 		if _, err := EnsureAdminConsoleApplication(tx, superAdminRoleID); err != nil {
 			return fmt.Errorf("创建默认管理后台应用失败: %w", err)
 		}
+		if _, err := EnsureAccountCenterApplication(tx); err != nil {
+			return fmt.Errorf("创建默认个人中心应用失败: %w", err)
+		}
 
 		return nil
 	})

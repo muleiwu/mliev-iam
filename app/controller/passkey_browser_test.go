@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -69,6 +70,13 @@ func TestPasskeyBrowser(t *testing.T) {
 	router.POST("/api/passkey/login/options", pc.LoginOptions)
 	router.POST("/api/passkey/login/verify", pc.LoginVerify)
 	router.POST("/api/user/login", UserController{}.ValidateLogin)
+	router.GET("/api/user/auth/authorize", AccountAuthController{}.Authorize)
+	router.GET("/api/user/auth/callback", AccountAuthController{}.Callback)
+	router.GET("/oidc/:client_id/authorize", OIDCController{}.Authorize)
+	router.GET("/api/oidc/session-bind", OIDCAuthFlowController{}.BindSession)
+	router.POST("/api/oidc/consent", OIDCAuthFlowController{}.Consent)
+	router.POST("/webhook/oidc/consent", OIDCAuthFlowController{}.Consent)
+	router.GET("/api/identity-connections", func(c httpInterfaces.RouterContextInterface) { BaseResponse{}.Success(c, []any{}) })
 	router.POST("/api/auth/logout", UserController{}.Logout)
 	router.POST("/api/oidc/auth/logout", OIDCAuthFlowController{}.Logout)
 	router.POST("/api/captcha/params", CaptchaController{}.GetCaptchaParams)
@@ -116,10 +124,14 @@ func TestPasskeyBrowser(t *testing.T) {
 		c.Header("Content-Type", "text/html")
 		c.String(200, `<iframe src="%s/auth/#/account/login" style="width:100%%;height:800px"></iframe>`, cfg.GetStringSlice("passkey.rp_origins", nil)[0])
 	})
-	engine.Static("/auth/assets", "../../static/auth/assets")
+	authDir := os.Getenv("IAM_AUTH_OUT_DIR")
+	if authDir == "" {
+		authDir = "../../static/auth"
+	}
+	engine.Static("/auth/assets", filepath.Join(authDir, "assets"))
 	engine.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/auth/") {
-			c.File("../../static/auth/index.html")
+			c.File(filepath.Join(authDir, "index.html"))
 		} else {
 			c.Status(404)
 		}

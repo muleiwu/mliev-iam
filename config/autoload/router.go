@@ -309,9 +309,11 @@ func (receiver Router) InitConfig() map[string]any {
 			adminMigration.GET("/legacy-users/:id", AdminController.MigrationController{}.GetLegacyUser)
 
 			// === 普通用户路由 ===
-			// 公开：/api/user/login
+			// 公开：统一认证入口与回调，以及兼容的密码登录接口。
 			userPublic := api.Group("/user")
 			userPublic.POST("/login", controller.UserController{}.ValidateLogin)
+			userPublic.GET("/auth/authorize", controller.AccountAuthController{}.Authorize)
+			userPublic.GET("/auth/callback", controller.AccountAuthController{}.Callback)
 
 			passkey := api.Group("/passkey")
 			passkey.GET("/config", controller.PasskeyController{}.Config)

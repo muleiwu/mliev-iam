@@ -1998,7 +1998,7 @@ func (c OIDCAuthFlowController) GetFlowStatus(ctx httpInterfaces.RouterContextIn
 		Status:      "needs_consent",
 		Prompt:      session.Prompt,
 		CsrfToken:   session.CsrfToken,
-		AutoApprove: service.IsAdminConsoleApplication(app),
+		AutoApprove: service.ApplicationAutoApprovesConsent(app),
 		Client:      clientInfo,
 		User:        userInfo,
 		Scopes:      scopes,

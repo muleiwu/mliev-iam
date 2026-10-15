@@ -6,9 +6,70 @@ import (
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestEnsureAccountCenterApplicationCreatesAndRepairs(t *testing.T) {
+	db := newSystemApplicationTestDB(t)
+	app, err := EnsureAccountCenterApplication(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://cnb.cool/mliev/iam/mliev-iam/account-center")).String()
+	if app.UUID != wantID || !app.IsActive || !app.IsProtected || !app.IsVerified || app.AccessScope != nil || ApplicationAllowsRegistration(app) {
+		t.Fatalf("unexpected account application: %+v", app)
+	}
+	handler := protocol.NewOIDCProtocolHandler(db)
+	issuer := "https://iam.example/oidc/" + app.UUID
+	if err := handler.ValidateRedirectURI(app, "https://iam.example"+AccountCenterCallbackPath, issuer); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"https://evil.example" + AccountCenterCallbackPath, "https://iam.example" + AdminConsoleCallbackPath, "https://iam.example" + AccountCenterCallbackPath + "?extra=1"} {
+		if handler.ValidateRedirectURI(app, target, issuer) == nil {
+			t.Fatalf("accepted callback %s", target)
+		}
+	}
+	app.Name = "我的个人中心"
+	app.IsActive, app.IsProtected = false, false
+	app.AccessScope = &model.ApplicationAccessScope{RoleIDs: []uint{7}}
+	app.ProtocolConfig = map[string]interface{}{"broken": true}
+	if err := db.Save(app).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(app).Error; err != nil {
+		t.Fatal(err)
+	}
+	repaired, err := EnsureAccountCenterApplication(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.ID != app.ID || repaired.Name != app.Name || !repaired.IsActive || !repaired.IsProtected || repaired.AccessScope != nil || repaired.DeletedAt.Valid || repaired.ProtocolConfig["requirePkce"] != true {
+		t.Fatalf("account application was not repaired: %+v", repaired)
+	}
+	var keys int64
+	db.Model(&model.ApplicationOIDCKey{}).Where("application_id = ? AND is_primary = ?", app.ID, true).Count(&keys)
+	if keys != 1 {
+		t.Fatalf("expected one signing key, got %d", keys)
+	}
+}
+
+func TestApplicationAutoApprovesOnlyCoreProtectedClients(t *testing.T) {
+	for _, id := range []string{AdminConsoleApplicationUUID, AccountCenterApplicationUUID, "other-client"} {
+		for _, protected := range []bool{true, false} {
+			app := &model.Application{UUID: id, IsProtected: protected}
+			want := protected && id != "other-client"
+			if ApplicationAutoApprovesConsent(app) != want {
+				t.Fatalf("unexpected auto-approval for %s protected=%v", id, protected)
+			}
+		}
+	}
+	if ApplicationAutoApprovesConsent(nil) {
+		t.Fatal("missing client cannot auto-approve")
+	}
+}
 
 func newSystemApplicationTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

@@ -1,7 +1,10 @@
 // Run with playwright-cli run-code --filename=scripts/passkey-browser-check.js
-// after opening the isolated TestPasskeyBrowser fixture's /auth/account/login URL.
+// after opening the isolated TestPasskeyBrowser fixture's /auth/#/account URL.
 async page => {
   const base = page.url().split('/').slice(0, 3).join('/');
+  // Each fixture has a fresh database; discard cookies from an earlier run.
+  await page.context().clearCookies();
+  await page.goto(`${base}/auth/#/account`);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.disable');
   await cdp.send('WebAuthn.enable');
@@ -30,10 +33,17 @@ async page => {
     const response = await post('/api/oidc/auth/logout');
     if (response.status !== 200) throw new Error(`logout failed ${JSON.stringify(response)}`);
     await page.goto(`${base}/auth/#/account/login`);
+    await page.waitForURL(`${base}/auth/#/oidc/authorize?**`);
+    await page.getByRole('button', { name: '使用 Passkey 登录' }).waitFor();
   };
-  await page.getByLabel('账号', { exact: true }).fill('passkey-user');
-  await page.getByLabel('密码', { exact: true }).fill('correct-password');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  const passwordLogin = async () => {
+    await page.getByRole('tab', { name: '账户', exact: true }).click();
+    await page.getByLabel('账户', { exact: true }).fill('passkey-user');
+    await page.getByRole('button', { name: '继续', exact: true }).click();
+    await page.getByLabel('密码', { exact: true }).fill('correct-password');
+    await page.getByRole('button', { name: '登录', exact: true }).click();
+  };
+  await passwordLogin();
   await page.waitForURL('**/auth/#/account');
   await security();
   await page.getByRole('button', { name: '添加 Passkey', exact: true }).click();
@@ -60,9 +70,7 @@ async page => {
   await page.waitForURL('**/auth/#/account');
   steps.push('Passkey then password');
   await logout();
-  await page.getByLabel('账号', { exact: true }).fill('passkey-user');
-  await page.getByLabel('密码', { exact: true }).fill('correct-password');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await passwordLogin();
   await page.waitForURL('**/auth/#/two-factor?**');
   if (await page.getByRole('button', { name: '账户密码', exact: true }).count()) throw new Error('Primary password was offered a second time');
   await page.getByRole('button', { name: 'Passkey', exact: true }).click();
@@ -110,7 +118,7 @@ async page => {
   await page.goto(`${base.replace('localhost', '127.0.0.1')}/__test/iframe`);
   const frame = page.frameLocator('iframe');
   await frame.getByRole('link', { name: '打开完整认证页面' }).click();
-  await page.waitForURL(`${base}/auth/#/account/login`);
+  await page.waitForURL(`${base}/auth/#/oidc/authorize?**`);
   await page.getByRole('button', { name: '使用 Passkey 登录' }).click();
   await page.waitForURL('**/auth/#/account');
   steps.push('Cross-origin iframe opens the full authentication page');
