@@ -251,3 +251,18 @@ func TestCustomPermissionRoutesRequireAdmin(t *testing.T) {
 		}
 	}
 }
+
+func TestAppearanceRoutes(t *testing.T) {
+	router := newRecordingRouter()
+	Router{}.InitConfig()["http.router"].(func(httpInterfaces.RouterInterface))(router)
+	router.assertRoute(t, "GET", "/api/appearance")
+	router.assertRoute(t, "GET", "/api/admin/settings/appearance/config")
+	router.assertRoute(t, "PUT", "/api/admin/settings/appearance/config")
+	router.assertRoute(t, "POST", "/api/admin/attachments/brand-image")
+	if router.middlewarePrefixes["/api/admin/settings"] == 0 || router.middlewarePrefixes["/api/admin/attachments"] == 0 {
+		t.Fatal("appearance configuration and uploads require admin authentication")
+	}
+	if router.middlewarePrefixes["/api"] != 0 {
+		t.Fatal("appearance must be readable without login")
+	}
+}

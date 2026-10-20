@@ -265,6 +265,8 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSettings.POST("/push/test", AdminController.PushController{}.Test)
 			adminSettings.GET("/captcha/bindings", AdminController.CaptchaConfigController{}.GetCaptchaSceneBindings)
 			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
+			adminSettings.GET("/appearance/config", AdminController.SettingController{}.GetAppearanceSettings)
+			adminSettings.PUT("/appearance/config", AdminController.SettingController{}.UpdateAppearanceSettings)
 			adminSettings.GET("/storage/config", AdminController.SettingController{}.GetStorageSettings)
 			adminSettings.PUT("/storage/config", AdminController.SettingController{}.UpdateStorageSettings)
 
@@ -273,6 +275,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminAttachments.Use(middleware.AdminAuthMiddleware())
 			adminAttachments.POST("/avatar", AdminController.AttachmentController{}.UploadAvatar)
 			adminAttachments.POST("/application-icon", AdminController.AttachmentController{}.UploadApplicationIcon)
+			adminAttachments.POST("/brand-image", AdminController.AttachmentController{}.UploadBrandImage)
 
 			// 管理员协议设置
 			adminAgreements := admin.Group("/agreements")
@@ -371,6 +374,8 @@ func (receiver Router) InitConfig() map[string]any {
 			agreements := api.Group("/agreements")
 			agreements.GET("/global/:code", controller.AgreementController{}.GetGlobalAgreement)
 			agreements.GET("/application", controller.AgreementController{}.GetApplicationAgreement)
+
+			api.GET("/appearance", controller.AppearanceController{}.Get)
 
 			// OIDC 授权流程 API（服务于 /auth 登录 UI）
 			apiOidc := api.Group("/oidc")

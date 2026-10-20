@@ -55,3 +55,23 @@ func (c AttachmentController) UploadApplicationIcon(ctx httpInterfaces.RouterCon
 
 	c.Success(ctx, response)
 }
+
+// UploadBrandImage uploads branding assets using the configured image storage.
+func (c AttachmentController) UploadBrandImage(ctx httpInterfaces.RouterContextInterface) {
+	uploaderID, _ := middleware.GetCurrentUserID(ctx)
+
+	file, err := ctx.FormFile("file")
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, "请选择要上传的品牌图片")
+		return
+	}
+
+	attachmentService := service.NewAttachmentService(helper.GetDatabase())
+	response, err := attachmentService.UploadBrandImage(ctx.Request().Context(), file, uploaderID)
+	if err != nil {
+		c.Error(ctx, constants.ErrCodeBadRequest, err.Error())
+		return
+	}
+
+	c.Success(ctx, response)
+}

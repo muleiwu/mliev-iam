@@ -358,6 +358,19 @@ func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContext
 	}
 
 	response := buildClientConfigResponse(app, agreementLinks)
+	// Preserve the existing contract while using the same active style as standalone pages.
+	if active, err := service.NewSettingService(db).GetPublicAppearance(); err == nil && active.Mode == "custom" {
+		if active.Appearance.PrimaryColor != "" {
+			response.Appearance.PrimaryColor = active.Appearance.PrimaryColor
+		}
+		if active.Appearance.DarkMode != "" {
+			response.Appearance.DarkMode = active.Appearance.DarkMode
+		}
+		if active.Appearance.ControlRadius != nil {
+			response.Appearance.BorderRadius = fmt.Sprintf("%dpx", *active.Appearance.ControlRadius)
+		}
+	}
+
 	// 找回密码依赖验证码推送服务，未配置时不向前端暴露入口
 	response.Features.ForgotPassword = getVerificationCodeConfig() != nil
 

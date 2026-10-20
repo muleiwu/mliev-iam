@@ -52,6 +52,9 @@ func (s *SettingService) GetWithDefault(key, defaultValue string) string {
 // SetSimple 更新 key 对应的设置值并失效缓存；用于替代原 helper.SetSetting。
 // 区别于 Update(key, req): SetSimple 只写 value，不动 category/remark。
 func (s *SettingService) SetSimple(key, value string) error {
+	if err := validateAppearanceSettingValue(key, value); err != nil {
+		return err
+	}
 	if err := s.settingDao.UpdateByKey(key, value); err != nil {
 		return err
 	}
@@ -130,6 +133,9 @@ func (s *SettingService) GetAll() ([]dto.SettingResponse, error) {
 
 // Create 创建设置
 func (s *SettingService) Create(req *dto.CreateSettingRequest) (*dto.SettingResponse, error) {
+	if err := validateAppearanceSettingValue(req.Key, req.Value); err != nil {
+		return nil, err
+	}
 	// 检查key是否已存在
 	exists, err := s.settingDao.Exists(req.Key)
 	if err != nil {
@@ -155,6 +161,9 @@ func (s *SettingService) Create(req *dto.CreateSettingRequest) (*dto.SettingResp
 
 // Update 更新设置
 func (s *SettingService) Update(key string, req *dto.UpdateSettingRequest) (*dto.SettingResponse, error) {
+	if err := validateAppearanceSettingValue(key, req.Value); err != nil {
+		return nil, err
+	}
 	setting, err := s.settingDao.GetByKey(key)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
