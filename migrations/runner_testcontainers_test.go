@@ -36,6 +36,11 @@ func TestMigrationDialects(t *testing.T) {
 		{name: "postgresql-16", driver: "postgresql", open: openPostgreSQL16},
 	}
 	for _, fixture := range fixtures {
+		t.Run(fixture.name+"/appearance-theme-upgrade", func(t *testing.T) {
+			db := fixture.open(t)
+			setMigrationIntegrationKey(t)
+			assertAppearanceThemeUpgrade(t, db, fixture.driver)
+		})
 		t.Run(fixture.name+"/agreement-url-upgrade", func(t *testing.T) {
 			db := fixture.open(t)
 			setMigrationIntegrationKey(t)

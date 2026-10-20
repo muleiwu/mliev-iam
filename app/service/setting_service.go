@@ -52,6 +52,16 @@ func (s *SettingService) GetWithDefault(key, defaultValue string) string {
 // SetSimple 更新 key 对应的设置值并失效缓存；用于替代原 helper.SetSetting。
 // 区别于 Update(key, req): SetSimple 只写 value，不动 category/remark。
 func (s *SettingService) SetSimple(key, value string) error {
+	if key == AppearanceSettingsConfigKey {
+		if err := validateAppearanceSettingValue(key, value); err != nil {
+			return err
+		}
+		var config dto.AppearanceSettings
+		if err := json.Unmarshal([]byte(value), &config); err != nil {
+			return err
+		}
+		return s.UpdateAppearanceSettings(config)
+	}
 	if err := validateAppearanceSettingValue(key, value); err != nil {
 		return err
 	}
@@ -145,6 +155,16 @@ func (s *SettingService) Create(req *dto.CreateSettingRequest) (*dto.SettingResp
 		return nil, fmt.Errorf("设置key已存在: %s", req.Key)
 	}
 
+	if req.Key == AppearanceSettingsConfigKey {
+		var config dto.AppearanceSettings
+		if err := json.Unmarshal([]byte(req.Value), &config); err != nil {
+			return nil, err
+		}
+		if err := s.UpdateAppearanceSettings(config); err != nil {
+			return nil, err
+		}
+		return s.GetByKey(req.Key)
+	}
 	setting := &model.Setting{
 		Key:      req.Key,
 		Value:    req.Value,
@@ -172,6 +192,16 @@ func (s *SettingService) Update(key string, req *dto.UpdateSettingRequest) (*dto
 		return nil, fmt.Errorf("获取设置失败: %w", err)
 	}
 
+	if key == AppearanceSettingsConfigKey {
+		var config dto.AppearanceSettings
+		if err := json.Unmarshal([]byte(req.Value), &config); err != nil {
+			return nil, err
+		}
+		if err := s.UpdateAppearanceSettings(config); err != nil {
+			return nil, err
+		}
+		return s.GetByKey(key)
+	}
 	setting.Value = req.Value
 	if req.Category != "" {
 		setting.Category = req.Category

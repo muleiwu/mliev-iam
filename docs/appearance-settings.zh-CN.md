@@ -38,6 +38,10 @@ CSS 按默认基础、所选预设、可视化覆盖、高级 CSS 的顺序应�
 
 常用选择器：`.auth-surface-entry`（认证页背景）、`.auth-task-shell-card`（认证卡片）、`.account-page`（个人中心）、`.agreement-page`（协议页）。自定义 CSS 上限为 32 KiB，完整配置序列化后上限为 60 KiB。
 
+## 主题包与主题库
+
+支持导出当前装修的开发 ZIP，在本地修改和预览后导入主题库。选择导入主题会完整载入其方案，保存后生效。详见 [主题开发包与主题库](appearance-theme-packages.zh-CN.md)。
+
 ## 接口与存储
 
 | 接口 | 用途 |
@@ -47,7 +51,7 @@ CSS 按默认基础、所选预设、可视化覆盖、高级 CSS 的顺序应�
 | `POST /api/admin/attachments/brand-image` | 管理员通过 multipart `file` 上传图片，返回附件地址 |
 | `GET /api/appearance` | 无需登录，读取 `{ mode, appearance }`；不暴露未启用的自定义方案 |
 
-`custom` 字段：`preset`、`desktopAlignment`、`brandName`、`logo`、`primaryColor`、`darkMode`、`backgroundMode`、`backgroundColor`、`backgroundImage`、`cardRadius`、`controlRadius`、`customCss`。`preset` 为 `default | minimal | brand | midnight | paper | grove | graphite`，`desktopAlignment` 为 `center | right`。颜色为 `#RRGGBB`，圆角为整数或 `null`；`mode` 为 `default` 或 `custom`。
+`custom` 还支持可选的 `sourceThemeId` 来源关联；关联丢失时保留装修快照。其他字段：`preset`、`desktopAlignment`、`brandName`、`logo`、`primaryColor`、`darkMode`、`backgroundMode`、`backgroundColor`、`backgroundImage`、`cardRadius`、`controlRadius`、`customCss`。`preset` 为 `default | minimal | brand | midnight | paper | grove | graphite`，`desktopAlignment` 为 `center | right`。颜色为 `#RRGGBB`，圆角为整数或 `null`；`mode` 为 `default` 或 `custom`。
 
 历史配置缺失新字段时使用 `default` 和 `center`。保存时拒绝未知枚举；读取未知枚举时仅回退对应字段，保留其他装修。预设默认值在运行时解析，不会写成显式覆盖，因此切换预设后仍能继承新的默认值。
 

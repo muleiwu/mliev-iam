@@ -266,3 +266,16 @@ func TestAppearanceRoutes(t *testing.T) {
 		t.Fatal("appearance must be readable without login")
 	}
 }
+
+func TestAppearanceThemeRoutesRequireAdmin(t *testing.T) {
+	router := newRecordingRouter()
+	Router{}.InitConfig()["http.router"].(func(httpInterfaces.RouterInterface))(router)
+	router.assertRoute(t, "POST", "/api/admin/settings/appearance/export")
+	router.assertRoute(t, "POST", "/api/admin/appearance-themes/import")
+	router.assertRoute(t, "GET", "/api/admin/appearance-themes")
+	router.assertRoute(t, "GET", "/api/admin/appearance-themes/:id")
+	router.assertRoute(t, "DELETE", "/api/admin/appearance-themes/:id")
+	if router.middlewarePrefixes["/api/admin/settings"] == 0 || router.middlewarePrefixes["/api/admin/appearance-themes"] == 0 {
+		t.Fatal("theme packages require admin authentication")
+	}
+}

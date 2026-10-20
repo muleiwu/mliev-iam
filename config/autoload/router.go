@@ -267,6 +267,13 @@ func (receiver Router) InitConfig() map[string]any {
 			adminSettings.PUT("/captcha/bindings", AdminController.CaptchaConfigController{}.UpdateCaptchaSceneBindings)
 			adminSettings.GET("/appearance/config", AdminController.SettingController{}.GetAppearanceSettings)
 			adminSettings.PUT("/appearance/config", AdminController.SettingController{}.UpdateAppearanceSettings)
+			adminSettings.POST("/appearance/export", AdminController.AppearanceThemeController{}.Export)
+			appearanceThemes := admin.Group("/appearance-themes")
+			appearanceThemes.Use(middleware.AdminAuthMiddleware())
+			appearanceThemes.GET("", AdminController.AppearanceThemeController{}.List)
+			appearanceThemes.GET("/:id", AdminController.AppearanceThemeController{}.Get)
+			appearanceThemes.POST("/import", AdminController.AppearanceThemeController{}.Import)
+			appearanceThemes.DELETE("/:id", AdminController.AppearanceThemeController{}.Delete)
 			adminSettings.GET("/storage/config", AdminController.SettingController{}.GetStorageSettings)
 			adminSettings.PUT("/storage/config", AdminController.SettingController{}.UpdateStorageSettings)
 

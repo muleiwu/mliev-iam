@@ -28,7 +28,7 @@ func assertAgreementURLUpgrade(t *testing.T, db *sql.DB, driver string) {
 	require.NoError(t, err)
 	require.NoError(t, gdb.Exec(`INSERT INTO agreements (scope, application_id, code, title, content_md, enabled, sort, created_at, updated_at)
 		VALUES ('application', 42, 'existing-policy', 'Existing policy', '# Existing content', TRUE, 7, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`).Error)
-	require.NoError(t, goose.Up(db, dirByDriver[driver]))
+	require.NoError(t, goose.UpTo(db, dirByDriver[driver], 20261015000000))
 	var agreement model.Agreement
 	require.NoError(t, gdb.Where("code = ?", "existing-policy").First(&agreement).Error)
 	require.Equal(t, "markdown", agreement.ContentType)
@@ -51,7 +51,7 @@ func assertAgreementURLUpgrade(t *testing.T, db *sql.DB, driver string) {
 	var content string
 	require.NoError(t, gdb.Table("agreements").Select("content_md").Where("id = ?", agreement.ID).Scan(&content).Error)
 	require.Equal(t, "# Existing content", content)
-	require.NoError(t, goose.Up(db, dirByDriver[driver]))
+	require.NoError(t, goose.UpTo(db, dirByDriver[driver], 20261015000000))
 	require.NoError(t, gdb.First(&stored, agreement.ID).Error)
 	require.Equal(t, "markdown", stored.ContentType)
 	require.Empty(t, stored.ContentURL)

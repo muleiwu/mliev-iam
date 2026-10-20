@@ -7,6 +7,7 @@ type AppearanceSettings struct {
 }
 
 type AppearanceConfig struct {
+	SourceThemeID    string `json:"sourceThemeId,omitempty"`
 	Preset           string `json:"preset"`
 	DesktopAlignment string `json:"desktopAlignment"`
 	BrandName        string `json:"brandName"`

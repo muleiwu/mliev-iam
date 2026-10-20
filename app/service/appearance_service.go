@@ -9,9 +9,12 @@ import (
 	"strings"
 	"unicode"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const AppearanceSettingsConfigKey = "appearance_settings_config"
@@ -67,6 +70,13 @@ func ValidateAppearanceSettings(config *dto.AppearanceSettings) error {
 		return errors.New("风格必须为默认或自定义")
 	}
 	c := &config.Custom
+	if c.SourceThemeID != "" {
+		id, err := uuid.Parse(c.SourceThemeID)
+		if err != nil {
+			return errors.New("来源主题 ID 无效")
+		}
+		c.SourceThemeID = id.String()
+	}
 	if c.Preset == "" {
 		c.Preset = "default"
 	}
@@ -146,6 +156,11 @@ func (s *SettingService) GetAppearanceSettings() (dto.AppearanceSettings, error)
 		return defaults, nil
 	}
 	// Future/unknown choices must not erase the rest of a saved customization.
+	if config.Custom.SourceThemeID != "" {
+		if _, err := uuid.Parse(config.Custom.SourceThemeID); err != nil {
+			config.Custom.SourceThemeID = ""
+		}
+	}
 	if !validAppearancePreset(config.Custom.Preset) {
 		config.Custom.Preset = "default"
 	}
@@ -155,6 +170,14 @@ func (s *SettingService) GetAppearanceSettings() (dto.AppearanceSettings, error)
 	if ValidateAppearanceSettings(&config) != nil {
 		return defaults, nil
 	}
+	if config.Custom.SourceThemeID != "" {
+		var count int64
+		// Provenance is optional metadata. A library outage must not break the saved
+		// authentication appearance; only a confirmed missing row clears the link.
+		if err := s.db.Model(&model.AppearanceTheme{}).Where("uuid = ?", config.Custom.SourceThemeID).Count(&count).Error; err == nil && count == 0 {
+			config.Custom.SourceThemeID = ""
+		}
+	}
 	return config, nil
 }
 
@@ -162,9 +185,20 @@ func (s *SettingService) UpdateAppearanceSettings(config dto.AppearanceSettings)
 	if err := ValidateAppearanceSettings(&config); err != nil {
 		return err
 	}
-	data, _ := json.Marshal(config)
-	return s.settingDao.CreateOrUpdate(&model.Setting{
-		Key: AppearanceSettingsConfigKey, Value: string(data), Category: "appearance", Remark: "认证门户界面设置",
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if config.Custom.SourceThemeID != "" {
+			var theme model.AppearanceTheme
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("uuid = ?", config.Custom.SourceThemeID).First(&theme).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				config.Custom.SourceThemeID = ""
+			} else if err != nil {
+				return err
+			}
+		}
+		data, _ := json.Marshal(config)
+		return dao.NewSettingDao(tx).CreateOrUpdate(&model.Setting{
+			Key: AppearanceSettingsConfigKey, Value: string(data), Category: "appearance", Remark: "认证门户界面设置",
+		})
 	})
 }
 

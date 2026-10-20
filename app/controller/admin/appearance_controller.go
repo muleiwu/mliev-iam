@@ -31,5 +31,10 @@ func (c SettingController) UpdateAppearanceSettings(ctx httpInterfaces.RouterCon
 		c.Error(ctx, 500, "保存界面配置失败")
 		return
 	}
-	c.Success(ctx, config)
+	saved, err := service.NewSettingService(helper.GetDatabase()).GetAppearanceSettings()
+	if err != nil {
+		c.Error(ctx, 500, "读取已保存配置失败")
+		return
+	}
+	c.Success(ctx, saved)
 }
