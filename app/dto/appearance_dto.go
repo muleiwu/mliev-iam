@@ -7,16 +7,18 @@ type AppearanceSettings struct {
 }
 
 type AppearanceConfig struct {
-	BrandName       string `json:"brandName"`
-	Logo            string `json:"logo"`
-	PrimaryColor    string `json:"primaryColor"`
-	DarkMode        string `json:"darkMode"`
-	BackgroundMode  string `json:"backgroundMode"`
-	BackgroundColor string `json:"backgroundColor"`
-	BackgroundImage string `json:"backgroundImage"`
-	CardRadius      *int   `json:"cardRadius"`
-	ControlRadius   *int   `json:"controlRadius"`
-	CustomCSS       string `json:"customCss"`
+	Preset           string `json:"preset"`
+	DesktopAlignment string `json:"desktopAlignment"`
+	BrandName        string `json:"brandName"`
+	Logo             string `json:"logo"`
+	PrimaryColor     string `json:"primaryColor"`
+	DarkMode         string `json:"darkMode"`
+	BackgroundMode   string `json:"backgroundMode"`
+	BackgroundColor  string `json:"backgroundColor"`
+	BackgroundImage  string `json:"backgroundImage"`
+	CardRadius       *int   `json:"cardRadius"`
+	ControlRadius    *int   `json:"controlRadius"`
+	CustomCSS        string `json:"customCss"`
 }
 
 // PublicAppearanceResponse exposes only the active style, never an inactive draft.

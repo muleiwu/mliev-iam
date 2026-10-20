@@ -150,7 +150,7 @@ type AuthInfoResponse struct {
 }
 
 // ClientConfigResponse OIDC 登录页客户端配置响应。
-// v1 先用应用基础信息和固定默认值补齐前端契约，不引入额外持久化字段。
+// 使用应用基础信息和当前全局外观生成配置，保留原有前端契约。
 type ClientConfigResponse struct {
 	ClientID         string                    `json:"clientId"`
 	AppName          string                    `json:"appName"`
@@ -360,6 +360,7 @@ func (c OIDCAuthFlowController) GetClientConfig(ctx httpInterfaces.RouterContext
 	response := buildClientConfigResponse(app, agreementLinks)
 	// Preserve the existing contract while using the same active style as standalone pages.
 	if active, err := service.NewSettingService(db).GetPublicAppearance(); err == nil && active.Mode == "custom" {
+		active.Appearance = service.ResolveAppearanceConfig(active.Appearance)
 		if active.Appearance.PrimaryColor != "" {
 			response.Appearance.PrimaryColor = active.Appearance.PrimaryColor
 		}

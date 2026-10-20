@@ -45,6 +45,27 @@ func TestPublicAppearanceAndClientConfigShareActiveStyle(t *testing.T) {
 	if client.AppName != app.Name || client.Logo != app.Icon {
 		t.Fatal("application identity must be preserved")
 	}
+	for _, tc := range []struct{ preset, color, theme, radius string }{
+		{"minimal", "#334155", "light", "6px"}, {"brand", "#1d4ed8", "auto", "8px"}, {"midnight", "#0f766e", "dark", "8px"},
+		{"paper", "#9a4c20", "light", "4px"}, {"grove", "#3f6212", "auto", "12px"}, {"graphite", "#3f4c5a", "auto", "0px"},
+	} {
+		config.Custom = service.DefaultAppearanceSettings().Custom
+		config.Custom.Preset, config.Custom.DesktopAlignment = tc.preset, "right"
+		if err := settings.UpdateAppearanceSettings(config); err != nil {
+			t.Fatal(err)
+		}
+		ctx = newTestRouterContext(map[string]string{"client_id": app.UUID})
+		OIDCAuthFlowController{}.GetClientConfig(ctx)
+		resp = assertControllerResponse[dto.Response](t, ctx.payload)
+		client = resp.Data.(ClientConfigResponse)
+		if client.Appearance.PrimaryColor != tc.color || client.Appearance.DarkMode != tc.theme || client.Appearance.BorderRadius != tc.radius {
+			t.Fatalf("%s preset overridden by legacy defaults: %+v", tc.preset, client.Appearance)
+		}
+		active, err := settings.GetPublicAppearance()
+		if err != nil || active.Appearance.Preset != tc.preset || active.Appearance.PrimaryColor != "" || active.Appearance.ControlRadius != nil {
+			t.Fatal("public settings must retain explicit overrides separately from preset defaults")
+		}
+	}
 	config.Mode = "default"
 	if err := settings.UpdateAppearanceSettings(config); err != nil {
 		t.Fatal(err)

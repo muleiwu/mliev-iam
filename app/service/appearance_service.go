@@ -19,7 +19,47 @@ const AppearanceSettingsConfigKey = "appearance_settings_config"
 var appearanceColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 func DefaultAppearanceSettings() dto.AppearanceSettings {
-	return dto.AppearanceSettings{Mode: "default", Custom: dto.AppearanceConfig{BackgroundMode: "default"}}
+	return dto.AppearanceSettings{Mode: "default", Custom: dto.AppearanceConfig{Preset: "default", DesktopAlignment: "center", BackgroundMode: "default"}}
+}
+
+func validAppearancePreset(preset string) bool {
+	return preset == "default" || preset == "minimal" || preset == "brand" || preset == "midnight" || preset == "paper" || preset == "grove" || preset == "graphite"
+}
+
+// ResolveAppearanceConfig derives client-facing defaults without persisting them as overrides.
+// Keep these defaults in sync with frontend-oidc/src/themes/presets.ts.
+func ResolveAppearanceConfig(config dto.AppearanceConfig) dto.AppearanceConfig {
+	var color, theme string
+	cardRadius, controlRadius := 16, 8
+	switch config.Preset {
+	case "minimal":
+		color, theme, cardRadius, controlRadius = "#334155", "light", 8, 6
+	case "brand":
+		color, theme = "#1d4ed8", "auto"
+	case "midnight":
+		color, theme = "#0f766e", "dark"
+	case "paper":
+		color, theme, cardRadius, controlRadius = "#9a4c20", "light", 4, 4
+	case "grove":
+		color, theme, cardRadius, controlRadius = "#3f6212", "auto", 24, 12
+	case "graphite":
+		color, theme, cardRadius, controlRadius = "#3f4c5a", "auto", 0, 0
+	default:
+		return config
+	}
+	if config.PrimaryColor == "" {
+		config.PrimaryColor = color
+	}
+	if config.DarkMode == "" {
+		config.DarkMode = theme
+	}
+	if config.CardRadius == nil {
+		config.CardRadius = &cardRadius
+	}
+	if config.ControlRadius == nil {
+		config.ControlRadius = &controlRadius
+	}
+	return config
 }
 
 func ValidateAppearanceSettings(config *dto.AppearanceSettings) error {
@@ -27,6 +67,18 @@ func ValidateAppearanceSettings(config *dto.AppearanceSettings) error {
 		return errors.New("风格必须为默认或自定义")
 	}
 	c := &config.Custom
+	if c.Preset == "" {
+		c.Preset = "default"
+	}
+	if !validAppearancePreset(c.Preset) {
+		return errors.New("风格预设无效")
+	}
+	if c.DesktopAlignment == "" {
+		c.DesktopAlignment = "center"
+	}
+	if c.DesktopAlignment != "center" && c.DesktopAlignment != "right" {
+		return errors.New("PC 端卡片位置必须为居中或居右")
+	}
 	c.BrandName = strings.TrimSpace(c.BrandName)
 	if len([]rune(c.BrandName)) > 100 {
 		return errors.New("品牌名称不能超过 100 个字符")
@@ -90,7 +142,17 @@ func (s *SettingService) GetAppearanceSettings() (dto.AppearanceSettings, error)
 		return defaults, err
 	}
 	var config dto.AppearanceSettings
-	if json.Unmarshal([]byte(setting.Value), &config) != nil || ValidateAppearanceSettings(&config) != nil {
+	if json.Unmarshal([]byte(setting.Value), &config) != nil {
+		return defaults, nil
+	}
+	// Future/unknown choices must not erase the rest of a saved customization.
+	if !validAppearancePreset(config.Custom.Preset) {
+		config.Custom.Preset = "default"
+	}
+	if config.Custom.DesktopAlignment != "center" && config.Custom.DesktopAlignment != "right" {
+		config.Custom.DesktopAlignment = "center"
+	}
+	if ValidateAppearanceSettings(&config) != nil {
 		return defaults, nil
 	}
 	return config, nil
