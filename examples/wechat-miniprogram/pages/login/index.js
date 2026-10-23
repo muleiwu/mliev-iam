@@ -3,28 +3,51 @@ Page({
   data: {
     config: null, state: '', busy: false, error: '', bindForm: false,
     username: '', password: '', email: '', realName: '', nickname: '',
-    accepted: false, challenge: null, methods: [], methodIndex: 0, factorCode: '',
+    challenge: null, methods: [], methodIndex: 0, factorCode: '',
     authenticated: false, notice: '', agreementContent: '',
   },
   onLoad() {
+    this.unloaded = false;
     this.run(async () => {
       const config = await iam.config();
-      this.setData({ config, authenticated: Boolean(iam.tokens()) });
+      if (!this.unloaded) this.setData({ config, authenticated: Boolean(iam.tokens()) });
     });
   },
+  onUnload() { this.unloaded = true; iam.cancelLogin(); },
   async run(action) {
     if (this.data.busy) return;
     this.setData({ busy: true, error: '', notice: '' });
-    try { await action(); } catch (err) { this.setData({ error: err.message || '操作失败，请重试' }); }
-    finally { this.setData({ busy: false }); }
+    try { await action(); } catch (err) {
+      if (this.unloaded || err.cancelled) return;
+      this.setData({ error: err.message || '操作失败，请重试' });
+      if (err.restartLogin || err.status === 401) {
+        iam.cancelLogin();
+        this.setData({ state: '', bindForm: false, config: null, password: '', factorCode: '' });
+        try {
+          const config = await iam.config();
+          if (!this.unloaded) this.setData({ config });
+        } catch (error) { if (!this.unloaded) this.setData({ error: error.message }); }
+      }
+    }
+    finally { if (!this.unloaded) this.setData({ busy: false }); }
   },
   apply(result) {
+    if (this.unloaded) return;
     const challenge = result.twoFactorChallenge || null;
     const names = { password: '账号密码', phone: '短信验证码', email: '邮箱验证码', totp: '验证器动态码', recovery: '恢复码' };
     const methods = challenge ? challenge.methods.filter((m) => m.available).map((m) => ({ ...m, label: names[m.method] || m.method })) : [];
     this.setData({ state: result.state, challenge, methods, methodIndex: 0, bindForm: result.state === 'bind_required', authenticated: result.state === 'authenticated', password: '', factorCode: '' });
   },
-  login() { this.run(async () => this.apply(await iam.login())); },
+  login() {
+    if (!this.data.config) return;
+    return this.run(async () => this.apply(await iam.login({ consent: {
+      approveScopes: true, acceptedAgreementKeys: this.data.config.agreements.map((a) => a.key),
+    } })));
+  },
+  reloadConfig() { return this.run(async () => {
+    const config = await iam.config();
+    if (!this.unloaded) this.setData({ config });
+  }); },
   phone(event) {
     if (!event.detail.code) { this.setData({ error: '未授权手机号。可以重试或选择绑定已有账号。' }); return; }
     this.run(async () => this.apply(await iam.native('phone', { phoneCode: event.detail.code })));
@@ -33,14 +56,15 @@ Page({
   showBind() { this.setData({ bindForm: true }); },
   bind() { this.run(async () => this.apply(await iam.native('bind', { username: this.data.username, password: this.data.password })));
   },
-  accept(event) { this.setData({ accepted: event.detail.value.includes('yes') }); },
   complete() {
-    if (!this.data.accepted) { this.setData({ error: '请阅读协议并确认授权' }); return; }
-    this.run(async () => this.apply(await iam.native('complete', {
-      approveScopes: true,
-      acceptedAgreementKeys: this.data.config.agreements.map((a) => a.key),
-      profile: { email: this.data.email, realName: this.data.realName, nickname: this.data.nickname },
+    this.run(async () => this.apply(await iam.complete({
+      email: this.data.email, realName: this.data.realName, nickname: this.data.nickname,
     })));
+  },
+  cancel() {
+    iam.cancelLogin();
+    this.setData({ state: '', bindForm: false, password: '', factorCode: '', error: '' });
+    if (!this.data.busy) return this.reloadConfig();
   },
   method(event) { this.setData({ methodIndex: Number(event.detail.value), factorCode: '' }); },
   sendCode() { this.run(async () => {

@@ -2,48 +2,53 @@
   <text class="eyebrow">MLIEV IDENTITY</text>
   <text class="title">{{config.name || '统一账号登录'}}</text>
   <text class="description">使用微信身份访问当前应用。账号与权限由 IAM 管理。</text>
-  <view wx:if="error" class="error" role="alert">{{error}}</view>
-  <view wx:if="notice" class="notice">{{notice}}</view>
-  <button wx:if="!authenticated" bindtap="login" loading="{{busy}}" disabled="{{busy || !config}}">{{state ? '重新开始登录' : '微信登录'}}</button>
-  <block wx:if="state === 'phone_required' && !bindForm">
+  <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
+  <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+  <button wx:if="{{!config && !busy}}" bindtap="reloadConfig" class="secondary">重新加载登录配置</button>
+  <view wx:if="{{!authenticated && !state && config && !busy}}">
+    <text class="description">授权范围：openid</text>
+    <button class="secondary" wx:for="{{config.agreements}}" wx:key="key" data-index="{{index}}" bindtap="readAgreement">阅读《{{item.title}}》</button>
+    <text class="description">点击下方按钮，即表示同意{{config.agreements.length ? '以上协议及' : ''}}所列授权范围。</text>
+  </view>
+  <button wx:if="{{!authenticated && !state}}" bindtap="login" loading="{{busy}}" disabled="{{busy || !config}}">{{busy ? '正在登录…' : '同意并登录'}}</button>
+  <block wx:if="{{state === 'phone_required' && !bindForm}}">
     <text class="section">授权手机号</text>
     <text class="description">用于关联已有账号或创建新账号。</text>
     <button open-type="getRealtimePhoneNumber" bindgetrealtimephonenumber="phone" disabled="{{busy}}">验证并授权手机号</button>
   </block>
-  <button wx:if="(state === 'phone_required' || state === 'profile_required') && !bindForm" bindtap="showBind" disabled="{{busy}}" class="secondary">绑定已有账号</button>
-  <view wx:if="bindForm">
+  <button wx:if="{{(state === 'phone_required' || state === 'profile_required') && !bindForm}}" bindtap="showBind" disabled="{{busy}}" class="secondary">绑定已有账号</button>
+  <view wx:if="{{bindForm}}">
     <text class="section">验证已有账号</text>
     <input aria-label="账号" placeholder="用户名、邮箱或手机号" value="{{username}}" data-field="username" bindinput="field" />
     <input aria-label="密码" placeholder="账号密码" password value="{{password}}" data-field="password" bindinput="field" />
     <button bindtap="bind" disabled="{{busy}}">验证并继续</button>
   </view>
-  <view wx:if="(state === 'profile_required' || state === 'consent_required') && !bindForm">
-    <text class="section">{{state === 'profile_required' ? '完善账号资料' : '确认应用授权'}}</text>
-    <block wx:if="state === 'profile_required'">
-      <input wx:if="config.registerFields.email.visible" aria-label="邮箱" placeholder="{{config.registerFields.email.label}}{{config.registerFields.email.required ? '（必填）' : ''}}" value="{{email}}" data-field="email" bindinput="field" />
-      <input wx:if="config.registerFields.realName.visible" aria-label="姓名" placeholder="{{config.registerFields.realName.label}}{{config.registerFields.realName.required ? '（必填）' : ''}}" value="{{realName}}" data-field="realName" bindinput="field" />
-      <input wx:if="config.registerFields.nickname.visible" aria-label="昵称" placeholder="{{config.registerFields.nickname.label}}{{config.registerFields.nickname.required ? '（必填）' : ''}}" value="{{nickname}}" data-field="nickname" bindinput="field" />
+  <view wx:if="{{state === 'profile_required' && !bindForm}}">
+    <text class="section">完善账号资料</text>
+    <block wx:if="{{state === 'profile_required'}}">
+      <input wx:if="{{config.registerFields.email.visible}}" aria-label="邮箱" placeholder="{{config.registerFields.email.label}}{{config.registerFields.email.required ? '（必填）' : ''}}" value="{{email}}" data-field="email" bindinput="field" />
+      <input wx:if="{{config.registerFields.realName.visible}}" aria-label="姓名" placeholder="{{config.registerFields.realName.label}}{{config.registerFields.realName.required ? '（必填）' : ''}}" value="{{realName}}" data-field="realName" bindinput="field" />
+      <input wx:if="{{config.registerFields.nickname.visible}}" aria-label="昵称" placeholder="{{config.registerFields.nickname.label}}{{config.registerFields.nickname.required ? '（必填）' : ''}}" value="{{nickname}}" data-field="nickname" bindinput="field" />
     </block>
-    <button class="secondary" wx:for="{{config.agreements}}" wx:key="key" data-index="{{index}}" bindtap="readAgreement">阅读《{{item.title}}》</button>
-    <checkbox-group bindchange="accept"><label><checkbox value="yes" checked="{{accepted}}" />我同意以上协议，并授权此应用识别我的统一账号。</label></checkbox-group>
-    <button bindtap="complete" disabled="{{busy}}">同意并继续</button>
+    <button bindtap="complete" disabled="{{busy}}">完成并登录</button>
   </view>
-  <view wx:if="state === 'two_factor_required'">
+  <view wx:if="{{state === 'two_factor_required'}}">
     <text class="section">完成二次验证</text>
     <picker range="{{methods}}" range-key="label" value="{{methodIndex}}" bindchange="method"><view class="picker">{{methods[methodIndex].label || '无可用方式'}} ▾</view></picker>
     <input aria-label="验证凭证" placeholder="输入验证码、恢复码或密码" password="{{methods[methodIndex].method === 'password'}}" value="{{factorCode}}" data-field="factorCode" bindinput="field" />
-    <button wx:if="methods[methodIndex].method === 'phone' || methods[methodIndex].method === 'email'" class="secondary" bindtap="sendCode" disabled="{{busy}}">发送验证码</button>
+    <button wx:if="{{methods[methodIndex].method === 'phone' || methods[methodIndex].method === 'email'}}" class="secondary" bindtap="sendCode" disabled="{{busy}}">发送验证码</button>
     <button bindtap="verify" disabled="{{busy || !methods.length}}">验证并登录</button>
   </view>
-  <view wx:if="authenticated">
+  <button wx:if="{{!authenticated && (state || busy)}}" bindtap="cancel" class="secondary">取消本次登录</button>
+  <view wx:if="{{authenticated}}">
     <text class="section">已登录当前应用</text>
     <text class="description">令牌保存在本机；页面不会展示令牌内容。</text>
     <button bindtap="refresh" disabled="{{busy}}">刷新登录凭证</button>
     <button class="secondary" bindtap="logout" disabled="{{busy}}">退出登录</button>
   </view>
-  <view wx:if="agreementContent || agreementUrl" class="agreement">
+  <view wx:if="{{agreementContent || agreementUrl}}" class="agreement">
     <text selectable>{{agreementContent || '此协议使用外部网页，请复制链接阅读后返回。'}}</text>
-    <button wx:if="agreementUrl" class="secondary" bindtap="copyAgreementURL">复制协议链接</button>
+    <button wx:if="{{agreementUrl}}" class="secondary" bindtap="copyAgreementURL">复制协议链接</button>
     <button class="secondary" bindtap="closeAgreement">收起协议</button>
   </view>
 </view>
