@@ -14,7 +14,8 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 	routerConfig(router)
 
 	router.assertRoute(t, "GET", "/api/auth/miniprogram/:client_id/config")
-	for _, action := range []string{"login", "phone", "bind", "complete", "two-factor/send", "two-factor/verify"} {
+	router.assertRoute(t, "GET", "/api/admin/captcha-configs/options")
+	for _, action := range []string{"login", "phone", "bind", "complete", "two-factor/send", "two-factor/verify", "captcha/params"} {
 		router.assertRoute(t, "POST", "/api/auth/miniprogram/:client_id/"+action)
 	}
 	router.assertRoute(t, "POST", "/api/auth/refresh")

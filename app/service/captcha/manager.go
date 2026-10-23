@@ -29,6 +29,7 @@ func NewManager(db *gorm.DB) *CaptchaManager {
 
 	// 注册内置提供商
 	manager.RegisterProvider(&TencentCaptchaProvider{})
+	manager.RegisterProvider(&TencentMiniProgramProvider{})
 
 	return manager
 }

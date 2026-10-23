@@ -45,3 +45,7 @@ type MiniProgramConfigResponse struct {
 	RegisterFields *RegisterFieldsSettings `json:"registerFields"`
 	Agreements     []ClientAgreementLink   `json:"agreements"`
 }
+
+type MiniProgramCaptchaParamsRequest struct {
+	Fingerprint string `json:"fingerprint" binding:"required,max=256"`
+}

@@ -256,3 +256,19 @@ func (c CaptchaConfigController) convertToResponse(config *model.CaptchaConfig) 
 		UpdatedAt: config.UpdatedAt,
 	}
 }
+
+// GetCaptchaOptions lists selectable metadata without credential parameters.
+func (c CaptchaConfigController) GetCaptchaOptions(ctx httpInterfaces.RouterContextInterface) {
+	var options []struct {
+		ID       uint   `json:"id"`
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+		Enabled  bool   `json:"enabled"`
+	}
+	err := helper.GetDatabase().Model(&model.CaptchaConfig{}).Select("id, name, provider, enabled").Order("id DESC").Find(&options).Error
+	if err != nil {
+		c.Error(ctx, 500, "读取验证码选项失败")
+		return
+	}
+	c.Success(ctx, options)
+}

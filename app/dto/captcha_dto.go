@@ -87,6 +87,7 @@ type UpdateCaptchaSceneBindingsRequest struct {
 
 // CaptchaClientParamsResponse 前端初始化参数响应
 type CaptchaClientParamsResponse struct {
+	ExpiresIn   int                    `json:"expiresIn,omitempty"`
 	Enabled     bool                   `json:"enabled"`     // 是否启用验证码
 	Provider    string                 `json:"provider"`    // 提供商类型
 	Params      map[string]interface{} `json:"params"`      // 前端初始化参数

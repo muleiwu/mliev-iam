@@ -296,6 +296,7 @@ func (receiver Router) InitConfig() map[string]any {
 			adminCaptchaConfigs.Use(middleware.AdminAuthMiddleware())
 			adminCaptchaConfigs.GET("", AdminController.CaptchaConfigController{}.GetCaptchaConfigs)
 			adminCaptchaConfigs.GET("/providers", AdminController.CaptchaConfigController{}.GetCaptchaProviders)
+			adminCaptchaConfigs.GET("/options", AdminController.CaptchaConfigController{}.GetCaptchaOptions)
 			adminCaptchaConfigs.GET("/:id", AdminController.CaptchaConfigController{}.GetCaptchaConfig)
 			adminCaptchaConfigs.POST("", AdminController.CaptchaConfigController{}.CreateCaptchaConfig)
 			adminCaptchaConfigs.PUT("/:id", AdminController.CaptchaConfigController{}.UpdateCaptchaConfig)
@@ -414,7 +415,7 @@ func (receiver Router) InitConfig() map[string]any {
 			// Native clients use a bearer continuation, never browser cookies.
 			miniProgram := api.Group("/auth/miniprogram/:client_id")
 			miniProgram.GET("/config", controller.MiniProgramController{}.Handle)
-			for _, action := range []string{"login", "phone", "bind", "complete", "two-factor/send", "two-factor/verify"} {
+			for _, action := range []string{"login", "phone", "bind", "complete", "two-factor/send", "two-factor/verify", "captcha/params"} {
 				miniProgram.POST("/"+action, controller.MiniProgramController{}.Handle)
 			}
 

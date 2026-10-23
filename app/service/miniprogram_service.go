@@ -46,6 +46,7 @@ type miniTransaction struct {
 }
 
 type MiniProgramService struct {
+	captcha  MiniProgramCaptcha
 	db       *gorm.DB
 	redis    *redis.Client
 	factors  *TwoFactorService
@@ -347,13 +348,30 @@ func (s *MiniProgramService) Phone(ctx context.Context, clientID, token, code st
 	})
 }
 
-func (s *MiniProgramService) Bind(ctx context.Context, clientID, token, username, password, ip string) (*dto.MiniProgramResponse, error) {
+func (s *MiniProgramService) Bind(ctx context.Context, clientID, token, username, password, ip string, tickets ...*dto.CaptchaTicket) (*dto.MiniProgramResponse, error) {
 	return s.withTransaction(ctx, clientID, token, func(tr *miniTransaction, app *miniApplication) (*dto.MiniProgramResponse, error) {
-		if tr.UserID != 0 || (tr.State != "bind_required" && tr.State != "phone_required" && tr.State != "profile_required") {
+		if !miniCanBind(tr) {
 			return nil, ErrMiniTransaction
 		}
 		if err := NewExternalAuthService(s.db, s.redis).CheckContinuationRateLimit(ctx, token, ip, username); err != nil {
 			return nil, ErrMiniRateLimit
+		}
+		var ticket *dto.CaptchaTicket
+		if len(tickets) > 0 {
+			ticket = tickets[0]
+		}
+		if s.captcha != nil {
+			if err := s.captcha.Validate(ctx, app.app, miniHash(clientID, token), ticket, ip); err != nil {
+				return nil, err
+			}
+		} else {
+			id, err := ResolveMiniProgramCaptchaConfigID(s.db, app.app)
+			if err != nil {
+				return nil, err
+			}
+			if id != 0 {
+				return nil, errors.New("验证码服务未初始化")
+			}
 		}
 		user, err := NewUserService(s.db).ValidateUserForLogin(username, password)
 		if err != nil {

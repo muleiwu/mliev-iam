@@ -40,6 +40,12 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 		if config["clientType"] != "public" {
 			return errors.New("小程序必须使用公开客户端")
 		}
+		if mp.CaptchaConfigID != nil && *mp.CaptchaConfigID > 0 {
+			var config model.CaptchaConfig
+			if err := h.db.First(&config, *mp.CaptchaConfigID).Error; err != nil || !config.Enabled || config.Provider != "tencent_miniprogram" {
+				return errors.New("请选择已启用的微信小程序验证码配置")
+			}
+		}
 		var connection model.IdentityConnection
 		if err := h.db.First(&connection, mp.ConnectionID).Error; err != nil || connection.ProviderType != "wechat_miniprogram" || connection.Category != model.ConnectionCategorySocial || !connection.IsEnabled() || !connection.HasCapability(model.ConnectionCapabilityAuthentication) {
 			return errors.New("请选择已启用的微信小程序认证连接")

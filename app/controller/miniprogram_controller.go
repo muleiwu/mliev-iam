@@ -24,6 +24,7 @@ func (mc MiniProgramController) Handle(c httpInterfaces.RouterContextInterface) 
 		token = parts[1]
 	}
 	svc := service.NewMiniProgramService(helper.GetDatabase(), helper.GetRedis(), twoFactorService())
+	svc.SetCaptcha(captcha.NewMiniProgramManager(helper.GetDatabase(), helper.GetRedis()))
 	fail := func(err error) {
 		status := 400
 		if errors.Is(err, service.ErrMiniRateLimit) {
@@ -81,9 +82,20 @@ func (mc MiniProgramController) Handle(c httpInterfaces.RouterContextInterface) 
 		if !bind(&req) {
 			return
 		}
-		if err = captcha.NewManager(helper.GetDatabase()).ValidateForScene("login", req.CaptchaTicket, c.ClientIP(), helper.GetRedis()); err == nil {
-			response, err = svc.Bind(ctx, clientID, token, req.Username, req.Password, c.ClientIP())
+		response, err = svc.Bind(ctx, clientID, token, req.Username, req.Password, c.ClientIP(), req.CaptchaTicket)
+	case "captcha/params":
+		var req dto.MiniProgramCaptchaParamsRequest
+		if !bind(&req) {
+			return
 		}
+		params, paramsErr := svc.CaptchaParams(ctx, clientID, token, req, c.ClientIP())
+		if paramsErr != nil {
+			fail(paramsErr)
+			return
+		}
+		mc.Success(c, params)
+		return
+
 	case "complete":
 		var req dto.MiniProgramCompleteRequest
 		if !bind(&req) {

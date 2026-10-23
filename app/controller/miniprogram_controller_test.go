@@ -21,6 +21,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"gorm.io/datatypes"
 )
 
 type nativeHTTPTransport func(*http.Request) (*http.Response, error)
@@ -32,7 +33,7 @@ func TestMiniProgramHTTPUsesBearerTransactionsAndNeverCookies(t *testing.T) {
 	require.NoError(t, err)
 	sql.SetMaxOpenConns(1)
 	t.Cleanup(func() { sql.Close() })
-	require.NoError(t, db.AutoMigrate(&model.Setting{}, &model.IdentityConnection{}, &model.IdentityConnectionCredential{}, &model.ExternalPrincipal{}, &model.ExternalIdentifier{}, &model.WeChatIdentity{}, &model.WeChatIdentityConflict{}, &model.Agreement{}, &model.AgreementAcceptance{}, &model.CustomPermission{}))
+	require.NoError(t, db.AutoMigrate(&model.CaptchaConfig{}, &model.Setting{}, &model.IdentityConnection{}, &model.IdentityConnectionCredential{}, &model.ExternalPrincipal{}, &model.ExternalIdentifier{}, &model.WeChatIdentity{}, &model.WeChatIdentityConflict{}, &model.Agreement{}, &model.AgreementAcceptance{}, &model.CustomPermission{}))
 	server := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { rdb.Close() })
@@ -54,7 +55,7 @@ func TestMiniProgramHTTPUsesBearerTransactionsAndNeverCookies(t *testing.T) {
 	engine := gin.New()
 	router := httpimpl.NewRouter(engine, httpimpl.NewHttpDeps())
 	router.GET("/api/auth/miniprogram/:client_id/config", MiniProgramController{}.Handle)
-	for _, action := range []string{"login", "phone", "complete"} {
+	for _, action := range []string{"login", "phone", "complete", "bind", "captcha/params"} {
 		router.POST("/api/auth/miniprogram/:client_id/"+action, MiniProgramController{}.Handle)
 	}
 	request := func(method, action, body, authorization string) *httptest.ResponseRecorder {
@@ -90,6 +91,20 @@ func TestMiniProgramHTTPUsesBearerTransactionsAndNeverCookies(t *testing.T) {
 	require.Equal(t, 401, noBearer.Code)
 	wrongStage := request("POST", "complete", `{"approveScopes":true}`, "Bearer "+result.Data.Token)
 	require.Equal(t, 401, wrongStage.Code)
+	capConfig := model.CaptchaConfig{Name: "HTTP mini captcha", Provider: "tencent_miniprogram", Enabled: true, Params: datatypes.JSONMap{"captchaAppId": "123456", "secretId": "hidden-cloud-id", "secretKey": "hidden-cloud-key", "appSecretKey": "hidden-app-secret"}}
+	require.NoError(t, db.Create(&capConfig).Error)
+	app.ProtocolConfig["miniProgram"] = model.MiniProgramConfig{Enabled: true, ConnectionID: connection.ID, AccountPolicy: "auto_register", CaptchaConfigID: &capConfig.ID}
+	require.NoError(t, db.Save(&app).Error)
+	missingProof := request("POST", "captcha/params", `{"fingerprint":"installation"}`, "")
+	require.Equal(t, 401, missingProof.Code)
+	params := request("POST", "captcha/params", `{"fingerprint":"installation"}`, "Bearer "+result.Data.Token)
+	require.Equal(t, 200, params.Code)
+	require.Contains(t, params.Body.String(), `"provider":"tencent_miniprogram"`)
+	require.Contains(t, params.Body.String(), `"sessionUuid"`)
+	require.NotContains(t, params.Body.String(), "hidden-")
+	bindWithoutCaptcha := request("POST", "bind", `{"username":"somebody","password":"password"}`, "Bearer "+result.Data.Token)
+	require.Equal(t, 400, bindWithoutCaptcha.Code)
+	require.Contains(t, bindWithoutCaptcha.Body.String(), "请完成小程序验证码")
 	replay := request("POST", "login", `{"jsCode":"real-code"}`, "")
 	require.Equal(t, 400, replay.Code)
 }

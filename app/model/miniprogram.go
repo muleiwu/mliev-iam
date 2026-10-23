@@ -7,9 +7,10 @@ import (
 )
 
 type MiniProgramConfig struct {
-	Enabled       bool   `json:"enabled"`
-	ConnectionID  uint   `json:"connectionId"`
-	AccountPolicy string `json:"accountPolicy"`
+	CaptchaConfigID *uint  `json:"captchaConfigId,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	ConnectionID    uint   `json:"connectionId"`
+	AccountPolicy   string `json:"accountPolicy"`
 }
 
 func DecodeMiniProgramConfig(config map[string]any) (MiniProgramConfig, error) {
