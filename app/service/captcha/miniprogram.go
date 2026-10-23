@@ -97,16 +97,15 @@ func (m *MiniProgramManager) Params(ctx context.Context, app *model.Application,
 	return &dto.CaptchaClientParamsResponse{Enabled: true, Provider: TencentMiniProgramProviderType, Params: params, SessionUuid: id, ExpiresIn: 300}, nil
 }
 func (m *MiniProgramManager) Validate(ctx context.Context, app *model.Application, transactionHash string, ticket *dto.CaptchaTicket, ip string) error {
-	config, inherited, err := m.configuration(app)
+	config, _, err := m.configuration(app)
 	if err != nil {
 		return err
 	}
 	if config == nil {
 		return nil
 	}
-	if inherited && config.Provider == TencentProviderType {
-		return NewManager(m.db).ValidateForScene("login", ticket, ip, m.redis)
-	}
+	// Browser captcha tickets have no native application/transaction binding.
+	// Reject them here even when inherited; only browser endpoints may use them.
 	if config.Provider != TencentMiniProgramProviderType {
 		return errors.New("小程序验证码类型不支持")
 	}

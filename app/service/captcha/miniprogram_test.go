@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -62,6 +64,43 @@ func TestMiniProgramCaptchaSuccessIsBoundAndSingleUse(t *testing.T) {
 	require.ErrorContains(t, m.Validate(context.Background(), app, "transaction-a", ticket, "192.0.2.1"), "已使用")
 	_, secondTicket := captchaParamsAndTicket(t, m, app)
 	require.ErrorContains(t, m.Validate(context.Background(), app, "transaction-a", secondTicket, "192.0.2.1"), "票据已使用", "a fresh IAM session must not make a consumed vendor ticket reusable")
+}
+func TestMiniProgramCaptchaBindsApplicationAndTransaction(t *testing.T) {
+	for _, policy := range []string{"explicit", "inherited"} {
+		t.Run(policy, func(t *testing.T) {
+			m, owner, cfg, _ := miniCaptchaFixture(t)
+			if policy == "inherited" {
+				createCaptchaSceneBinding(t, m.db, cfg.ID)
+				owner.ProtocolConfig = map[string]any{}
+			}
+			other := *owner
+			other.UUID = "native-client-b"
+			_, ticket := captchaParamsAndTicket(t, m, owner)
+			calls := 0
+			send := m.provider.send
+			m.provider.send = func(config *model.CaptchaConfig, req *miniCaptchaRequest, res *miniCaptchaResponse) error {
+				calls++
+				return send(config, req, res)
+			}
+			ctx := context.Background()
+			// Matching provider, config and fingerprint cannot substitute for the
+			// owning application and exact login transaction.
+			require.ErrorContains(t, m.Validate(ctx, &other, "transaction-a", ticket, "192.0.2.1"), "当前登录不匹配")
+			require.ErrorContains(t, m.Validate(ctx, owner, "transaction-b", ticket, "192.0.2.1"), "当前登录不匹配")
+			require.Zero(t, calls)
+			require.NoError(t, m.Validate(ctx, owner, "transaction-a", ticket, "192.0.2.1"), "foreign attempts must not consume the owner's session")
+			require.Equal(t, 1, calls)
+			require.ErrorContains(t, m.Validate(ctx, owner, "transaction-a", ticket, "192.0.2.1"), "已使用")
+			// A new session for another application/transaction must not make the
+			// already consumed Tencent ticket valid again.
+			params, err := m.Params(ctx, &other, "transaction-b", dto.MiniProgramCaptchaParamsRequest{Fingerprint: "installation-a"}, "192.0.2.1")
+			require.NoError(t, err)
+			retargeted := *ticket
+			retargeted.SessionUuid = params.SessionUuid
+			require.ErrorContains(t, m.Validate(ctx, &other, "transaction-b", &retargeted, "192.0.2.1"), "票据已使用")
+			require.Equal(t, 1, calls)
+		})
+	}
 }
 func TestMiniProgramCaptchaRejectsForeignExpiredAndChangedProofs(t *testing.T) {
 	for _, scenario := range []string{"client", "transaction", "fingerprint", "expired", "configuration", "disabled", "provider", "remote-failure", "network-failure"} {
@@ -122,6 +161,40 @@ func TestMiniProgramCaptchaInheritedWebPolicyDoesNotBecomeDisabled(t *testing.T)
 	require.NoError(t, err)
 	require.False(t, params.Enabled)
 	require.NoError(t, m.Validate(context.Background(), app, "tx", nil, "192.0.2.1"))
+}
+
+type captchaTestTransport func(*http.Request) (*http.Response, error)
+
+func (f captchaTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestMiniProgramCaptchaRejectsValidInheritedWebTicket(t *testing.T) {
+	m, app, cfg, _ := miniCaptchaFixture(t)
+	cfg.Provider = TencentProviderType
+	require.NoError(t, m.db.Save(cfg).Error)
+	createCaptchaSceneBinding(t, m.db, cfg.ID)
+	app.ProtocolConfig = map[string]any{}
+	// Only the external Tencent API is stubbed. Its successful result must not
+	// let native callers skip the application/transaction-bound captcha session.
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	calls := 0
+	http.DefaultTransport = captchaTestTransport(func(req *http.Request) (*http.Response, error) {
+		require.Equal(t, TencentAPIHost, req.URL.Host)
+		calls++
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"Response":{"CaptchaCode":1}}`))}, nil
+	})
+	ticket := &dto.CaptchaTicket{Provider: TencentProviderType, Data: map[string]string{"ticket": "valid-web-ticket", "randstr": "valid-web-randstr"}}
+	for _, clientID := range []string{app.UUID, "other-client"} {
+		other := *app
+		other.UUID = clientID
+		for _, transaction := range []string{"transaction-a", "transaction-b"} {
+			require.ErrorContains(t, m.Validate(context.Background(), &other, transaction, ticket, "192.0.2.1"), "小程序验证码类型不支持")
+		}
+	}
+	require.Zero(t, calls, "incompatible tickets must be rejected before contacting Tencent")
+	// The browser login endpoint retains its existing Web captcha support.
+	require.NoError(t, NewManager(m.db).ValidateForScene("login", ticket, "192.0.2.1", m.redis))
+	require.Equal(t, 1, calls)
 }
 func TestMiniProgramCaptchaAidEncryptionMatchesDocumentedFormat(t *testing.T) {
 	_, _, cfg, _ := miniCaptchaFixture(t)
