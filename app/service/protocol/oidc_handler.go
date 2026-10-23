@@ -32,9 +32,31 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 	if err := model.CleanLegacyCustomScopes(config); err != nil {
 		return err
 	}
+	mp, err := model.DecodeMiniProgramConfig(config)
+	if err != nil {
+		return err
+	}
+	if mp.Enabled {
+		if config["clientType"] != "public" {
+			return errors.New("小程序必须使用公开客户端")
+		}
+		var connection model.IdentityConnection
+		if err := h.db.First(&connection, mp.ConnectionID).Error; err != nil || connection.ProviderType != "wechat_miniprogram" || connection.Category != model.ConnectionCategorySocial || !connection.IsEnabled() || !connection.HasCapability(model.ConnectionCapabilityAuthentication) {
+			return errors.New("请选择已启用的微信小程序认证连接")
+		}
+	}
+	browserFlow := false
+	if grants, ok := config["grantTypes"].([]interface{}); ok {
+		for _, grant := range grants {
+			if grant == "authorization_code" || grant == "implicit" {
+				browserFlow = true
+			}
+		}
+	}
+	nativeOnly := mp.Enabled && !browserFlow
 	// 验证重定向URI
 	redirectUris, ok := config["redirectUris"].([]interface{})
-	if !ok || len(redirectUris) == 0 {
+	if (!ok || len(redirectUris) == 0) && !nativeOnly {
 		return errors.New("至少需要一个重定向URI")
 	}
 
@@ -55,9 +77,20 @@ func (h *OIDCProtocolHandler) ValidateConfig(config map[string]interface{}) erro
 		return errors.New("至少需要一个授权类型")
 	}
 
+	if mp.Enabled {
+		refresh := false
+		for _, grant := range grantTypes {
+			if grant == "refresh_token" {
+				refresh = true
+			}
+		}
+		if !refresh {
+			return errors.New("小程序应用必须启用刷新令牌")
+		}
+	}
 	// 验证响应类型
 	responseTypes, ok := config["responseTypes"].([]interface{})
-	if !ok || len(responseTypes) == 0 {
+	if (!ok || len(responseTypes) == 0) && !nativeOnly {
 		return errors.New("至少需要一个响应类型")
 	}
 

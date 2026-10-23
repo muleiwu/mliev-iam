@@ -1,0 +1,6 @@
+{
+  "pages": ["pages/login/index"],
+  "window": { "navigationBarTitleText": "IAM 登录示例", "navigationBarBackgroundColor": "#f3f6fb", "navigationBarTextStyle": "black" },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

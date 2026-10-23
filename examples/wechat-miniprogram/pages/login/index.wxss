@@ -1,0 +1,14 @@
+page { background: #f3f6fb; color: #182c46; font-size: 30rpx; }
+.page { padding: 56rpx 36rpx 80rpx; max-width: 800rpx; margin: auto; }
+.eyebrow, .title, .section, .description { display: block; }
+.eyebrow { font-size: 22rpx; color: #536a85; letter-spacing: 3rpx; margin-bottom: 20rpx; }
+.title { font-size: 48rpx; font-weight: 600; margin-bottom: 20rpx; }
+.description { color: #536a85; line-height: 1.7; margin: 16rpx 0 32rpx; }
+.section { margin: 48rpx 0 24rpx; font-size: 34rpx; font-weight: 600; }
+button { margin: 24rpx 0; background: #235cad; color: #f8faff; font-size: 30rpx; border-radius: 12rpx; }
+button.secondary { background: #e3ebf6; color: #204b87; }
+input, .picker { background: #fafdff; border: 2rpx solid #c2cfdf; border-radius: 8rpx; padding: 24rpx; margin: 20rpx 0; }
+.error { background: #fce9e8; color: #922a30; padding: 24rpx; margin: 24rpx 0; }
+.notice { background: #e2f0e8; color: #26573a; padding: 24rpx; margin: 24rpx 0; }
+checkbox-group { line-height: 1.8; margin: 24rpx 0; }
+.agreement { border-top: 2rpx solid #c2cfdf; padding-top: 24rpx; margin-top: 32rpx; line-height: 1.8; }

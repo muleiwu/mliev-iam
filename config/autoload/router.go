@@ -411,6 +411,13 @@ func (receiver Router) InitConfig() map[string]any {
 			attachments := router.Group("/attachments")
 			attachments.GET("/:uuid", controller.AttachmentController{}.RedirectAttachment)
 
+			// Native clients use a bearer continuation, never browser cookies.
+			miniProgram := api.Group("/auth/miniprogram/:client_id")
+			miniProgram.GET("/config", controller.MiniProgramController{}.Handle)
+			for _, action := range []string{"login", "phone", "bind", "complete", "two-factor/send", "two-factor/verify"} {
+				miniProgram.POST("/"+action, controller.MiniProgramController{}.Handle)
+			}
+
 			// === 统一身份连接与外部认证 ===
 			api.GET("/identity-connections", controller.ExternalAuthController{}.GetConnections)
 			externalAuth := router.Group("/external-auth")

@@ -295,6 +295,7 @@ func (ec ExternalAuthController) MiniProgramLogin(c httpInterfaces.RouterContext
 				return
 			}
 		}
+		setMiniProgramContinuation(c, response.PendingContinuationID, response.PendingContinuationCSRF)
 		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
 			if respondTwoFactorRequired(c, err) {
 				return
@@ -353,6 +354,7 @@ func (ec ExternalAuthController) GetMiniProgramQRCodeStatus(c httpInterfaces.Rou
 		}
 	}
 	if response.State == service.QRStateConfirmed && response.User != nil {
+		setMiniProgramContinuation(c, response.PendingContinuationID, response.PendingContinuationCSRF)
 		if err := completeUserLogin(c, response.User, false, response.SessionID); err != nil {
 			if respondTwoFactorRequired(c, err) {
 				return
@@ -526,4 +528,12 @@ func (ec ExternalAuthController) popup(c httpInterfaces.RouterContextInterface, 
 	c.SetHeader("Content-Type", "text/html; charset=utf-8")
 	c.SetHeader("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; base-uri 'none'; frame-ancestors 'none'")
 	c.String(200, "%s", output.String())
+}
+
+func setMiniProgramContinuation(c httpInterfaces.RouterContextInterface, id, csrf string) {
+	if id != "" {
+		c.Set("two_factor_continuation", id)
+		c.Set("two_factor_continuation_csrf", csrf)
+		c.Set("primary_auth_method", "external")
+	}
 }

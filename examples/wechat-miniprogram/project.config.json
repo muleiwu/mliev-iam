@@ -1,0 +1,7 @@
+{
+  "appid": "touristappid",
+  "projectname": "mliev-iam-login",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "setting": { "es6": true, "urlCheck": true }
+}

@@ -36,6 +36,11 @@ func TestMigrationDialects(t *testing.T) {
 		{name: "postgresql-16", driver: "postgresql", open: openPostgreSQL16},
 	}
 	for _, fixture := range fixtures {
+		t.Run(fixture.name+"/miniprogram-upgrade", func(t *testing.T) {
+			db := fixture.open(t)
+			setMigrationIntegrationKey(t)
+			assertMiniProgramUpgrade(t, db, fixture.driver)
+		})
 		t.Run(fixture.name+"/appearance-theme-upgrade", func(t *testing.T) {
 			db := fixture.open(t)
 			setMigrationIntegrationKey(t)
@@ -251,13 +256,14 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 			t.Fatalf("硬切后仍存在旧表 %s", oldTable)
 		}
 	}
-	const expectedVersion int64 = 20261015000000
+	const expectedVersion int64 = 20261023000000
 	version, err := goose.GetDBVersion(db)
 	if err != nil || version != expectedVersion {
 		t.Fatalf("迁移版本错误: got=%d want=%d err=%v", version, expectedVersion, err)
 	}
 	assertCustomPermissionSchema(t, gormDB)
 	assertPasskeySchema(t, gormDB)
+	assertMiniProgramSchema(t, gormDB)
 	assertActiveUserUniqueness(t, gormDB)
 	assertOIDCRefreshTokenUniqueness(t, db, gormDB, driver)
 }

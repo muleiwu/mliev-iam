@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -34,13 +35,15 @@ type ExternalAuthService struct {
 }
 
 type ExternalTempProfile struct {
-	ConnectionID uint                      `json:"connectionId"`
-	Profile      *protocol.ExternalProfile `json:"profile"`
-	Category     model.ConnectionCategory  `json:"category"`
-	Connection   string                    `json:"connection"`
-	Identifier   string                    `json:"identifier"`
-	SessionID    string                    `json:"sessionId,omitempty"`
-	CSRFHash     string                    `json:"csrfHash"`
+	AuthenticatedUserID  uint                      `json:"authenticatedUserId,omitempty"`
+	AuthenticatedVersion *uint64                   `json:"authenticatedVersion,omitempty"`
+	ConnectionID         uint                      `json:"connectionId"`
+	Profile              *protocol.ExternalProfile `json:"profile"`
+	Category             model.ConnectionCategory  `json:"category"`
+	Connection           string                    `json:"connection"`
+	Identifier           string                    `json:"identifier"`
+	SessionID            string                    `json:"sessionId,omitempty"`
+	CSRFHash             string                    `json:"csrfHash"`
 }
 
 func NewExternalAuthService(db *gorm.DB, redisClient *redis.Client) *ExternalAuthService {
@@ -130,7 +133,7 @@ func (s *ExternalAuthService) HandleMiniProgramLogin(identifier, code, sessionID
 }
 
 func (s *ExternalAuthService) completeAuthentication(connection *model.IdentityConnection, profile *protocol.ExternalProfile, sessionID string) (*dto.SocialAuthCallbackResponse, error) {
-	principal, err := s.findPrincipal(connection.ID, profile)
+	principal, err := s.findPrincipal(connection, profile)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
@@ -139,6 +142,9 @@ func (s *ExternalAuthService) completeAuthentication(connection *model.IdentityC
 			return nil, fmt.Errorf("该企业身份已被停用")
 		}
 		if principal.UserID != nil {
+			if connection.ProviderType == "wechat_miniprogram" {
+				return s.prepareMiniProgramLogin(connection, profile, *principal.UserID, sessionID)
+			}
 			if err := s.refreshPrincipal(principal, profile, true); err != nil {
 				return nil, err
 			}
@@ -158,7 +164,7 @@ func (s *ExternalAuthService) completeAuthentication(connection *model.IdentityC
 	return &dto.SocialAuthCallbackResponse{NeedsBind: true, ContinuationCSRF: csrf, SessionID: sessionID, ContinuationID: continuationID}, nil
 }
 
-func (s *ExternalAuthService) storeContinuation(connection *model.IdentityConnection, profile *protocol.ExternalProfile, sessionID string) (string, string, error) {
+func (s *ExternalAuthService) storeContinuation(connection *model.IdentityConnection, profile *protocol.ExternalProfile, sessionID string, authenticated ...*model.User) (string, string, error) {
 	continuationID := uuid.NewString()
 	csrf, err := newCsrfToken()
 	if err != nil {
@@ -168,6 +174,11 @@ func (s *ExternalAuthService) storeContinuation(connection *model.IdentityConnec
 	temp := ExternalTempProfile{ConnectionID: connection.ID, Profile: profile, Category: connection.Category,
 		Connection: connection.Name, Identifier: connection.Identifier, SessionID: sessionID,
 		CSRFHash: base64.RawURLEncoding.EncodeToString(csrfDigest[:])}
+	if len(authenticated) == 1 && authenticated[0] != nil {
+		version := authenticated[0].TwoFactorVersion
+		temp.AuthenticatedUserID = authenticated[0].ID
+		temp.AuthenticatedVersion = &version
+	}
 	if err := s.storeJSON(externalTempKeyPrefix+continuationID, temp, 15*time.Minute); err != nil {
 		return "", "", err
 	}
@@ -253,6 +264,9 @@ func (s *ExternalAuthService) BindWithExistingUser(ctx context.Context, continua
 		return nil, err
 	}
 	defer release()
+	if temp.AuthenticatedUserID != 0 {
+		return nil, ErrMiniTransaction
+	}
 	user, err := s.userService.ValidateUserForLogin(username, password)
 	if err != nil {
 		return nil, fmt.Errorf("用户名或密码错误")
@@ -279,6 +293,9 @@ func (s *ExternalAuthService) Register(ctx context.Context, continuationID strin
 		return nil, err
 	}
 	defer release()
+	if temp.AuthenticatedUserID != 0 {
+		return nil, ErrMiniTransaction
+	}
 	agreementService := NewAgreementService(s.db)
 	appID, err := agreementService.ResolveApplicationIDFromSession(context.Background(), req.SessionID, s.redis)
 	if err != nil {
@@ -442,6 +459,13 @@ func (s *ExternalAuthService) UnbindWithSession(userID, principalID uint, sid st
 		if err := tx.Delete(&current).Error; err != nil {
 			return err
 		}
+		// Drop derived WeChat indexes; remaining live bindings are resolved again
+		// on the next native login, so unlinking cannot leave a stale login path.
+		if tx.Migrator().HasTable(&model.WeChatIdentity{}) {
+			if err := tx.Where("user_id = ?", userID).Delete(&model.WeChatIdentity{}).Error; err != nil {
+				return err
+			}
+		}
 		verifier := factors.withDB(tx)
 		if err := verifier.validateLoginPath(userID); err != nil {
 			return err
@@ -471,11 +495,18 @@ func (s *ExternalAuthService) enabledAdapter(identifier string) (*model.Identity
 	return connection, adapter, nil
 }
 
-func (s *ExternalAuthService) findPrincipal(connectionID uint, profile *protocol.ExternalProfile) (*model.ExternalPrincipal, error) {
+func (s *ExternalAuthService) findPrincipal(connection *model.IdentityConnection, profile *protocol.ExternalProfile) (*model.ExternalPrincipal, error) {
 	if _, err := primaryLoginSubject(profile); err != nil {
 		return nil, err
 	}
-	return NewExternalPrincipalResolver(s.db).Resolve(connectionID, profilePrincipalIdentifiers(profile), false)
+	if connection.ProviderType == "wechat_miniprogram" {
+		principal, err := findMiniProgramPrincipal(s.db, connection, profile)
+		if err != nil {
+			recordMiniIdentityConflict(s.db, connection.ID, err)
+		}
+		return principal, err
+	}
+	return NewExternalPrincipalResolver(s.db).Resolve(connection.ID, profilePrincipalIdentifiers(profile), false)
 }
 
 func (s *ExternalAuthService) attachProfile(db *gorm.DB, connectionID, userID uint, profile *protocol.ExternalProfile) error {
@@ -483,6 +514,36 @@ func (s *ExternalAuthService) attachProfile(db *gorm.DB, connectionID, userID ui
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		// Keep browser binding and native binding in the same WeChat namespace.
+		// Older installations/test fixtures without the new index keep their
+		// connection-scoped behavior until the migration is installed.
+		if tx.Migrator().HasTable(&model.WeChatIdentity{}) {
+			var c model.IdentityConnection
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&c, connectionID).Error; err != nil {
+				return err
+			}
+			if c.ProviderType == "wechat_miniprogram" {
+				appID, _, err := miniCredential(tx, &c)
+				if err != nil {
+					return err
+				}
+				var openID, unionID string
+				for _, id := range profile.Identifiers {
+					if id.Namespace == model.IdentifierNamespaceOpenID {
+						openID = id.Value
+					}
+					if id.Namespace == model.IdentifierNamespaceUnionID {
+						unionID = id.Value
+					}
+				}
+				if appID == "" || openID == "" {
+					return fmt.Errorf("微信身份标识不完整")
+				}
+				if err := ensureMiniIdentityIndex(tx, &c, appID, openID, unionID, userID); err != nil {
+					return err
+				}
+			}
+		}
 		resolver := NewExternalPrincipalResolver(tx)
 		principal, err := resolver.Resolve(connectionID, profilePrincipalIdentifiers(profile), false)
 		if err == nil && principal != nil {
@@ -604,15 +665,32 @@ func (s *ExternalAuthService) CompleteTwoFactorBinding(ctx context.Context, cont
 	}
 	defer release()
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Match native completion's connection -> user lock order.
+		var connection model.IdentityConnection
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&connection, temp.ConnectionID).Error; err != nil {
+			return err
+		}
 		if err := dao.LockLoginUser(tx, proof.userID); err != nil {
 			return err
 		}
 		var user model.User
-		if err := tx.First(&user, proof.userID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, proof.userID).Error; err != nil {
 			return err
 		}
 		if !user.CanLogin() || !proof.validFor(&user) {
 			return ErrTwoFactorExpired
+		}
+		if temp.AuthenticatedUserID != 0 {
+			if temp.AuthenticatedUserID != user.ID || temp.AuthenticatedVersion == nil || *temp.AuthenticatedVersion != user.TwoFactorVersion {
+				return ErrTwoFactorExpired
+			}
+			principal, err := findMiniProgramPrincipal(tx, &connection, temp.Profile)
+			if err != nil {
+				return err
+			}
+			if principal.UserID == nil || *principal.UserID != user.ID {
+				return ErrTwoFactorExpired
+			}
 		}
 		return s.attachProfile(tx, temp.ConnectionID, user.ID, temp.Profile)
 	})

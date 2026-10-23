@@ -86,13 +86,15 @@ type MPQRCodeCreateResponse struct {
 // MPQRCodeStatusResponse 扫码状态查询响应
 // state 可取值：pending / scanned / confirmed / needs_bind / access_denied / canceled / expired
 type MPQRCodeStatusResponse struct {
-	State            string                `json:"state"`
-	User             *UserResponse         `json:"-"` // 仅供 controller 签发 HttpOnly Cookie
-	ContinuationID   string                `json:"-"` // 仅供 controller 设置 continuation Cookie
-	ContinuationCSRF string                `json:"continuationCsrf,omitempty"`
-	SocialInfo       *MPSocialBrief        `json:"socialInfo,omitempty"`
-	SessionID        string                `json:"sessionId,omitempty"`
-	Error            *AuthorizationFailure `json:"error,omitempty"`
+	PendingContinuationID   string                `json:"-"`
+	PendingContinuationCSRF string                `json:"-"`
+	State                   string                `json:"state"`
+	User                    *UserResponse         `json:"-"` // 仅供 controller 签发 HttpOnly Cookie
+	ContinuationID          string                `json:"-"` // 仅供 controller 设置 continuation Cookie
+	ContinuationCSRF        string                `json:"continuationCsrf,omitempty"`
+	SocialInfo              *MPSocialBrief        `json:"socialInfo,omitempty"`
+	SessionID               string                `json:"sessionId,omitempty"`
+	Error                   *AuthorizationFailure `json:"error,omitempty"`
 }
 
 // MPSocialBrief 供 PC 在"注册/绑定"抉择页展示的最小社交资料

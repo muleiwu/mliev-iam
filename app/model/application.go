@@ -64,6 +64,7 @@ func (*Application) TableName() string {
 
 // OIDCProtocolConfig OIDC协议特定配置
 type OIDCProtocolConfig struct {
+	MiniProgram         *MiniProgramConfig          `json:"miniProgram,omitempty"`
 	CustomPermissionIDs []uint                      `json:"customPermissionIds"`
 	DepartmentClaims    *OIDCDepartmentClaimsConfig `json:"departmentClaims,omitempty"`
 	RoleClaims          *OIDCRoleClaimsConfig       `json:"roleClaims,omitempty"`

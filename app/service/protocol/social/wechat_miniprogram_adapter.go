@@ -2,9 +2,7 @@ package social
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 )
@@ -20,7 +18,7 @@ type WeChatMiniProgramAdapter struct {
 }
 
 func NewWeChatMiniProgramAdapter(provider *Provider) *WeChatMiniProgramAdapter {
-	return &WeChatMiniProgramAdapter{provider: provider, client: http.DefaultClient}
+	return &WeChatMiniProgramAdapter{provider: provider, client: NewWeChatHTTPClient()}
 }
 
 func (a *WeChatMiniProgramAdapter) GetProviderType() ProviderType {
@@ -49,23 +47,12 @@ func (a *WeChatMiniProgramAdapter) LoginWithCode(ctx context.Context, code strin
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("jscode2session 请求失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	var out jscodeSessionResp
+	if err := ReadWeChatJSON(a.client, req, &out); err != nil {
 		return nil, err
 	}
-
-	var out jscodeSessionResp
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil, fmt.Errorf("jscode2session 解析失败: %w", err)
-	}
 	if out.ErrCode != 0 {
-		return nil, fmt.Errorf("微信小程序登录错误 %d: %s", out.ErrCode, out.ErrMsg)
+		return nil, fmt.Errorf("微信小程序登录失败（%d），请重新获取登录凭证", out.ErrCode)
 	}
 	if out.OpenID == "" {
 		return nil, fmt.Errorf("jscode2session 未返回 openid")
@@ -75,9 +62,8 @@ func (a *WeChatMiniProgramAdapter) LoginWithCode(ctx context.Context, code strin
 		OpenID:  out.OpenID,
 		UnionID: out.UnionID,
 		RawUserInfo: map[string]any{
-			"openid":      out.OpenID,
-			"session_key": out.SessionKey,
-			"unionid":     out.UnionID,
+			"openid":  out.OpenID,
+			"unionid": out.UnionID,
 		},
 	}, nil
 }

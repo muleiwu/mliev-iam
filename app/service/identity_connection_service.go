@@ -190,6 +190,9 @@ func (s *IdentityConnectionService) Update(id uint, req *dto.UpdateIdentityConne
 		return nil, err
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := guardMiniConnectionIdentity(tx, connection, req.Credentials[string(model.CredentialPurposeAuthentication)]); err != nil {
+			return err
+		}
 		if err := dao.NewIdentityConnectionDAO(tx).Save(connection); err != nil {
 			return err
 		}
@@ -450,6 +453,24 @@ func (s *IdentityConnectionService) saveCredentialInputs(tx *gorm.DB, connection
 				continue
 			}
 			merged[key] = value
+		}
+		if purpose == model.CredentialPurposeAuthentication {
+			connection, err := connectionDAO.GetByID(connectionID)
+			if err != nil {
+				return err
+			}
+			if connection.ProviderType == "wechat_miniprogram" {
+				for _, key := range []string{"clientId", "clientSecret"} {
+					if value, supplied := input[key]; supplied {
+						if _, valid := value.(string); !valid {
+							return fmt.Errorf("微信 %s 凭据必须是字符串，留空表示保持不变", key)
+						}
+					}
+				}
+			}
+			if err := guardMiniConnectionIdentity(tx, connection, merged); err != nil {
+				return err
+			}
 		}
 		plaintext, err := json.Marshal(merged)
 		if err != nil {

@@ -13,6 +13,10 @@ func TestRouterKeepsUserAuthAndAddsOIDCAuthRoutes(t *testing.T) {
 
 	routerConfig(router)
 
+	router.assertRoute(t, "GET", "/api/auth/miniprogram/:client_id/config")
+	for _, action := range []string{"login", "phone", "bind", "complete", "two-factor/send", "two-factor/verify"} {
+		router.assertRoute(t, "POST", "/api/auth/miniprogram/:client_id/"+action)
+	}
 	router.assertRoute(t, "POST", "/api/auth/refresh")
 	router.assertRoute(t, "POST", "/api/auth/logout")
 	router.assertRoute(t, "GET", "/api/oidc/client-config")

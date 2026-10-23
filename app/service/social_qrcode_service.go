@@ -17,6 +17,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol/social"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -60,7 +61,7 @@ func NewSocialQRCodeService(db *gorm.DB, rdb *redis.Client) *SocialQRCodeService
 		db: db, redis: rdb, connectionService: NewIdentityConnectionService(db),
 		authService: NewExternalAuthService(db, rdb), userService: NewUserService(db),
 		jwtAuthService: newOptionalJWTAuthService(), tokenCache: NewWeChatAccessTokenCache(rdb),
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: social.NewWeChatHTTPClient(),
 	}
 }
 
@@ -176,16 +177,21 @@ func (s *SocialQRCodeService) GetStatus(
 
 	switch session.State {
 	case QRStateConfirmed:
-		// JWT 不再通过轮询响应返回；controller 直接签发 HttpOnly Cookie。
-		userModel, err := s.userService.GetUserModelByID(session.UserID)
-		if err != nil || userModel == nil || !userModel.CanLogin() {
-			return nil, fmt.Errorf("用户未激活或已禁用")
+		if err := s.validateBoundIdentity(session); err != nil {
+			_ = s.deleteSession(ctx, scanHandle)
+			return nil, err
 		}
-		userResp, err := s.userService.GetUserByID(session.UserID)
+		connection, err := s.connectionService.GetByIdentifier(session.ConnectionIdentifier)
 		if err != nil {
-			return nil, fmt.Errorf("获取用户信息失败: %w", err)
+			return nil, err
 		}
-		resp.User = userResp
+		response, err := s.authService.prepareMiniProgramLogin(connection, qrVerifiedProfile(session), session.UserID, session.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		resp.User = response.User
+		resp.PendingContinuationID = response.PendingContinuationID
+		resp.PendingContinuationCSRF = response.PendingContinuationCSRF
 		// 确认后立即回收票据，避免重复使用
 		_ = s.deleteSession(ctx, scanHandle)
 
@@ -306,15 +312,12 @@ func (s *SocialQRCodeService) Scan(
 
 	resp := &dto.MPQRCodeScanResponse{State: QRStateScanned, Nickname: nickname, Avatar: avatar, ConfirmToken: confirmToken}
 
-	// 查已绑定账号
-	var principal model.ExternalPrincipal
-	err = s.db.Joins("JOIN external_identifiers ei ON ei.principal_id = external_principals.id").
-		Where("ei.connection_id = ? AND ei.namespace = ? AND ei.value = ?", connection.ID, model.IdentifierNamespaceLoginSubject, primary.Value).
-		First(&principal).Error
+	// Use the same global conflict checks as native and legacy code login.
+	principal, err := s.authService.findPrincipal(connection, profile)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("查询绑定账号失败: %w", err)
 	}
-	if err == nil && principal.UserID != nil && principal.Status == model.PrincipalStatusActive {
+	if err == nil && principal != nil && principal.UserID != nil && principal.Status == model.PrincipalStatusActive {
 		session.UserID = *principal.UserID
 		resp.PendingAction = "login"
 		if userResp, err := s.userService.GetUserByID(*principal.UserID); err == nil && userResp != nil {
@@ -366,6 +369,9 @@ func (s *SocialQRCodeService) Confirm(
 	switch req.Action {
 	case "confirm":
 		if session.UserID > 0 {
+			if err := s.validateBoundIdentity(session); err != nil {
+				return err
+			}
 			session.State = QRStateConfirmed
 		} else {
 			session.State = QRStateNeedsBind
@@ -459,11 +465,17 @@ func (s *SocialQRCodeService) fetchWxacode(
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("调用 getwxacodeunlimit 失败: %w", err)
+		return "", errors.New("微信二维码服务请求失败")
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", errors.New("微信二维码服务暂时不可用")
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if len(raw) > 1<<20 {
+		return "", errors.New("微信二维码响应过大")
+	}
 	if err != nil {
 		return "", err
 	}
@@ -472,7 +484,7 @@ func (s *SocialQRCodeService) fetchWxacode(
 	if ct := resp.Header.Get("Content-Type"); strings.Contains(ct, "application/json") || strings.Contains(ct, "text/plain") {
 		var errResp wxacodeErrResp
 		if err := json.Unmarshal(raw, &errResp); err == nil && errResp.ErrCode != 0 {
-			return "", fmt.Errorf("getwxacodeunlimit 错误 %d: %s", errResp.ErrCode, errResp.ErrMsg)
+			return "", fmt.Errorf("微信二维码服务失败（%d）", errResp.ErrCode)
 		}
 	}
 
@@ -490,4 +502,30 @@ func shortTicket() string {
 		return s[:24]
 	}
 	return s
+}
+
+// Recheck at confirmation and polling: a scan is not a permanent proof of a
+// binding that an administrator or user can revoke before the browser logs in.
+func (s *SocialQRCodeService) validateBoundIdentity(session *qrSession) error {
+	connection, err := s.connectionService.GetByIdentifier(session.ConnectionIdentifier)
+	if err != nil || connection.ID != session.ConnectionID || !connection.IsEnabled() || !connection.HasCapability(model.ConnectionCapabilityAuthentication) {
+		return errors.New("微信身份连接已失效，请重新扫码")
+	}
+	profile := qrVerifiedProfile(session)
+	principal, err := s.authService.findPrincipal(connection, profile)
+	if err != nil {
+		return err
+	}
+	if principal == nil || principal.UserID == nil || *principal.UserID != session.UserID {
+		return errors.New("微信身份绑定已失效，请重新扫码")
+	}
+	return nil
+}
+
+func qrVerifiedProfile(session *qrSession) *protocol.ExternalProfile {
+	return &protocol.ExternalProfile{DisplayName: session.Nickname, Avatar: session.Avatar, Identifiers: []protocol.ExternalProfileIdentifier{
+		{Namespace: model.IdentifierNamespaceLoginSubject, Value: session.OpenID, Primary: true},
+		{Namespace: model.IdentifierNamespaceOpenID, Value: session.OpenID},
+		{Namespace: model.IdentifierNamespaceUnionID, Value: session.UnionID},
+	}}
 }

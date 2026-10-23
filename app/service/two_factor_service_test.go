@@ -423,7 +423,9 @@ func TestTwoFactorDefersExternalBindingUntilVerification(t *testing.T) {
 	codes := enableTestFactor(t, s, u, "email")
 	auth := NewExternalAuthService(s.db, s.redis)
 	profile := &protocol.ExternalProfile{DisplayName: "External user", Identifiers: []protocol.ExternalProfileIdentifier{{Namespace: model.IdentifierNamespaceLoginSubject, Value: "external-subject", Primary: true}}}
-	continuation, csrf, err := auth.storeContinuation(&model.IdentityConnection{ID: 42, Category: model.ConnectionCategorySocial}, profile, "")
+	connection := &model.IdentityConnection{ID: 42, Name: "External binding", Identifier: "external-binding", Category: model.ConnectionCategorySocial, ProviderType: "generic", Status: model.ConnectionStatusEnabled, Capabilities: model.StringList{"authentication"}}
+	require.NoError(t, s.db.Create(connection).Error)
+	continuation, csrf, err := auth.storeContinuation(connection, profile, "")
 	require.NoError(t, err)
 	result, err := auth.BindWithExistingUser(ctx, continuation, csrf, u.Username, "current-password")
 	require.NoError(t, err)
