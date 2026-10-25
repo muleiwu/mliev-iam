@@ -6,36 +6,39 @@ import "cnb.cool/mliev/iam/mliev-iam/app/model"
 
 // CreateApplicationRequest 创建应用请求
 type CreateApplicationRequest struct {
-	Name           string                 `json:"name" binding:"required" validate:"max=100"`
-	Description    string                 `json:"description" validate:"max=500"`
-	Icon           string                 `json:"icon" validate:"max=255"`
-	ProtocolType   string                 `json:"protocolType" binding:"required,oneof=oidc saml cas oauth2"`
-	ProtocolConfig map[string]interface{} `json:"protocolConfig" binding:"required"`
+	LoginConnections *model.LoginConnectionConfig `json:"loginConnections"`
+	Name             string                       `json:"name" binding:"required" validate:"max=100"`
+	Description      string                       `json:"description" validate:"max=500"`
+	Icon             string                       `json:"icon" validate:"max=255"`
+	ProtocolType     string                       `json:"protocolType" binding:"required,oneof=oidc saml cas oauth2"`
+	ProtocolConfig   map[string]interface{}       `json:"protocolConfig" binding:"required"`
 }
 
 // UpdateApplicationRequest 更新应用请求
 type UpdateApplicationRequest struct {
-	Name           *string                 `json:"name,omitempty" validate:"max=100"`
-	Description    *string                 `json:"description,omitempty" validate:"max=500"`
-	Icon           *string                 `json:"icon,omitempty" validate:"omitempty,max=255"`
-	ProtocolConfig *map[string]interface{} `json:"protocolConfig,omitempty"`
-	IsActive       *bool                   `json:"isActive,omitempty"`
+	LoginConnections *model.LoginConnectionConfig `json:"loginConnections,omitempty"`
+	Name             *string                      `json:"name,omitempty" validate:"max=100"`
+	Description      *string                      `json:"description,omitempty" validate:"max=500"`
+	Icon             *string                      `json:"icon,omitempty" validate:"omitempty,max=255"`
+	ProtocolConfig   *map[string]interface{}      `json:"protocolConfig,omitempty"`
+	IsActive         *bool                        `json:"isActive,omitempty"`
 }
 
 // ApplicationResponse 应用响应
 type ApplicationResponse struct {
-	ID             uint                   `json:"id"`
-	UUID           string                 `json:"uuid"`
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description"`
-	Icon           string                 `json:"icon"`
-	ProtocolType   string                 `json:"protocolType"`
-	ProtocolConfig map[string]interface{} `json:"protocolConfig"`
-	IsActive       bool                   `json:"isActive"`
-	IsVerified     bool                   `json:"isVerified"`
-	IsProtected    bool                   `json:"isProtected"`
-	CreatedAt      string                 `json:"createdAt"`
-	UpdatedAt      string                 `json:"updatedAt"`
+	LoginConnections model.LoginConnectionConfig `json:"loginConnections"`
+	ID               uint                        `json:"id"`
+	UUID             string                      `json:"uuid"`
+	Name             string                      `json:"name"`
+	Description      string                      `json:"description"`
+	Icon             string                      `json:"icon"`
+	ProtocolType     string                      `json:"protocolType"`
+	ProtocolConfig   map[string]interface{}      `json:"protocolConfig"`
+	IsActive         bool                        `json:"isActive"`
+	IsVerified       bool                        `json:"isVerified"`
+	IsProtected      bool                        `json:"isProtected"`
+	CreatedAt        string                      `json:"createdAt"`
+	UpdatedAt        string                      `json:"updatedAt"`
 }
 
 // ApplicationStats 应用统计信息

@@ -37,7 +37,7 @@ func assertMiniProgramUpgrade(t *testing.T, db *sql.DB, driver string) {
 	gdb, err := openGormOnSQLDB(db, driver)
 	require.NoError(t, err)
 	connection := model.IdentityConnection{Name: "migration mini", Identifier: "migration-mini", Category: model.ConnectionCategorySocial, ProviderType: "wechat_miniprogram", Status: model.ConnectionStatusEnabled, Capabilities: model.StringList{"authentication"}}
-	require.NoError(t, gdb.Create(&connection).Error)
+	require.NoError(t, gdb.Omit("ShowGlobally").Create(&connection).Error)
 	p := model.ExternalPrincipal{ConnectionID: connection.ID, Status: model.PrincipalStatusActive, RawProfile: model.JSONObject{"openid": "retain-openid", "session_key": "erase-secret"}}
 	require.NoError(t, gdb.Create(&p).Error)
 	require.NoError(t, RunGooseMigrations(db, driver, nil))

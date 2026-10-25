@@ -17,6 +17,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/constants"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"cnb.cool/mliev/iam/mliev-iam/app/middleware"
+	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	"cnb.cool/mliev/iam/mliev-iam/app/service/captcha"
 	"cnb.cool/mliev/open/go-web/pkg/helper"
@@ -68,7 +69,32 @@ func trustedOpenerOrigin(c httpInterfaces.RouterContextInterface) (string, error
 }
 
 func (ec ExternalAuthController) GetConnections(c httpInterfaces.RouterContextInterface) {
-	connections, err := service.NewIdentityConnectionService(helper.GetDatabase()).PublicList()
+	connectionService := service.NewIdentityConnectionService(helper.GetDatabase())
+	purpose := c.Query("purpose")
+	if purpose != "" && purpose != "login" {
+		ec.Error(c, constants.ErrCodeBadRequest, "无效的连接列表用途")
+		return
+	}
+	var app *model.Application
+	if purpose == "login" && c.Query("session_id") != "" {
+		session, err := getBoundOIDCSession(c, service.NewOIDCSessionService(helper.GetRedis()), c.Query("session_id"))
+		if err != nil {
+			ec.Error(c, constants.ErrCodeUnauthorized, err.Error())
+			return
+		}
+		app, err = service.NewApplicationService(helper.GetDatabase()).GetApplicationByClientID(session.ClientID)
+		if err != nil || !app.IsActive {
+			ec.Error(c, constants.ErrCodeForbidden, "应用不存在或已被禁用")
+			return
+		}
+	}
+	var connections []dto.PublicIdentityConnectionInfo
+	var err error
+	if purpose == "login" {
+		connections, err = connectionService.PublicLoginList(app)
+	} else {
+		connections, err = connectionService.PublicList()
+	}
 	if err != nil {
 		ec.Error(c, constants.ErrCodeInternal, err.Error())
 		return

@@ -9,6 +9,7 @@ import (
 type IdentityConnectionCredentialInput map[string]map[string]any
 
 type CreateIdentityConnectionRequest struct {
+	ShowGlobally bool                              `json:"showGlobally"`
 	Name         string                            `json:"name" binding:"required,max=100"`
 	Identifier   string                            `json:"identifier" binding:"required,max=80"`
 	Category     model.ConnectionCategory          `json:"category" binding:"required"`
@@ -25,6 +26,7 @@ type CreateIdentityConnectionRequest struct {
 }
 
 type UpdateIdentityConnectionRequest struct {
+	ShowGlobally *bool                             `json:"showGlobally"`
 	Name         *string                           `json:"name" binding:"omitempty,max=100"`
 	Identifier   *string                           `json:"identifier" binding:"omitempty,max=80"`
 	Category     *model.ConnectionCategory         `json:"category"`
@@ -48,6 +50,7 @@ type IdentityConnectionCredentialSummary struct {
 }
 
 type IdentityConnectionResponse struct {
+	ShowGlobally              bool                                  `json:"showGlobally"`
 	ID                        uint                                  `json:"id"`
 	Name                      string                                `json:"name"`
 	Identifier                string                                `json:"identifier"`

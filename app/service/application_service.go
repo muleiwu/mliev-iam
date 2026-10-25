@@ -42,6 +42,10 @@ func NewApplicationService(db *gorm.DB) *ApplicationService {
 
 // CreateApplication 创建应用
 func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest, creatorID uint) (*dto.ApplicationResponse, error) {
+	loginConnections, err := s.validateLoginConnections(req.LoginConnections, nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Icon = strings.TrimSpace(req.Icon)
 	if err := s.validateApplicationIcon(req.Icon); err != nil {
 		return nil, err
@@ -89,15 +93,16 @@ func (s *ApplicationService) CreateApplication(req *dto.CreateApplicationRequest
 
 	// 8. 创建应用模型（使用加密后的配置）
 	app := &model.Application{
-		UUID:            appUUID.String(),
-		Name:            req.Name,
-		Description:     req.Description,
-		Icon:            req.Icon,
-		ProtocolType:    req.ProtocolType,
-		ProtocolConfig:  preparedConfig,
-		CreatedByUserID: &creatorID,
-		IsActive:        true,
-		IsVerified:      false,
+		UUID:             appUUID.String(),
+		Name:             req.Name,
+		Description:      req.Description,
+		Icon:             req.Icon,
+		ProtocolType:     req.ProtocolType,
+		ProtocolConfig:   preparedConfig,
+		LoginConnections: loginConnections,
+		CreatedByUserID:  &creatorID,
+		IsActive:         true,
+		IsVerified:       false,
 	}
 
 	// 9. 使用事务确保应用和协议特定资源一起创建
@@ -195,6 +200,14 @@ func (s *ApplicationService) updateApplication(id uint, req *dto.UpdateApplicati
 
 	// 准备更新字段
 	updates := make(map[string]interface{})
+
+	if req.LoginConnections != nil {
+		settings, err := s.validateLoginConnections(req.LoginConnections, app.LoginConnections)
+		if err != nil {
+			return nil, err
+		}
+		app.LoginConnections = settings
+	}
 
 	// 更新基础字段
 	if req.Name != nil {
@@ -343,17 +356,18 @@ func (s *ApplicationService) ValidateApplication(clientID, clientSecret string) 
 // modelToResponse 将模型转换为响应
 func (s *ApplicationService) modelToResponse(app *model.Application, plainConfig map[string]interface{}) *dto.ApplicationResponse {
 	response := &dto.ApplicationResponse{
-		ID:           app.ID,
-		UUID:         app.UUID,
-		Name:         app.Name,
-		Description:  app.Description,
-		Icon:         app.Icon,
-		ProtocolType: app.ProtocolType,
-		IsActive:     app.IsActive,
-		IsVerified:   app.IsVerified,
-		IsProtected:  app.IsProtected,
-		CreatedAt:    app.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    app.UpdatedAt.Format(time.RFC3339),
+		ID:               app.ID,
+		LoginConnections: app.LoginConnectionSettings(),
+		UUID:             app.UUID,
+		Name:             app.Name,
+		Description:      app.Description,
+		Icon:             app.Icon,
+		ProtocolType:     app.ProtocolType,
+		IsActive:         app.IsActive,
+		IsVerified:       app.IsVerified,
+		IsProtected:      app.IsProtected,
+		CreatedAt:        app.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:        app.UpdatedAt.Format(time.RFC3339),
 	}
 
 	// 如果提供了明文配置（创建操作），使用明文配置

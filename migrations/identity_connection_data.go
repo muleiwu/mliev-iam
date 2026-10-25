@@ -281,7 +281,8 @@ func migrateLegacyConnection(db *gorm.DB, cipher *credentialcrypto.Cipher, sourc
 			IsDefault: source.IsDefault, CreatedAt: source.CreatedAt, UpdatedAt: source.UpdatedAt,
 			Remark: source.Remark,
 		}
-		if err := db.Create(&connection).Error; err != nil {
+		// The hard cut runs before the login-visibility column is introduced.
+		if err := db.Omit("ShowGlobally").Create(&connection).Error; err != nil {
 			return 0, fmt.Errorf("迁移连接 %q 失败: %w", source.Identifier, err)
 		}
 	} else if connection.Category != source.Category || connection.ProviderType != source.ProviderType {

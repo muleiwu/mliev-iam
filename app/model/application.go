@@ -44,7 +44,8 @@ type Application struct {
 	IsProtected bool `gorm:"default:false;not null" json:"isProtected"`
 
 	// 授权范围配置
-	AccessScope *ApplicationAccessScope `gorm:"type:json;serializer:json" json:"accessScope"`
+	AccessScope      *ApplicationAccessScope `gorm:"type:json;serializer:json" json:"accessScope"`
+	LoginConnections *LoginConnectionConfig  `gorm:"type:json;serializer:json" json:"loginConnections"`
 
 	// 时间信息
 	CreatedAt time.Time      `json:"createdAt"`

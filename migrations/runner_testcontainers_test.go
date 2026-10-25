@@ -36,6 +36,11 @@ func TestMigrationDialects(t *testing.T) {
 		{name: "postgresql-16", driver: "postgresql", open: openPostgreSQL16},
 	}
 	for _, fixture := range fixtures {
+		t.Run(fixture.name+"/login-visibility-upgrade", func(t *testing.T) {
+			db := fixture.open(t)
+			setMigrationIntegrationKey(t)
+			assertLoginConnectionVisibilityUpgrade(t, db, fixture.driver)
+		})
 		t.Run(fixture.name+"/miniprogram-upgrade", func(t *testing.T) {
 			db := fixture.open(t)
 			setMigrationIntegrationKey(t)
@@ -256,7 +261,7 @@ func assertFinalMigrationSchema(t *testing.T, db *sql.DB, driver string) {
 			t.Fatalf("硬切后仍存在旧表 %s", oldTable)
 		}
 	}
-	const expectedVersion int64 = 20261023000000
+	const expectedVersion int64 = 20261025000000
 	version, err := goose.GetDBVersion(db)
 	if err != nil || version != expectedVersion {
 		t.Fatalf("迁移版本错误: got=%d want=%d err=%v", version, expectedVersion, err)

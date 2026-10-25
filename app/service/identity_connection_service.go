@@ -51,7 +51,7 @@ func (s *IdentityConnectionService) Create(req *dto.CreateIdentityConnectionRequ
 		Name: req.Name, Identifier: req.Identifier, Category: req.Category,
 		ProviderType: req.ProviderType, Description: req.Description, Capabilities: capabilities,
 		Config: model.JSONObject(req.Config), Icon: req.Icon, SortOrder: req.SortOrder,
-		Status: status, IsDefault: req.IsDefault, Remark: req.Remark,
+		Status: status, IsDefault: req.IsDefault, ShowGlobally: req.ShowGlobally, Remark: req.Remark,
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		if err := dao.NewIdentityConnectionDAO(tx).Create(connection); err != nil {
@@ -101,12 +101,35 @@ func (s *IdentityConnectionService) List(page, pageSize int, category, providerT
 }
 
 func (s *IdentityConnectionService) PublicList() ([]dto.PublicIdentityConnectionInfo, error) {
+	return s.publicList(nil)
+}
+
+// PublicLoginList applies display settings without restricting authentication or binding.
+func (s *IdentityConnectionService) PublicLoginList(app *model.Application) ([]dto.PublicIdentityConnectionInfo, error) {
+	settings := app.LoginConnectionSettings()
+	return s.publicList(&settings)
+}
+
+func (s *IdentityConnectionService) publicList(settings *model.LoginConnectionConfig) ([]dto.PublicIdentityConnectionInfo, error) {
+	selected := map[uint]bool{}
+	if settings != nil {
+		if settings.Mode != model.LoginConnectionsInherit && settings.Mode != model.LoginConnectionsCustom {
+			return nil, fmt.Errorf("登录方式展示配置无效")
+		}
+		for _, id := range settings.ConnectionIDs {
+			selected[id] = true
+		}
+	}
 	connections, err := s.dao.GetEnabledAuthenticationConnections()
 	if err != nil {
 		return nil, err
 	}
 	result := make([]dto.PublicIdentityConnectionInfo, 0, len(connections))
 	for _, connection := range connections {
+		if settings != nil && ((settings.Mode == model.LoginConnectionsInherit && !connection.ShowGlobally) ||
+			(settings.Mode == model.LoginConnectionsCustom && !selected[connection.ID])) {
+			continue
+		}
 		result = append(result, dto.PublicIdentityConnectionInfo{
 			Identifier: connection.Identifier, Name: connection.Name, Category: connection.Category,
 			ProviderType: connection.ProviderType, Capabilities: connection.Capabilities,
@@ -179,6 +202,9 @@ func (s *IdentityConnectionService) Update(id uint, req *dto.UpdateIdentityConne
 	}
 	if req.Status != nil {
 		connection.Status = *req.Status
+	}
+	if req.ShowGlobally != nil {
+		connection.ShowGlobally = *req.ShowGlobally
 	}
 	if req.IsDefault != nil {
 		connection.IsDefault = *req.IsDefault
@@ -517,7 +543,7 @@ func (s *IdentityConnectionService) toResponse(connection *model.IdentityConnect
 		Description: connection.Description, Capabilities: connection.Capabilities,
 		Config: map[string]any(connection.Config), CredentialState: summaries,
 		Icon: connection.Icon, SortOrder: connection.SortOrder, Status: connection.Status,
-		IsDefault: connection.IsDefault, LastCheckedAt: connection.LastCheckedAt,
+		ShowGlobally: connection.ShowGlobally, IsDefault: connection.IsDefault, LastCheckedAt: connection.LastCheckedAt,
 		LastCheckStatus: connection.LastCheckStatus, LastCheckError: connection.LastCheckError,
 		Remark: connection.Remark, CreatedAt: connection.CreatedAt, UpdatedAt: connection.UpdatedAt,
 		Health: health,

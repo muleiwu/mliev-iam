@@ -95,6 +95,7 @@ type IdentityConnection struct {
 	SortOrder       int                `gorm:"default:0" json:"sortOrder"`
 	Status          ConnectionStatus   `gorm:"size:20;not null;default:disabled;index" json:"status"`
 	IsDefault       bool               `gorm:"default:false" json:"isDefault"`
+	ShowGlobally    bool               `gorm:"not null;default:false" json:"showGlobally"`
 	LastCheckedAt   *time.Time         `json:"lastCheckedAt,omitempty"`
 	LastCheckStatus string             `gorm:"size:20" json:"lastCheckStatus,omitempty"`
 	LastCheckError  string             `gorm:"type:text" json:"lastCheckError,omitempty"`
