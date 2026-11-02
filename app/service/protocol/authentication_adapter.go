@@ -20,6 +20,8 @@ type ExternalProfileIdentifier struct {
 }
 
 type ExternalProfile struct {
+	// OIDCIssuer binds a verified profile to its source while it waits for local account binding.
+	OIDCIssuer  string `json:"oidcIssuer,omitempty"`
 	DisplayName string
 	Avatar      string
 	Email       string
@@ -40,12 +42,26 @@ type CodeAuthenticationAdapter interface {
 	LoginWithCode(ctx context.Context, code string) (*ExternalProfile, error)
 }
 
+// TransactionAuthenticationAdapter is implemented only by browser protocols
+// that need transaction-bound nonce and PKCE values.
+type TransactionAuthenticationAdapter interface {
+	AuthenticationAdapter
+	ConfigureTransaction(nonce, verifier string) error
+}
+
 func NewAuthenticationAdapter(connection *model.IdentityConnection, credentials map[string]any, redisClient *redis.Client) (AuthenticationAdapter, error) {
 	if connection == nil {
 		return nil, fmt.Errorf("identity connection 不能为空")
 	}
 	if !connection.HasCapability(model.ConnectionCapabilityAuthentication) {
 		return nil, fmt.Errorf("连接 %s 未启用 authentication 能力", connection.Identifier)
+	}
+	if connection.ProviderType == "oidc" && (connection.Category == model.ConnectionCategorySocial || connection.Category == model.ConnectionCategoryEnterprise) {
+		adapter, err := social.NewOIDCAdapter(socialProviderFromConnection(connection, credentials), &oidcResolverAdapter{cache: NewOIDCDiscoveryCache(redisClient)})
+		if err != nil {
+			return nil, err
+		}
+		return &oidcAuthenticationAdapter{socialBrowserAuthenticationAdapter: socialBrowserAuthenticationAdapter{adapter: adapter}, oidc: adapter}, nil
 	}
 	switch connection.Category {
 	case model.ConnectionCategorySocial:
@@ -74,6 +90,24 @@ func NewAuthenticationAdapter(connection *model.IdentityConnection, credentials 
 }
 
 type socialBrowserAuthenticationAdapter struct{ adapter BrowserFlowAdapter }
+
+type oidcAuthenticationAdapter struct {
+	socialBrowserAuthenticationAdapter
+	oidc *social.OIDCAdapter
+}
+
+func (a *oidcAuthenticationAdapter) ConfigureTransaction(nonce, verifier string) error {
+	return a.oidc.ConfigureTransaction(nonce, verifier)
+}
+
+func (a *oidcAuthenticationAdapter) FetchProfile(ctx context.Context, token *AuthToken) (*ExternalProfile, error) {
+	profile, err := a.socialBrowserAuthenticationAdapter.FetchProfile(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	profile.OIDCIssuer = a.oidc.Issuer
+	return profile, nil
+}
 
 func (a *socialBrowserAuthenticationAdapter) ValidateConfig() error {
 	return a.adapter.ValidateConfig()

@@ -31,11 +31,13 @@ func (r *oidcResolverAdapter) Resolve(ctx context.Context, issuer string) (*soci
 		return nil, err
 	}
 	return &social_OIDCDoc{
-		Issuer:                doc.Issuer,
-		AuthorizationEndpoint: doc.AuthorizationEndpoint,
-		TokenEndpoint:         doc.TokenEndpoint,
-		UserinfoEndpoint:      doc.UserinfoEndpoint,
-		JwksURI:               doc.JwksURI,
+		Issuer:                   doc.Issuer,
+		AuthorizationEndpoint:    doc.AuthorizationEndpoint,
+		TokenEndpoint:            doc.TokenEndpoint,
+		UserinfoEndpoint:         doc.UserinfoEndpoint,
+		JwksURI:                  doc.JwksURI,
+		SigningAlgs:              doc.SigningAlgs,
+		TokenEndpointAuthMethods: doc.TokenEndpointAuthMethods,
 	}, nil
 }
 
@@ -43,7 +45,7 @@ func (r *oidcResolverAdapter) Resolve(ctx context.Context, issuer string) (*soci
 type social_OIDCDoc = social.OIDCDoc //nolint:revive
 
 // NewSocialProviderAdapter 按 provider.Type 返回对应适配器。
-// redisClient 用于 OIDC discovery 缓存；传 nil 时 OIDC 依赖 provider 已手填的端点。
+// redisClient 用于 OIDC discovery 缓存；传 nil 时仍通过 HTTP 发现配置。
 func NewSocialProviderAdapter(provider *social.Provider, redisClient *redis.Client) (SocialProviderAdapter, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("provider 不能为空")
@@ -61,10 +63,7 @@ func NewSocialProviderAdapter(provider *social.Provider, redisClient *redis.Clie
 	case social.ProviderTypeWeChatMiniProgram:
 		return social.NewWeChatMiniProgramAdapter(provider), nil
 	case social.ProviderTypeOIDC:
-		var resolver social.OIDCResolver
-		if redisClient != nil {
-			resolver = &oidcResolverAdapter{cache: NewOIDCDiscoveryCache(redisClient)}
-		}
+		resolver := &oidcResolverAdapter{cache: NewOIDCDiscoveryCache(redisClient)}
 		return social.NewOIDCAdapter(provider, resolver)
 	case social.ProviderTypeGeneric, social.ProviderTypeAlipay:
 		// 历史枚举：沿用通用 OAuth2 实现（Alipay 作为简单 OAuth2 占位）。

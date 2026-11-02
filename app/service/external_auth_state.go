@@ -11,6 +11,8 @@ type StateData struct {
 	ConnectionIdentifier string `json:"connectionIdentifier,omitempty"`
 	OpenerOrigin         string `json:"openerOrigin,omitempty"`
 	BrowserBindingHash   string `json:"browserBindingHash,omitempty"`
+	OIDCNonce            string `json:"oidcNonce,omitempty"`
+	PKCEVerifier         string `json:"pkceVerifier,omitempty"`
 	Timestamp            int64  `json:"timestamp"`
 }
 

@@ -11,18 +11,20 @@ import (
 	"strings"
 	"time"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol/oidcclient"
 	"github.com/redis/go-redis/v9"
 )
 
-// OIDCDiscoveryDoc 是 /.well-known/openid-configuration 的最小字段集。
-// 仅保留 Resolve 过程中需要的字段，未列出的其它字段可以通过前端再次抓取展示。
+// OIDCDiscoveryDoc 保留外部认证校验及管理端展示使用的 discovery 元数据。
 type OIDCDiscoveryDoc struct {
-	Issuer                string   `json:"issuer"`
-	AuthorizationEndpoint string   `json:"authorization_endpoint"`
-	TokenEndpoint         string   `json:"token_endpoint"`
-	UserinfoEndpoint      string   `json:"userinfo_endpoint"`
-	JwksURI               string   `json:"jwks_uri"`
-	ScopesSupported       []string `json:"scopes_supported,omitempty"`
+	Issuer                   string   `json:"issuer"`
+	AuthorizationEndpoint    string   `json:"authorization_endpoint"`
+	TokenEndpoint            string   `json:"token_endpoint"`
+	UserinfoEndpoint         string   `json:"userinfo_endpoint"`
+	JwksURI                  string   `json:"jwks_uri"`
+	ScopesSupported          []string `json:"scopes_supported,omitempty"`
+	SigningAlgs              []string `json:"id_token_signing_alg_values_supported,omitempty"`
+	TokenEndpointAuthMethods []string `json:"token_endpoint_auth_methods_supported,omitempty"`
 }
 
 // OIDCDiscoveryCache 带 Redis 缓存的 OIDC 发现文档解析器。
@@ -37,7 +39,7 @@ type OIDCDiscoveryCache struct {
 func NewOIDCDiscoveryCache(rdb *redis.Client) *OIDCDiscoveryCache {
 	return &OIDCDiscoveryCache{
 		redis:  rdb,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: oidcclient.NewHTTPClient(),
 		prefix: "oidc:discovery:",
 		ttl:    24 * time.Hour,
 	}
@@ -45,8 +47,8 @@ func NewOIDCDiscoveryCache(rdb *redis.Client) *OIDCDiscoveryCache {
 
 // Resolve 先查缓存；未命中或失败则走 HTTP 获取并写回缓存。
 func (c *OIDCDiscoveryCache) Resolve(ctx context.Context, issuer string) (*OIDCDiscoveryDoc, error) {
-	if issuer == "" {
-		return nil, fmt.Errorf("issuer is required")
+	if err := oidcclient.ValidateURL(issuer, "issuer"); err != nil {
+		return nil, err
 	}
 
 	if c.redis != nil {
@@ -71,6 +73,9 @@ func (c *OIDCDiscoveryCache) FetchAndCache(ctx context.Context, issuer string) (
 }
 
 func (c *OIDCDiscoveryCache) fetch(ctx context.Context, issuer string) (*OIDCDiscoveryDoc, error) {
+	if err := oidcclient.ValidateURL(issuer, "issuer"); err != nil {
+		return nil, err
+	}
 	url := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -87,7 +92,7 @@ func (c *OIDCDiscoveryCache) fetch(ctx context.Context, issuer string) (*OIDCDis
 		return nil, fmt.Errorf("discovery 响应异常: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, fmt.Errorf("读取 discovery 响应失败: %w", err)
 	}
@@ -97,8 +102,8 @@ func (c *OIDCDiscoveryCache) fetch(ctx context.Context, issuer string) (*OIDCDis
 		return nil, fmt.Errorf("解析 discovery 文档失败: %w", err)
 	}
 
-	if doc.AuthorizationEndpoint == "" || doc.TokenEndpoint == "" {
-		return nil, fmt.Errorf("discovery 文档缺少必要端点")
+	if err := validateOIDCDiscovery(&doc, issuer); err != nil {
+		return nil, err
 	}
 
 	return &doc, nil
@@ -118,7 +123,29 @@ func (c *OIDCDiscoveryCache) readCache(ctx context.Context, issuer string) (*OID
 	if err := json.Unmarshal([]byte(data), &doc); err != nil {
 		return nil, false
 	}
+	if err := validateOIDCDiscovery(&doc, issuer); err != nil {
+		return nil, false
+	}
 	return &doc, true
+}
+
+func validateOIDCDiscovery(doc *OIDCDiscoveryDoc, issuer string) error {
+	if doc.Issuer != issuer {
+		return fmt.Errorf("discovery issuer 与配置不匹配")
+	}
+	for _, endpoint := range []struct{ name, value string }{
+		{"authorization_endpoint", doc.AuthorizationEndpoint},
+		{"token_endpoint", doc.TokenEndpoint},
+		{"jwks_uri", doc.JwksURI},
+	} {
+		if err := oidcclient.ValidateURL(endpoint.value, endpoint.name); err != nil {
+			return err
+		}
+	}
+	if doc.UserinfoEndpoint != "" {
+		return oidcclient.ValidateURL(doc.UserinfoEndpoint, "userinfo_endpoint")
+	}
+	return nil
 }
 
 func (c *OIDCDiscoveryCache) writeCache(ctx context.Context, issuer string, doc *OIDCDiscoveryDoc) {

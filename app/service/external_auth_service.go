@@ -16,6 +16,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/oauth2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -67,6 +68,12 @@ func (s *ExternalAuthService) authURL(identifier string, stateData StateData) (*
 	if err != nil {
 		return nil, err
 	}
+	if transaction, ok := adapter.(protocol.TransactionAuthenticationAdapter); ok {
+		stateData.OIDCNonce, stateData.PKCEVerifier = oauth2.GenerateVerifier(), oauth2.GenerateVerifier()
+		if err := transaction.ConfigureTransaction(stateData.OIDCNonce, stateData.PKCEVerifier); err != nil {
+			return nil, err
+		}
+	}
 	authURL := adapter.AuthorizationURL("")
 	if authURL == "" {
 		return nil, fmt.Errorf("连接 %s 不支持浏览器授权流程", connection.Identifier)
@@ -100,9 +107,12 @@ func (s *ExternalAuthService) ConsumeState(ctx context.Context, state string) (*
 	return &stateData, true
 }
 
-func (s *ExternalAuthService) HandleCallback(identifier, code, sessionID string) (*dto.SocialAuthCallbackResponse, error) {
+func (s *ExternalAuthService) HandleCallback(identifier, code, sessionID string, state *StateData) (*dto.SocialAuthCallbackResponse, error) {
 	connection, adapter, err := s.enabledAdapter(identifier)
 	if err != nil {
+		return nil, err
+	}
+	if err := configureExternalTransaction(adapter, state, identifier, sessionID, 0); err != nil {
 		return nil, err
 	}
 	token, err := adapter.ExchangeCode(context.Background(), code)
@@ -242,9 +252,12 @@ func (s *ExternalAuthService) consumeContinuation(ctx context.Context, continuat
 	return nil
 }
 
-func (s *ExternalAuthService) BindWithCode(userID uint, identifier, code string) error {
+func (s *ExternalAuthService) BindWithCode(userID uint, identifier, code string, state *StateData) error {
 	connection, adapter, err := s.enabledAdapter(identifier)
 	if err != nil {
+		return err
+	}
+	if err := configureExternalTransaction(adapter, state, identifier, "", userID); err != nil {
 		return err
 	}
 	token, err := adapter.ExchangeCode(context.Background(), code)
@@ -256,6 +269,23 @@ func (s *ExternalAuthService) BindWithCode(userID uint, identifier, code string)
 		return err
 	}
 	return s.attachProfile(s.db, connection.ID, userID, profile)
+}
+
+// state must come from ConsumeState, after the controller's browser/session checks.
+func configureExternalTransaction(adapter protocol.AuthenticationAdapter, state *StateData, identifier, sessionID string, userID uint) error {
+	if state == nil {
+		return fmt.Errorf("外部认证事务缺失")
+	}
+	if state.ConnectionIdentifier != identifier || state.SessionID != sessionID || state.BindUserID != userID || state.IsBind() != (userID != 0) {
+		return fmt.Errorf("外部认证事务与连接、会话或绑定用户不匹配")
+	}
+	if state.Timestamp <= 0 || time.Now().Unix()-state.Timestamp >= 300 || state.Timestamp > time.Now().Unix()+60 {
+		return fmt.Errorf("外部认证事务已过期或无效")
+	}
+	if transaction, ok := adapter.(protocol.TransactionAuthenticationAdapter); ok {
+		return transaction.ConfigureTransaction(state.OIDCNonce, state.PKCEVerifier)
+	}
+	return nil
 }
 
 func (s *ExternalAuthService) BindWithExistingUser(ctx context.Context, continuationID, csrf, username, password string) (*dto.SocialAuthCallbackResponse, error) {
@@ -514,10 +544,20 @@ func (s *ExternalAuthService) attachProfile(db *gorm.DB, connectionID, userID ui
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		if profile.OIDCIssuer != "" {
+			var current model.IdentityConnection
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, connectionID).Error; err != nil {
+				return err
+			}
+			issuer, _ := current.Config["issuer"].(string)
+			if !current.IsEnabled() || !current.HasCapability(model.ConnectionCapabilityAuthentication) || current.ProviderType != "oidc" || issuer != profile.OIDCIssuer {
+				return fmt.Errorf("OIDC 连接配置已变更，请重新发起登录或绑定")
+			}
+		}
 		// Keep browser binding and native binding in the same WeChat namespace.
 		// Older installations/test fixtures without the new index keep their
 		// connection-scoped behavior until the migration is installed.
-		if tx.Migrator().HasTable(&model.WeChatIdentity{}) {
+		if profile.OIDCIssuer == "" && tx.Migrator().HasTable(&model.WeChatIdentity{}) {
 			var c model.IdentityConnection
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&c, connectionID).Error; err != nil {
 				return err

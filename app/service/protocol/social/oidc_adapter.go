@@ -2,103 +2,267 @@ package social
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+	"unicode"
 
+	"cnb.cool/mliev/iam/mliev-iam/app/service/protocol/oidcclient"
+	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
 
 const oidcDefaultScp = "openid,profile,email"
 
-// OIDCResolver 抽象 OIDC discovery 解析能力，避免 social 子包反向依赖外层 protocol 包。
+// OIDCResolver avoids a dependency on the parent protocol package.
 type OIDCResolver interface {
 	Resolve(ctx context.Context, issuer string) (*OIDCDoc, error)
 }
 
-// 为了避免从 protocol 包导入造成循环依赖，这里定义一个兼容的结构，
-// 外层 protocol.OIDCDiscoveryDoc 的字段需与此一一对应（由 factory 适配层负责转换）。
 type OIDCDoc struct {
-	Issuer                string
-	AuthorizationEndpoint string
-	TokenEndpoint         string
-	UserinfoEndpoint      string
-	JwksURI               string
+	Issuer                   string
+	AuthorizationEndpoint    string
+	TokenEndpoint            string
+	UserinfoEndpoint         string
+	JwksURI                  string
+	SigningAlgs              []string
+	TokenEndpointAuthMethods []string
 }
 
-// OIDCAdapter 标准 OpenID Connect 适配器。
-// 构造时若 Attributes["issuer"] 存在且 discovery 可用，端点会被自动填充。
+// OIDCAdapter belongs to one authorization transaction. Only verified ID Token
+// claims can establish an identity; UserInfo is optional profile enrichment.
 type OIDCAdapter struct {
 	*GenericOAuth2Adapter
-	Issuer string
+	Issuer     string
+	client     *http.Client
+	verifier   *oidc.IDTokenVerifier
+	authMethod string
+	nonce      string
+	pkce       string
 }
 
-// NewOIDCAdapter 创建 OIDC 适配器。
-// resolver 可为 nil；此时若 provider 已手工填写 Auth/Token/UserInfo URL 则仍可工作。
 func NewOIDCAdapter(provider *Provider, resolver OIDCResolver) (*OIDCAdapter, error) {
+	if provider == nil || resolver == nil {
+		return nil, fmt.Errorf("OIDC provider 和 discovery resolver 不能为空")
+	}
 	issuer, _ := getAttrString(provider.Attributes, "issuer")
-
-	if resolver != nil && issuer != "" {
-		doc, err := resolver.Resolve(context.Background(), issuer)
-		if err == nil && doc != nil {
-			if doc.AuthorizationEndpoint != "" {
-				provider.AuthURL = doc.AuthorizationEndpoint
-			}
-			if doc.TokenEndpoint != "" {
-				provider.TokenURL = doc.TokenEndpoint
-			}
-			if doc.UserinfoEndpoint != "" {
-				provider.UserInfoURL = doc.UserinfoEndpoint
-			}
+	if err := oidcclient.ValidateURL(issuer, "issuer"); err != nil {
+		return nil, err
+	}
+	doc, err := resolver.Resolve(context.Background(), issuer)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC discovery 失败: %w", err)
+	}
+	if doc == nil || doc.Issuer != issuer {
+		return nil, fmt.Errorf("OIDC discovery issuer 与配置不匹配")
+	}
+	for _, endpoint := range []struct{ name, value string }{
+		{"authorization_endpoint", doc.AuthorizationEndpoint},
+		{"token_endpoint", doc.TokenEndpoint},
+		{"jwks_uri", doc.JwksURI},
+	} {
+		if err := oidcclient.ValidateURL(endpoint.value, endpoint.name); err != nil {
+			return nil, err
 		}
 	}
-	if provider.Scopes == "" {
-		provider.Scopes = oidcDefaultScp
+	if doc.UserinfoEndpoint != "" {
+		if err := oidcclient.ValidateURL(doc.UserinfoEndpoint, "userinfo_endpoint"); err != nil {
+			return nil, err
+		}
+	}
+	// Do not mutate the caller's configuration or fall back to stale endpoints.
+	p := *provider
+	p.AuthURL, p.TokenURL, p.UserInfoURL = doc.AuthorizationEndpoint, doc.TokenEndpoint, doc.UserinfoEndpoint
+	if strings.TrimSpace(p.Scopes) == "" {
+		p.Scopes = oidcDefaultScp
+	}
+	scopes := []string{"openid"}
+	for _, scope := range strings.FieldsFunc(p.Scopes, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		if !slices.Contains(scopes, scope) {
+			scopes = append(scopes, scope)
+		}
+	}
+	p.Scopes = strings.Join(scopes, ",")
+	method, _ := getAttrString(p.Attributes, "tokenEndpointAuthMethod")
+	if method == "" {
+		method = "auto"
+	}
+	if method == "auto" && len(doc.TokenEndpointAuthMethods) > 0 {
+		switch {
+		case slices.Contains(doc.TokenEndpointAuthMethods, "client_secret_basic"):
+			method = "client_secret_basic"
+		case slices.Contains(doc.TokenEndpointAuthMethods, "client_secret_post"):
+			method = "client_secret_post"
+		default:
+			return nil, fmt.Errorf("OIDC Token 端点不支持客户端密钥认证；公共客户端请选择 none")
+		}
+	}
+	base := NewGenericOAuth2Adapter(&p)
+	switch method {
+	case "auto":
+		base.Config.Endpoint.AuthStyle = oauth2.AuthStyleAutoDetect
+	case "client_secret_basic":
+		base.Config.Endpoint.AuthStyle = oauth2.AuthStyleInHeader
+	case "client_secret_post", "none":
+		base.Config.Endpoint.AuthStyle = oauth2.AuthStyleInParams
+	default:
+		return nil, fmt.Errorf("不支持的 OIDC Token 端点认证方式 %q", method)
+	}
+	if method != "auto" && len(doc.TokenEndpointAuthMethods) > 0 && !slices.Contains(doc.TokenEndpointAuthMethods, method) {
+		return nil, fmt.Errorf("OIDC Token 端点不支持认证方式 %s", method)
+	}
+	if method == "none" {
+		base.Config.ClientSecret = ""
 	}
 
-	return &OIDCAdapter{
-		GenericOAuth2Adapter: NewGenericOAuth2Adapter(provider),
-		Issuer:               issuer,
-	}, nil
+	algorithms := []string{}
+	for _, alg := range doc.SigningAlgs {
+		switch alg {
+		case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA":
+			algorithms = append(algorithms, alg)
+		}
+	}
+	if len(doc.SigningAlgs) == 0 {
+		algorithms = []string{"RS256"}
+	} else if len(algorithms) == 0 {
+		return nil, fmt.Errorf("OIDC 未提供受支持的非对称签名算法")
+	}
+	client := oidcclient.NewHTTPClient()
+	ctx := oidc.ClientContext(context.Background(), client)
+	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, doc.JwksURI), &oidc.Config{
+		ClientID: p.ClientID, SupportedSigningAlgs: algorithms,
+	})
+	return &OIDCAdapter{GenericOAuth2Adapter: base, Issuer: issuer, client: client, verifier: verifier, authMethod: method}, nil
+}
+
+func (a *OIDCAdapter) ConfigureTransaction(nonce, verifier string) error {
+	if nonce == "" || len(verifier) < 43 || len(verifier) > 128 || strings.IndexFunc(verifier, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || strings.ContainsRune("-._~", r))
+	}) >= 0 {
+		return fmt.Errorf("OIDC 认证事务缺少有效的 nonce 或 PKCE verifier")
+	}
+	a.nonce, a.pkce = nonce, verifier
+	return nil
+}
+
+func (a *OIDCAdapter) GetAuthURL(state string) string {
+	if a.nonce == "" || a.pkce == "" {
+		return ""
+	}
+	return a.Config.AuthCodeURL(state, oidc.Nonce(a.nonce), oauth2.S256ChallengeOption(a.pkce))
+}
+
+func (a *OIDCAdapter) ExchangeToken(ctx context.Context, code string) (*oauth2.Token, error) {
+	if a.nonce == "" || a.pkce == "" {
+		return nil, fmt.Errorf("OIDC 认证事务未配置")
+	}
+	return a.Config.Exchange(oidc.ClientContext(ctx, a.client), code, oauth2.VerifierOption(a.pkce))
 }
 
 func (a *OIDCAdapter) GetUserInfo(ctx context.Context, token *oauth2.Token) (*SocialUser, error) {
-	user, err := a.GenericOAuth2Adapter.GetUserInfo(ctx, token)
+	if a.nonce == "" || token == nil {
+		return nil, fmt.Errorf("OIDC 认证事务或令牌缺失")
+	}
+	rawToken, _ := token.Extra("id_token").(string)
+	if rawToken == "" {
+		return nil, fmt.Errorf("OIDC 响应缺少 id_token")
+	}
+	idToken, err := a.verifier.Verify(ctx, rawToken)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC ID Token 校验失败: %w", err)
+	}
+	// Enforce exact matching even for providers with library compatibility exceptions.
+	if idToken.Issuer != a.Issuer {
+		return nil, fmt.Errorf("OIDC ID Token issuer 不匹配")
+	}
+	if idToken.Subject == "" {
+		return nil, fmt.Errorf("OIDC ID Token 缺少 sub")
+	}
+	if idToken.IssuedAt.IsZero() || idToken.IssuedAt.After(time.Now().Add(time.Minute)) || idToken.IssuedAt.After(idToken.Expiry) {
+		return nil, fmt.Errorf("OIDC ID Token iat 无效")
+	}
+	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(a.nonce)) != 1 {
+		return nil, fmt.Errorf("OIDC ID Token nonce 不匹配")
+	}
+	var claims map[string]any
+	if err := idToken.Claims(&claims); err != nil {
+		return nil, fmt.Errorf("OIDC ID Token claims 无效: %w", err)
+	}
+	azp, hasAZP := claims["azp"]
+	if (hasAZP && azp != a.Config.ClientID) || (len(idToken.Audience) > 1 && !hasAZP) {
+		return nil, fmt.Errorf("OIDC ID Token azp 不匹配或缺失")
+	}
+	if _, exists := claims["at_hash"]; exists {
+		if err := idToken.VerifyAccessToken(token.AccessToken); err != nil {
+			return nil, fmt.Errorf("OIDC access token 校验失败: %w", err)
+		}
+	}
+	if a.Provider.UserInfoURL != "" {
+		info, err := a.fetchUserInfo(ctx, token.AccessToken)
+		if err != nil {
+			return nil, err
+		}
+		if sub, ok := info["sub"].(string); !ok || sub != idToken.Subject {
+			return nil, fmt.Errorf("OIDC UserInfo sub 与 ID Token 不匹配")
+		}
+		// Only profile claims can be enriched; preserve validated security claims.
+		for _, key := range []string{"name", "nickname", "preferred_username", "picture", "email", "email_verified", "phone_number", "phone_number_verified"} {
+			if value, exists := info[key]; exists {
+				claims[key] = value
+			}
+		}
+	}
+	claimString := func(key string) string { value, _ := claims[key].(string); return value }
+	name := claimString("name")
+	if name == "" {
+		name = claimString("preferred_username")
+	}
+	if name == "" {
+		name = claimString("nickname")
+	}
+	return &SocialUser{OpenID: idToken.Subject, Nickname: name, Avatar: claimString("picture"), Email: claimString("email"), Phone: claimString("phone_number"), RawUserInfo: claims}, nil
+}
+
+func (a *OIDCAdapter) fetchUserInfo(ctx context.Context, accessToken string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.Provider.UserInfoURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	// OIDC 的 OpenID 应来自 sub；MapCommonUserFields 已处理 id/sub 的兜底，但这里确保优先 sub。
-	if sub, ok := user.RawUserInfo["sub"]; ok {
-		user.OpenID = stringifyID(sub)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC UserInfo 请求失败: %w", err)
 	}
-	return user, nil
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OIDC UserInfo 响应异常: %d", resp.StatusCode)
+	}
+	var claims map[string]any
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&claims); err != nil {
+		return nil, fmt.Errorf("OIDC UserInfo 格式无效: %w", err)
+	}
+	return claims, nil
 }
 
 func (a *OIDCAdapter) ValidateConfig() error {
-	if a.Issuer == "" {
-		return fmt.Errorf("OIDC issuer 不能为空（请在 Attributes.issuer 填写）")
-	}
 	if a.Provider.ClientID == "" {
 		return fmt.Errorf("OIDC ClientID 不能为空")
 	}
-	if a.Provider.ClientSecret == "" {
-		return fmt.Errorf("OIDC ClientSecret 不能为空")
+	if a.authMethod != "none" && a.Provider.ClientSecret == "" {
+		return fmt.Errorf("OIDC ClientSecret 不能为空（公共客户端请选择 none）")
 	}
 	if a.Provider.RedirectURL == "" {
 		return fmt.Errorf("OIDC 回调 URL 不能为空")
-	}
-	if a.Provider.AuthURL == "" || a.Provider.TokenURL == "" {
-		return fmt.Errorf("OIDC 端点缺失：请确认 issuer 的 discovery 文档可访问")
 	}
 	return nil
 }
 
 func getAttrString(attrs map[string]any, key string) (string, bool) {
-	if attrs == nil {
-		return "", false
-	}
-	v, ok := attrs[key]
-	if !ok {
-		return "", false
-	}
-	s, ok := v.(string)
-	return s, ok
+	value, ok := attrs[key].(string)
+	return value, ok
 }

@@ -133,10 +133,12 @@ type OIDCDiscoverRequest struct {
 
 // OIDCDiscoverResponse OIDC 发现响应
 type OIDCDiscoverResponse struct {
-	Issuer                string   `json:"issuer"`
-	AuthorizationEndpoint string   `json:"authorizationEndpoint"`
-	TokenEndpoint         string   `json:"tokenEndpoint"`
-	UserinfoEndpoint      string   `json:"userinfoEndpoint"`
-	JwksURI               string   `json:"jwksUri"`
-	ScopesSupported       []string `json:"scopesSupported,omitempty"`
+	Issuer                   string   `json:"issuer"`
+	AuthorizationEndpoint    string   `json:"authorizationEndpoint"`
+	TokenEndpoint            string   `json:"tokenEndpoint"`
+	UserinfoEndpoint         string   `json:"userinfoEndpoint"`
+	JwksURI                  string   `json:"jwksUri"`
+	ScopesSupported          []string `json:"scopesSupported,omitempty"`
+	SigningAlgs              []string `json:"signingAlgs,omitempty"`
+	TokenEndpointAuthMethods []string `json:"tokenEndpointAuthMethods,omitempty"`
 }

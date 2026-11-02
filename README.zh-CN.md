@@ -143,6 +143,9 @@ mliev-iam/
 
 ## 升级说明
 
+第三方 OIDC 身份认证源的配置、登录绑定与兼容性要求见
+[OIDC 身份认证源接入指南](docs/oidc-identity-source.zh-CN.md)。
+
 迁移版本 `20260922000001` 允许 `client_credentials` 应用反复申请访问令牌
 （机器令牌的刷新令牌列存储为 `NULL`）。升级前请备份数据库并停止旧节点——
 该迁移无法通过 `goose Down` 回滚。详见

@@ -216,6 +216,9 @@ func (s *IdentityConnectionService) Update(id uint, req *dto.UpdateIdentityConne
 		return nil, err
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := guardOIDCConnectionIdentity(tx, connection); err != nil {
+			return err
+		}
 		if err := guardMiniConnectionIdentity(tx, connection, req.Credentials[string(model.CredentialPurposeAuthentication)]); err != nil {
 			return err
 		}
@@ -566,7 +569,7 @@ func validateIdentityConnectionFields(identifier string, category model.Connecti
 			"generic": true, "wechat": true, "wechat_miniprogram": true, "qq": true,
 			"alipay": true, "github": true, "google": true, "oidc": true,
 		},
-		model.ConnectionCategoryEnterprise: {"feishu": true, "wecom": true, "dingtalk": true},
+		model.ConnectionCategoryEnterprise: {"feishu": true, "wecom": true, "dingtalk": true, "oidc": true},
 	}
 	if !allowed[category][providerType] {
 		return fmt.Errorf("连接类别 %s 不支持 providerType %q", category, providerType)
@@ -580,9 +583,35 @@ func validateIdentityConnectionFields(identifier string, category model.Connecti
 		if category == model.ConnectionCategorySocial && capability != string(model.ConnectionCapabilityAuthentication) {
 			return fmt.Errorf("社交连接只能启用 authentication 能力")
 		}
+		if providerType == "oidc" && capability != string(model.ConnectionCapabilityAuthentication) {
+			return fmt.Errorf("OIDC 连接只能启用 authentication 能力")
+		}
 	}
 	if status != "" && status != model.ConnectionStatusDisabled && status != model.ConnectionStatusEnabled {
 		return fmt.Errorf("非法连接状态 %q", status)
+	}
+	return nil
+}
+
+func guardOIDCConnectionIdentity(tx *gorm.DB, connection *model.IdentityConnection) error {
+	var current model.IdentityConnection
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, connection.ID).Error; err != nil {
+		return err
+	}
+	if current.ProviderType != "oidc" && connection.ProviderType != "oidc" {
+		return nil
+	}
+	oldIssuer, _ := current.Config["issuer"].(string)
+	newIssuer, _ := connection.Config["issuer"].(string)
+	if current.ProviderType == connection.ProviderType && oldIssuer == newIssuer {
+		return nil
+	}
+	count, err := dao.NewIdentityConnectionDAO(tx).CountPrincipals(connection.ID)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("连接已有外部身份，不能修改 OIDC Issuer 或提供商类型；请新建连接")
 	}
 	return nil
 }

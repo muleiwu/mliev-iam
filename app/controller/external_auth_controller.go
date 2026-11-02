@@ -163,7 +163,7 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 		return
 	}
 	if stateData.IsBind() {
-		err := authService.BindWithCode(stateData.BindUserID, identifier, code)
+		err := authService.BindWithCode(stateData.BindUserID, identifier, code, stateData)
 		ec.popup(c, map[string]any{"type": "external-bind-callback", "success": err == nil, "error": errorText(err)}, stateData.OpenerOrigin, "账号绑定")
 		return
 	}
@@ -172,7 +172,7 @@ func (ec ExternalAuthController) Callback(c httpInterfaces.RouterContextInterfac
 		ec.Error(c, constants.ErrCodeUnauthorized, "OAuth 回调浏览器事务校验失败")
 		return
 	}
-	response, err := authService.HandleCallback(identifier, code, stateData.SessionID)
+	response, err := authService.HandleCallback(identifier, code, stateData.SessionID, stateData)
 	if err != nil {
 		ec.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return

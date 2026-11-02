@@ -238,5 +238,6 @@ func (cc IdentityConnectionController) DiscoverOIDC(c httpInterfaces.RouterConte
 		Issuer: doc.Issuer, AuthorizationEndpoint: doc.AuthorizationEndpoint,
 		TokenEndpoint: doc.TokenEndpoint, UserinfoEndpoint: doc.UserinfoEndpoint,
 		JwksURI: doc.JwksURI, ScopesSupported: doc.ScopesSupported,
+		SigningAlgs: doc.SigningAlgs, TokenEndpointAuthMethods: doc.TokenEndpointAuthMethods,
 	})
 }
