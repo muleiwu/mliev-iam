@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -28,7 +27,7 @@ type OIDCDiscoveryDoc struct {
 }
 
 // OIDCDiscoveryCache 带 Redis 缓存的 OIDC 发现文档解析器。
-// key=`oidc:discovery:<sha256(issuer)>`，TTL 24h。
+// Cache entries are isolated by issuer and effective discovery URL, with a 24h TTL.
 type OIDCDiscoveryCache struct {
 	redis  *redis.Client
 	client *http.Client
@@ -40,66 +39,64 @@ func NewOIDCDiscoveryCache(rdb *redis.Client) *OIDCDiscoveryCache {
 	return &OIDCDiscoveryCache{
 		redis:  rdb,
 		client: oidcclient.NewHTTPClient(),
-		prefix: "oidc:discovery:",
+		prefix: "oidc:discovery:v2:",
 		ttl:    24 * time.Hour,
 	}
 }
 
 // Resolve 先查缓存；未命中或失败则走 HTTP 获取并写回缓存。
-func (c *OIDCDiscoveryCache) Resolve(ctx context.Context, issuer string) (*OIDCDiscoveryDoc, error) {
-	if err := oidcclient.ValidateURL(issuer, "issuer"); err != nil {
+func (c *OIDCDiscoveryCache) Resolve(ctx context.Context, issuer, discoveryURL string) (*OIDCDiscoveryDoc, error) {
+	endpoint, err := oidcDiscoveryURL(issuer, discoveryURL)
+	if err != nil {
 		return nil, err
 	}
 
 	if c.redis != nil {
-		if doc, ok := c.readCache(ctx, issuer); ok {
+		if doc, ok := c.readCache(ctx, issuer, endpoint); ok {
 			return doc, nil
 		}
 	}
 
-	return c.FetchAndCache(ctx, issuer)
+	return c.FetchAndCache(ctx, issuer, endpoint)
 }
 
 // FetchAndCache 总是走网络获取，然后写缓存（管理端"从 Issuer 拉取"按钮调用）。
-func (c *OIDCDiscoveryCache) FetchAndCache(ctx context.Context, issuer string) (*OIDCDiscoveryDoc, error) {
-	doc, err := c.fetch(ctx, issuer)
+func (c *OIDCDiscoveryCache) FetchAndCache(ctx context.Context, issuer, discoveryURL string) (*OIDCDiscoveryDoc, error) {
+	endpoint, err := oidcDiscoveryURL(issuer, discoveryURL)
 	if err != nil {
 		return nil, err
 	}
+	doc, err := c.fetch(ctx, issuer, endpoint)
+	if err != nil {
+		if c.redis != nil {
+			_ = c.redis.Del(ctx, c.cacheKey(issuer, endpoint)).Err()
+		}
+		return nil, err
+	}
 	if c.redis != nil {
-		c.writeCache(ctx, issuer, doc)
+		c.writeCache(ctx, issuer, endpoint, doc)
 	}
 	return doc, nil
 }
 
-func (c *OIDCDiscoveryCache) fetch(ctx context.Context, issuer string) (*OIDCDiscoveryDoc, error) {
+func oidcDiscoveryURL(issuer, discoveryURL string) (string, error) {
 	if err := oidcclient.ValidateURL(issuer, "issuer"); err != nil {
-		return nil, err
+		return "", err
 	}
-	url := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("构造请求失败: %w", err)
+	endpoint := strings.TrimSpace(discoveryURL)
+	if endpoint == "" {
+		endpoint = strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
 	}
+	if err := oidcclient.ValidateURL(endpoint, "discoveryUrl"); err != nil {
+		return "", err
+	}
+	return endpoint, nil
+}
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("获取 discovery 文档失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("discovery 响应异常: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("读取 discovery 响应失败: %w", err)
-	}
-
+func (c *OIDCDiscoveryCache) fetch(ctx context.Context, issuer, endpoint string) (*OIDCDiscoveryDoc, error) {
 	var doc OIDCDiscoveryDoc
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("解析 discovery 文档失败: %w", err)
+	if err := oidcclient.GetJSON(ctx, c.client, endpoint, "discovery", &doc); err != nil {
+		return nil, err
 	}
 
 	if err := validateOIDCDiscovery(&doc, issuer); err != nil {
@@ -109,13 +106,14 @@ func (c *OIDCDiscoveryCache) fetch(ctx context.Context, issuer string) (*OIDCDis
 	return &doc, nil
 }
 
-func (c *OIDCDiscoveryCache) cacheKey(issuer string) string {
-	sum := sha256.Sum256([]byte(issuer))
+func (c *OIDCDiscoveryCache) cacheKey(issuer, endpoint string) string {
+	identity, _ := json.Marshal([2]string{issuer, endpoint})
+	sum := sha256.Sum256(identity)
 	return c.prefix + hex.EncodeToString(sum[:])
 }
 
-func (c *OIDCDiscoveryCache) readCache(ctx context.Context, issuer string) (*OIDCDiscoveryDoc, bool) {
-	data, err := c.redis.Get(ctx, c.cacheKey(issuer)).Result()
+func (c *OIDCDiscoveryCache) readCache(ctx context.Context, issuer, endpoint string) (*OIDCDiscoveryDoc, bool) {
+	data, err := c.redis.Get(ctx, c.cacheKey(issuer, endpoint)).Result()
 	if err != nil {
 		return nil, false
 	}
@@ -131,7 +129,7 @@ func (c *OIDCDiscoveryCache) readCache(ctx context.Context, issuer string) (*OID
 
 func validateOIDCDiscovery(doc *OIDCDiscoveryDoc, issuer string) error {
 	if doc.Issuer != issuer {
-		return fmt.Errorf("discovery issuer 与配置不匹配")
+		return fmt.Errorf("discovery issuer 与配置不匹配，请填写提供方声明的准确 Issuer，保留路径和末尾斜杠")
 	}
 	for _, endpoint := range []struct{ name, value string }{
 		{"authorization_endpoint", doc.AuthorizationEndpoint},
@@ -148,10 +146,10 @@ func validateOIDCDiscovery(doc *OIDCDiscoveryDoc, issuer string) error {
 	return nil
 }
 
-func (c *OIDCDiscoveryCache) writeCache(ctx context.Context, issuer string, doc *OIDCDiscoveryDoc) {
+func (c *OIDCDiscoveryCache) writeCache(ctx context.Context, issuer, endpoint string, doc *OIDCDiscoveryDoc) {
 	data, err := json.Marshal(doc)
 	if err != nil {
 		return
 	}
-	_ = c.redis.Set(ctx, c.cacheKey(issuer), data, c.ttl).Err()
+	_ = c.redis.Set(ctx, c.cacheKey(issuer, endpoint), data, c.ttl).Err()
 }

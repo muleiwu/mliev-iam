@@ -49,6 +49,12 @@ type TransactionAuthenticationAdapter interface {
 	ConfigureTransaction(nonce, verifier string) error
 }
 
+// AuthenticationConnectionChecker is an optional management-only remote probe.
+// Login does not call this interface; ID Token verification fetches its own JWKS.
+type AuthenticationConnectionChecker interface {
+	CheckConnection(ctx context.Context) error
+}
+
 func NewAuthenticationAdapter(connection *model.IdentityConnection, credentials map[string]any, redisClient *redis.Client) (AuthenticationAdapter, error) {
 	if connection == nil {
 		return nil, fmt.Errorf("identity connection 不能为空")
@@ -98,6 +104,10 @@ type oidcAuthenticationAdapter struct {
 
 func (a *oidcAuthenticationAdapter) ConfigureTransaction(nonce, verifier string) error {
 	return a.oidc.ConfigureTransaction(nonce, verifier)
+}
+
+func (a *oidcAuthenticationAdapter) CheckConnection(ctx context.Context) error {
+	return a.oidc.CheckConnection(ctx)
 }
 
 func (a *oidcAuthenticationAdapter) FetchProfile(ctx context.Context, token *AuthToken) (*ExternalProfile, error) {

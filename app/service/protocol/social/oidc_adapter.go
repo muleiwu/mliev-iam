@@ -21,7 +21,7 @@ const oidcDefaultScp = "openid,profile,email"
 
 // OIDCResolver avoids a dependency on the parent protocol package.
 type OIDCResolver interface {
-	Resolve(ctx context.Context, issuer string) (*OIDCDoc, error)
+	Resolve(ctx context.Context, issuer, discoveryURL string) (*OIDCDoc, error)
 }
 
 type OIDCDoc struct {
@@ -38,12 +38,14 @@ type OIDCDoc struct {
 // claims can establish an identity; UserInfo is optional profile enrichment.
 type OIDCAdapter struct {
 	*GenericOAuth2Adapter
-	Issuer     string
-	client     *http.Client
-	verifier   *oidc.IDTokenVerifier
-	authMethod string
-	nonce      string
-	pkce       string
+	Issuer      string
+	client      *http.Client
+	verifier    *oidc.IDTokenVerifier
+	jwksURI     string
+	signingAlgs []string
+	authMethod  string
+	nonce       string
+	pkce        string
 }
 
 func NewOIDCAdapter(provider *Provider, resolver OIDCResolver) (*OIDCAdapter, error) {
@@ -54,7 +56,15 @@ func NewOIDCAdapter(provider *Provider, resolver OIDCResolver) (*OIDCAdapter, er
 	if err := oidcclient.ValidateURL(issuer, "issuer"); err != nil {
 		return nil, err
 	}
-	doc, err := resolver.Resolve(context.Background(), issuer)
+	discoveryURL := ""
+	if value, exists := provider.Attributes["discoveryUrl"]; exists {
+		var ok bool
+		discoveryURL, ok = value.(string)
+		if !ok {
+			return nil, fmt.Errorf("OIDC discoveryUrl 必须是字符串，留空使用标准发现地址")
+		}
+	}
+	doc, err := resolver.Resolve(context.Background(), issuer, discoveryURL)
 	if err != nil {
 		return nil, fmt.Errorf("OIDC discovery 失败: %w", err)
 	}
@@ -122,8 +132,7 @@ func NewOIDCAdapter(provider *Provider, resolver OIDCResolver) (*OIDCAdapter, er
 
 	algorithms := []string{}
 	for _, alg := range doc.SigningAlgs {
-		switch alg {
-		case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA":
+		if supportedOIDCSigningAlgorithm(alg) {
 			algorithms = append(algorithms, alg)
 		}
 	}
@@ -134,10 +143,31 @@ func NewOIDCAdapter(provider *Provider, resolver OIDCResolver) (*OIDCAdapter, er
 	}
 	client := oidcclient.NewHTTPClient()
 	ctx := oidc.ClientContext(context.Background(), client)
-	verifier := oidc.NewVerifier(issuer, oidc.NewRemoteKeySet(ctx, doc.JwksURI), &oidc.Config{
+	verifier := oidc.NewVerifier(issuer, safeOIDCKeySet{oidc.NewRemoteKeySet(ctx, doc.JwksURI)}, &oidc.Config{
 		ClientID: p.ClientID, SupportedSigningAlgs: algorithms,
 	})
-	return &OIDCAdapter{GenericOAuth2Adapter: base, Issuer: issuer, client: client, verifier: verifier, authMethod: method}, nil
+	return &OIDCAdapter{GenericOAuth2Adapter: base, Issuer: issuer, client: client, verifier: verifier, authMethod: method, jwksURI: doc.JwksURI, signingAlgs: algorithms}, nil
+}
+
+func supportedOIDCSigningAlgorithm(algorithm string) bool {
+	switch algorithm {
+	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA":
+		return true
+	}
+	return false
+}
+
+// RemoteKeySet includes upstream HTTP bodies in some errors. Keep its caching
+// and verification, but direct users to the safe management diagnostics instead
+// of reflecting those bodies (or endpoint query credentials) into login errors.
+type safeOIDCKeySet struct{ oidc.KeySet }
+
+func (s safeOIDCKeySet) VerifySignature(ctx context.Context, token string) ([]byte, error) {
+	payload, err := s.KeySet.VerifySignature(ctx, token)
+	if err != nil {
+		return nil, fmt.Errorf("OIDC JWKS 签名校验失败，请在管理端检查连接以确认公钥访问及签名算法配置")
+	}
+	return payload, nil
 }
 
 func (a *OIDCAdapter) ConfigureTransaction(nonce, verifier string) error {

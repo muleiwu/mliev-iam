@@ -355,6 +355,11 @@ func (s *IdentityConnectionService) testCapabilities(ctx context.Context, connec
 			if checkErr == nil {
 				checkErr = adapter.ValidateConfig()
 			}
+			if checkErr == nil {
+				if checker, ok := adapter.(protocol.AuthenticationConnectionChecker); ok {
+					checkErr = checker.CheckConnection(ctx)
+				}
+			}
 		case model.ConnectionCapabilityDirectorySync:
 			var credentials map[string]any
 			credentials, checkErr = s.CredentialValues(connection.ID, model.CredentialPurposeDirectory)

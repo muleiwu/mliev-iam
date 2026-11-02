@@ -229,7 +229,7 @@ func (cc IdentityConnectionController) DiscoverOIDC(c httpInterfaces.RouterConte
 		cc.Error(c, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
 		return
 	}
-	doc, err := protocol.NewOIDCDiscoveryCache(helper.GetRedis()).FetchAndCache(c.Request().Context(), req.Issuer)
+	doc, err := protocol.NewOIDCDiscoveryCache(helper.GetRedis()).FetchAndCache(c.Request().Context(), req.Issuer, req.DiscoveryURL)
 	if err != nil {
 		cc.Error(c, constants.ErrCodeBadRequest, err.Error())
 		return

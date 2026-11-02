@@ -128,7 +128,8 @@ type MPQRCodeConfirmRequest struct {
 
 // OIDCDiscoverRequest OIDC 发现请求
 type OIDCDiscoverRequest struct {
-	Issuer string `json:"issuer" binding:"required"`
+	Issuer       string `json:"issuer" binding:"required"`
+	DiscoveryURL string `json:"discoveryUrl"`
 }
 
 // OIDCDiscoverResponse OIDC 发现响应

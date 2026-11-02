@@ -21,7 +21,9 @@ import (
 
 type oidcTestResolver struct{ doc *OIDCDoc }
 
-func (r oidcTestResolver) Resolve(context.Context, string) (*OIDCDoc, error) { return r.doc, nil }
+func (r oidcTestResolver) Resolve(context.Context, string, string) (*OIDCDoc, error) {
+	return r.doc, nil
+}
 
 func TestOIDCKeyRotationAndAlgorithms(t *testing.T) {
 	var mu sync.Mutex

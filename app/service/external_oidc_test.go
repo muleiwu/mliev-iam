@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,9 +29,10 @@ import (
 )
 
 type externalOIDCProvider struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	codes  map[string]url.Values
+	server    *httptest.Server
+	mu        sync.Mutex
+	codes     map[string]url.Values
+	jwksCalls atomic.Int32
 }
 
 type externalOIDCOptions struct {
@@ -40,6 +42,8 @@ type externalOIDCOptions struct {
 	invalidSignature bool
 	authMethod       string
 	redirectURI      string
+	discoveryPath    string
+	jwksHandler      http.HandlerFunc
 }
 
 func newExternalOIDCProvider(t *testing.T, options externalOIDCOptions) *externalOIDCProvider {
@@ -47,13 +51,16 @@ func newExternalOIDCProvider(t *testing.T, options externalOIDCOptions) *externa
 	if options.redirectURI == "" {
 		options.redirectURI = "https://iam.test/external-auth/company/callback"
 	}
+	if options.discoveryPath == "" {
+		options.discoveryPath = "/.well-known/openid-configuration"
+	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	p := &externalOIDCProvider{codes: map[string]url.Values{}}
 	mux := http.NewServeMux()
 	p.server = httptest.NewServer(mux)
 	t.Cleanup(p.server.Close)
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(options.discoveryPath, func(w http.ResponseWriter, r *http.Request) {
 		doc := protocol.OIDCDiscoveryDoc{Issuer: p.server.URL, AuthorizationEndpoint: p.server.URL + "/authorize", TokenEndpoint: p.server.URL + "/token", JwksURI: p.server.URL + "/jwks", SigningAlgs: []string{"RS256"}}
 		if options.userinfo != nil {
 			doc.UserinfoEndpoint = p.server.URL + "/userinfo"
@@ -62,6 +69,11 @@ func newExternalOIDCProvider(t *testing.T, options externalOIDCOptions) *externa
 		_ = json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		p.jwksCalls.Add(1)
+		if options.jwksHandler != nil {
+			options.jwksHandler(w, r)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []any{map[string]any{
 			"kty": "RSA", "use": "sig", "alg": "RS256", "kid": "test-key",
 			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
@@ -155,6 +167,9 @@ func TestExternalOIDCTokenValidation(t *testing.T) {
 		{name: "public client", options: externalOIDCOptions{authMethod: "none"}},
 		{name: "missing id token", options: externalOIDCOptions{missingToken: true}, wantError: "缺少 id_token"},
 		{name: "invalid signature", options: externalOIDCOptions{invalidSignature: true}, wantError: "校验失败"},
+		{name: "JWKS failure body is private", options: externalOIDCOptions{jwksHandler: func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "private-upstream-content", http.StatusForbidden)
+		}}, wantError: "JWKS"},
 		{name: "wrong issuer", options: externalOIDCOptions{claims: map[string]any{"iss": "https://other.test"}}, wantError: "different provider"},
 		{name: "wrong audience", options: externalOIDCOptions{claims: map[string]any{"aud": "other"}}, wantError: "audience"},
 		{name: "expired", options: externalOIDCOptions{claims: map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}}, wantError: "expired"},
@@ -185,6 +200,7 @@ func TestExternalOIDCTokenValidation(t *testing.T) {
 			profile, err := adapter.FetchProfile(context.Background(), token)
 			if test.wantError != "" {
 				require.ErrorContains(t, err, test.wantError)
+				require.NotContains(t, err.Error(), "private-upstream-content")
 				require.Nil(t, profile)
 				return
 			}
@@ -201,16 +217,28 @@ func TestExternalOIDCTokenValidation(t *testing.T) {
 }
 
 func TestExternalOIDCConnectionLoginAndBinding(t *testing.T) {
+	for _, path := range []string{"", "/api/auth/.well-known/openid-configuration"} {
+		t.Run("discovery="+path, func(t *testing.T) {
+			testExternalOIDCConnectionLoginAndBinding(t, path)
+		})
+	}
+}
+
+func testExternalOIDCConnectionLoginAndBinding(t *testing.T, discoveryPath string) {
 	t.Setenv(credentialcrypto.EnvironmentKeys, "")
 	t.Setenv(credentialcrypto.EnvironmentKey, base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
-	provider := newExternalOIDCProvider(t, externalOIDCOptions{})
+	provider := newExternalOIDCProvider(t, externalOIDCOptions{discoveryPath: discoveryPath})
+	discoveryURL := ""
+	if discoveryPath != "" {
+		discoveryURL = provider.server.URL + discoveryPath
+	}
 	db := loginVisibilityDB(t)
 	require.NoError(t, db.AutoMigrate(&model.ExternalPrincipal{}, &model.ExternalIdentifier{}, &model.ExternalPrincipalConflict{}, &model.SyncJob{}, &model.User{}))
 	require.NoError(t, db.Create(&model.User{ID: 42, Username: "local-user", Status: model.UserStatusActive, IsActivated: true}).Error)
 	connections := NewIdentityConnectionService(db)
 	connection, err := connections.Create(&dto.CreateIdentityConnectionRequest{
 		Name: "Company", Identifier: "company", Category: "enterprise", ProviderType: "oidc", Capabilities: model.StringList{"authentication"}, Status: "enabled", ShowGlobally: true,
-		Config:      map[string]any{"issuer": provider.server.URL, "redirectUrl": "https://iam.test/external-auth/company/callback"},
+		Config:      map[string]any{"issuer": provider.server.URL, "discoveryUrl": discoveryURL, "redirectUrl": "https://iam.test/external-auth/company/callback"},
 		Credentials: dto.IdentityConnectionCredentialInput{"authentication": {"clientId": "client", "clientSecret": "secret"}},
 	})
 	require.NoError(t, err, "issuer-only configuration must enable without Redis or manual endpoints")
@@ -230,8 +258,10 @@ func TestExternalOIDCConnectionLoginAndBinding(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	auth := NewExternalAuthService(db, rdb)
+	checksBeforeLogin := provider.jwksCalls.Load()
 	start, err := auth.GetAuthURL("company", "login-session", "https://iam.test", "browser-hash")
 	require.NoError(t, err)
+	require.Equal(t, checksBeforeLogin, provider.jwksCalls.Load(), "login must not run the management JWKS preflight")
 	code, q := provider.code(t, start.AuthURL)
 	state, valid := auth.ConsumeState(context.Background(), start.State)
 	require.True(t, valid)
@@ -243,6 +273,7 @@ func TestExternalOIDCConnectionLoginAndBinding(t *testing.T) {
 	require.False(t, valid, "state must be single use")
 	response, err := auth.HandleCallback("company", code, state.SessionID, state)
 	require.NoError(t, err)
+	require.Equal(t, checksBeforeLogin+1, provider.jwksCalls.Load(), "callback should fetch JWKS only for ID Token verification")
 	require.True(t, response.NeedsBind)
 	profile, err := auth.GetTempProfile(response.ContinuationID)
 	require.NoError(t, err)
@@ -297,7 +328,7 @@ func TestExternalOIDCConnectionLoginAndBinding(t *testing.T) {
 	require.Equal(t, "second", public[0].Identifier)
 	secondProfile, err := auth.GetTempProfile(secondResponse.ContinuationID)
 	require.NoError(t, err)
-	_, err = connections.Update(secondConnection.ID, &dto.UpdateIdentityConnectionRequest{Config: map[string]any{"issuer": provider.server.URL}})
+	_, err = connections.Update(secondConnection.ID, &dto.UpdateIdentityConnectionRequest{Config: map[string]any{"issuer": provider.server.URL, "discoveryUrl": discoveryURL}})
 	require.NoError(t, err, "an unbound connection may change issuer")
 	require.ErrorContains(t, auth.attachProfile(db, secondConnection.ID, 42, secondProfile.Profile), "配置已变更")
 
@@ -367,4 +398,64 @@ func TestExternalOIDCTransactionValidation(t *testing.T) {
 	require.NoError(t, adapter.(protocol.TransactionAuthenticationAdapter).ConfigureTransaction("nonce", oauth2.GenerateVerifier()))
 	_, err = adapter.ExchangeCode(context.Background(), code)
 	require.ErrorContains(t, err, "invalid_grant")
+}
+
+func TestExternalOIDCJWKSHealthAndEnablement(t *testing.T) {
+	t.Setenv(credentialcrypto.EnvironmentKeys, "")
+	t.Setenv(credentialcrypto.EnvironmentKey, base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
+	for _, test := range []struct {
+		name, body, wantError string
+		status                int
+	}{
+		{"forbidden", "private-upstream-content", "HTTP 403", 403},
+		{"HTML", "<html>private-upstream-content</html>", "HTML/验证页面", 200},
+		{"invalid JSON", "private-upstream-content", "无效 JSON", 200},
+		{"empty keys", `{"keys":[]}`, "无可用签名公钥", 200},
+		{"symmetric keys", `{"keys":[{"kty":"oct","k":"c2VjcmV0","alg":"HS256"}]}`, "无可用签名公钥", 200},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider := newExternalOIDCProvider(t, externalOIDCOptions{jwksHandler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}})
+			db := loginVisibilityDB(t)
+			require.NoError(t, db.AutoMigrate(&model.ExternalPrincipal{}, &model.SyncJob{}))
+			connections := NewIdentityConnectionService(db)
+			request := &dto.CreateIdentityConnectionRequest{
+				Name: "Blocked", Identifier: "blocked", Category: "enterprise", ProviderType: "oidc", Capabilities: model.StringList{"authentication"}, Status: "disabled",
+				Config:      map[string]any{"issuer": provider.server.URL, "redirectUrl": "https://iam.test/external-auth/blocked/callback"},
+				Credentials: dto.IdentityConnectionCredentialInput{"authentication": {"clientId": "client", "clientSecret": "secret"}},
+			}
+			connection, err := connections.Create(request)
+			require.NoError(t, err, "disabled drafts do not need a reachable JWKS")
+			require.Zero(t, provider.jwksCalls.Load())
+			checks, err := connections.TestCapabilities(context.Background(), connection.ID)
+			require.ErrorContains(t, err, test.wantError)
+			require.Contains(t, err.Error(), "JWKS")
+			require.NotContains(t, err.Error(), "private-upstream-content")
+			require.Len(t, checks, 1)
+			require.Equal(t, model.CapabilityHealthFailed, checks[0].Status)
+			enabled := model.ConnectionStatusEnabled
+			_, err = connections.Update(connection.ID, &dto.UpdateIdentityConnectionRequest{Status: &enabled})
+			require.ErrorContains(t, err, test.wantError)
+			saved, err := connections.Get(connection.ID)
+			require.NoError(t, err)
+			require.Equal(t, model.ConnectionStatusDisabled, saved.Status)
+			require.Equal(t, "failed", saved.LastCheckStatus)
+			request.Identifier, request.Status = "blocked-new", "enabled"
+			_, err = connections.Create(request)
+			require.ErrorContains(t, err, test.wantError)
+
+			// Updating a live connection must run the same probe and roll back on failure.
+			working := newExternalOIDCProvider(t, externalOIDCOptions{})
+			request.Identifier, request.Config["issuer"] = "working", working.server.URL
+			active, err := connections.Create(request)
+			require.NoError(t, err)
+			_, err = connections.Update(active.ID, &dto.UpdateIdentityConnectionRequest{Config: map[string]any{"issuer": provider.server.URL}})
+			require.ErrorContains(t, err, test.wantError)
+			saved, err = connections.Get(active.ID)
+			require.NoError(t, err)
+			require.Equal(t, working.server.URL, saved.Config["issuer"])
+		})
+	}
 }

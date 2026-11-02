@@ -25,8 +25,8 @@ type oidcResolverAdapter struct {
 	cache *OIDCDiscoveryCache
 }
 
-func (r *oidcResolverAdapter) Resolve(ctx context.Context, issuer string) (*social_OIDCDoc, error) {
-	doc, err := r.cache.Resolve(ctx, issuer)
+func (r *oidcResolverAdapter) Resolve(ctx context.Context, issuer, discoveryURL string) (*social_OIDCDoc, error) {
+	doc, err := r.cache.Resolve(ctx, issuer, discoveryURL)
 	if err != nil {
 		return nil, err
 	}
