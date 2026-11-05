@@ -165,18 +165,41 @@ func (p *GeetestCaptchaProvider) Verify(config *model.CaptchaConfig, data map[st
 		p.logf("[geetest] validate captchaId=%s status=%s result=%s reason=%s code=%s msg=%s",
 			captchaID, result.Status, result.Result, result.Reason, result.Code, result.Msg)
 	}
-	if result.Status == "error" {
-		return nil, fmt.Errorf("验证码服务暂不可用，请稍后重试（%s）", geetestErrorCode(result.Code))
-	}
-	if result.Result != "success" {
-		return &VerifyResult{Success: false, Message: geetestFailureMessage(result.Reason)}, nil
-	}
 	// 极验后台可把 Captcha ID 设为 bypass；此时任意凭证都会返回 success。
 	// 默认不能把测试绕过当成真实通过，否则验证码可被完全跳过。
-	if strings.EqualFold(strings.TrimSpace(result.Reason), "bypass status") && !geetestBypassAllowed(config) {
+	// 放弃校验的标记可能落在 status/result/reason 任一字段，且文案会变，
+	// 因此对三个字段统一做 bypass 检测，而不是只认某一种固定文案。
+	if geetestBypassed(result.Status, result.Result, result.Reason) && !geetestBypassAllowed(config) {
 		return nil, errors.New("验证码服务处于测试绕过状态，请联系管理员配置生产 Captcha ID")
 	}
+	// status 表示极验服务调用本身是否成功，result 才是本次校验结论。
+	// 只有两者同时为 success 才算通过；{"status":"error","result":"success"}
+	// 这类组合绝不能被当成通过，否则验证码可被完全跳过。
+	if strings.EqualFold(strings.TrimSpace(result.Status), "error") {
+		return nil, fmt.Errorf("验证码服务暂不可用，请稍后重试（%s）", geetestErrorCode(result.Code))
+	}
+	if !geetestPassed(result.Status, result.Result) {
+		return &VerifyResult{Success: false, Message: geetestFailureMessage(result.Reason)}, nil
+	}
 	return &VerifyResult{Success: true, Message: "验证成功"}, nil
+}
+
+// geetestPassed 仅当 status 与 result 同时为 success 时才判定通过。
+func geetestPassed(status, result string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "success") &&
+		strings.EqualFold(strings.TrimSpace(result), "success")
+}
+
+// geetestBypassed 检测极验是否放弃校验（测试绕过）。
+// 极验把该标记放在 status、result 或 reason 上，且文案会变化，
+// 因此对三个字段都做包含匹配，避免换一种 wording 就绕过拦截。
+func geetestBypassed(status, result, reason string) bool {
+	for _, field := range []string{status, result, reason} {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(field)), "bypass") {
+			return true
+		}
+	}
+	return false
 }
 
 // geetestLogger 在容器就绪时返回全局 logger；单元测试等无容器环境返回 nil。

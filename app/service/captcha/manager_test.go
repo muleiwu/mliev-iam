@@ -195,6 +195,14 @@ func TestCaptchaSessionRejectsSceneMismatch(t *testing.T) {
 	if _, err := service.ConsumeSession(id, "login", "fp-1"); err == nil {
 		t.Fatal("expected scene mismatch to be rejected")
 	}
+
+	// 语义锚点：场景不匹配不消费会话，用户可用正确场景重试。
+	if _, err := service.GetSession(id); err != nil {
+		t.Fatalf("expected session to survive scene mismatch, got %v", err)
+	}
+	if _, err := service.ConsumeSession(id, "sendEmail", "fp-1"); err != nil {
+		t.Fatalf("expected retry with the right scene to succeed, got %v", err)
+	}
 }
 
 func TestCaptchaSessionRejectsFingerprintMismatch(t *testing.T) {
@@ -211,4 +219,90 @@ func TestCaptchaSessionRejectsFingerprintMismatch(t *testing.T) {
 	if _, err := service.ConsumeSession(id, "login", "fp-other"); err == nil {
 		t.Fatal("expected fingerprint mismatch to be rejected")
 	}
+
+	// 语义锚点：指纹不匹配不消费会话。
+	if _, err := service.GetSession(id); err != nil {
+		t.Fatalf("expected session to survive fingerprint mismatch, got %v", err)
+	}
+	if _, err := service.ConsumeSession(id, "login", "fp-1"); err != nil {
+		t.Fatalf("expected retry with the right fingerprint to succeed, got %v", err)
+	}
+}
+
+// 验证码交互失败（提供商返回 fail 或异常）时不能烧掉会话：
+// 评审指出此前先 ConsumeSession 再 Verify，导致一次可重试的失败变成必须刷新页面。
+func TestCaptchaValidateKeepsSessionWhenProviderFails(t *testing.T) {
+	db := newCaptchaManagerTestDB(t)
+	config := &model.CaptchaConfig{
+		Name:     "login captcha",
+		Provider: "stub",
+		Enabled:  true,
+		Params:   datatypes.JSONMap{},
+	}
+	if err := db.Create(config).Error; err != nil {
+		t.Fatalf("create captcha config: %v", err)
+	}
+	createCaptchaSceneBinding(t, db, config.ID)
+
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer client.Close()
+	sessions := NewCaptchaSessionService(client)
+
+	manager := NewManager(db)
+	provider := &stubCaptchaProvider{success: false, message: "验证失败，请重新验证"}
+	manager.RegisterProvider(provider)
+
+	id, err := sessions.CreateSession(&dto.CaptchaParamsRequest{Scene: "login", Fingerprint: "fp-1"}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ticket := &dto.CaptchaTicket{
+		Provider:    "stub",
+		SessionUuid: id,
+		Data:        map[string]string{"fingerprint": "fp-1"},
+	}
+
+	if err := manager.ValidateForScene("login", ticket, "127.0.0.1", client); err == nil {
+		t.Fatal("expected provider failure to reject the request")
+	}
+	// 失败后会话仍在，用户可以在同一会话内重试。
+	if _, err := sessions.GetSession(id); err != nil {
+		t.Fatalf("expected session to survive provider failure, got %v", err)
+	}
+
+	// 重试成功时只消费一次。
+	provider.success = true
+	if err := manager.ValidateForScene("login", ticket, "127.0.0.1", client); err != nil {
+		t.Fatalf("expected retry to succeed, got %v", err)
+	}
+	if _, err := sessions.GetSession(id); err == nil {
+		t.Fatal("expected session to be consumed after a successful validation")
+	}
+	// 同一会话不能重放。
+	if err := manager.ValidateForScene("login", ticket, "127.0.0.1", client); err == nil {
+		t.Fatal("expected replayed session to be rejected")
+	}
+}
+
+// stubCaptchaProvider 用于在测试中控制二次校验结果，避免依赖外部网络。
+type stubCaptchaProvider struct {
+	success bool
+	message string
+	calls   int
+}
+
+func (*stubCaptchaProvider) GetProviderType() string { return "stub" }
+
+func (*stubCaptchaProvider) GetProviderInfo() dto.CaptchaProviderInfo {
+	return dto.CaptchaProviderInfo{Provider: "stub", Label: "stub"}
+}
+
+func (*stubCaptchaProvider) GetClientParams(*model.CaptchaConfig) map[string]interface{} {
+	return map[string]interface{}{}
+}
+
+func (p *stubCaptchaProvider) Verify(*model.CaptchaConfig, map[string]string, string) (*VerifyResult, error) {
+	p.calls++
+	return &VerifyResult{Success: p.success, Message: p.message}, nil
 }

@@ -108,6 +108,54 @@ func TestGeetestProviderRejectsFailAndErrorResponses(t *testing.T) {
 	})
 }
 
+// status 是服务调用状态，result 才是校验结论；两者必须同时为 success。
+// 评审指出的 {"status":"error","result":"success"} 组合绝不能放行。
+func TestGeetestProviderRequiresStatusAndResultSuccess(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "error status with success result", body: `{"status":"error","result":"success","code":"-50005","msg":"illegal gen_time"}`},
+		{name: "missing status", body: `{"result":"success"}`},
+		{name: "unknown status", body: `{"status":"unknown","result":"success"}`},
+		{name: "empty status with success result", body: `{"status":"","result":"success"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			provider := &GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}
+			result, err := provider.Verify(geetestTestConfig(), geetestTestData(), "")
+			if err != nil {
+				require.Error(t, err)
+				return
+			}
+			require.NotNil(t, result)
+			require.False(t, result.Success)
+		})
+	}
+}
+
+func TestGeetestProviderOnlyAcceptsExactSuccessPair(t *testing.T) {
+	require.True(t, geetestPassed("success", "success"))
+	require.True(t, geetestPassed(" SUCCESS ", "Success"))
+	require.False(t, geetestPassed("error", "success"))
+	require.False(t, geetestPassed("", "success"))
+	require.False(t, geetestPassed("success", "fail"))
+}
+
+// bypass 标记可能出现在 status/result/reason 任一字段，且文案会变。
+func TestGeetestBypassDetectionCoversAllFields(t *testing.T) {
+	require.True(t, geetestBypassed("bypass status", "success", ""))
+	require.True(t, geetestBypassed("success", "BYPASS_SUCCESS", ""))
+	require.True(t, geetestBypassed("success", "success", "captcha bypass enabled"))
+	require.False(t, geetestBypassed("success", "success", ""))
+	require.False(t, geetestBypassed("error", "fail", "pass_token expire"))
+}
+
 // 极验配置只接受 captchaId / captchaKey / allowBypass，不再暴露 apiServer。
 func TestGeetestProviderSendsCaptchaIdInFormAndQuery(t *testing.T) {
 	var seenForm, seenQuery string

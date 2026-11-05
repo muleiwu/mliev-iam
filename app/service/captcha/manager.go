@@ -149,8 +149,11 @@ func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicke
 	if !ok || fingerprint == "" {
 		return fmt.Errorf("缺少设备指纹信息")
 	}
+	// 先只校验会话（场景 + 指纹），不消费。
+	// 极验超时、captcha_output 过期或用户答错时都会返回失败，
+	// 这些都属于可在会话有效期内重试的情况，不能提前把会话烧掉。
 	sessionService := NewCaptchaSessionService(redisClient)
-	if _, err := sessionService.ConsumeSession(ticket.SessionUuid, scene, fingerprint); err != nil {
+	if _, err := sessionService.ValidateSession(ticket.SessionUuid, scene, fingerprint); err != nil {
 		return fmt.Errorf("验证码会话验证失败: %w", err)
 	}
 
@@ -168,6 +171,12 @@ func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicke
 
 	if !result.Success {
 		return fmt.Errorf("验证码验证失败: %s", result.Message)
+	}
+
+	// 服务商二次校验通过后才消费会话。并发下只有第一个请求能删成功，
+	// 保证同一会话最多支撑一次成功的业务校验（防重放）。
+	if _, err := sessionService.ConsumeSession(ticket.SessionUuid, scene, fingerprint); err != nil {
+		return fmt.Errorf("验证码会话验证失败: %w", err)
 	}
 
 	return nil

@@ -99,45 +99,76 @@ func (s *CaptchaSessionService) GetSession(sessionUUID string) (*CaptchaSession,
 	return &session, nil
 }
 
-// ConsumeSession 原子校验并消费会话。
-// 校验场景、指纹后立即删除，避免 GET 与 DEL 之间的竞态让同一会话被并发复用。
-func (s *CaptchaSessionService) ConsumeSession(sessionUUID, scene, fingerprint string) (*CaptchaSession, error) {
-	if strings.TrimSpace(sessionUUID) == "" {
-		return nil, fmt.Errorf("会话不存在或已过期")
-	}
-	ctx := context.Background()
-	key := s.keyPrefix + sessionUUID
-
-	// Lua 保证读取与删除原子化：只有第一个匹配的请求能拿到会话。
-	const script = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then return nil end
-if redis.call('DEL', KEYS[1]) == 0 then return nil end
-return raw
-`
-	raw, err := s.redis.Eval(ctx, script, []string{key}).Text()
+// ValidateSession 校验会话的场景与指纹，但不消费会话。
+// 验证码交互允许在会话有效期内重试，只有服务商二次校验成功后才应消费。
+func (s *CaptchaSessionService) ValidateSession(sessionUUID, scene, fingerprint string) (*CaptchaSession, error) {
+	session, _, err := s.loadSession(sessionUUID, scene, fingerprint)
 	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return nil, fmt.Errorf("会话不存在或已过期")
-		}
-		return nil, fmt.Errorf("获取会话失败: %w", err)
+		return nil, err
+	}
+	return session, nil
+}
+
+// ConsumeSession 原子校验并消费会话。
+//
+// 语义约定（有意为之）：
+//   - 场景或指纹不匹配时返回错误，但不会删除会话；用户可在有效期内修正后重试。
+//   - 只有校验通过且 Redis 中原始数据仍与读取时一致，才用 DEL 消费。
+//   - 并发请求读取同一 raw 后，只有第一个 compare-and-delete 成功，
+//     其余请求拿到 0，保证一个会话最多支撑一次成功的业务校验。
+func (s *CaptchaSessionService) ConsumeSession(sessionUUID, scene, fingerprint string) (*CaptchaSession, error) {
+	session, raw, err := s.loadSession(sessionUUID, scene, fingerprint)
+	if err != nil {
+		return nil, err
+	}
+
+	// Lua 比较原始值与删除结果，避免 GET 与 DEL 之间被并发复用或覆盖。
+	const script = `
+local current = redis.call('GET', KEYS[1])
+if current ~= ARGV[1] then return 0 end
+return redis.call('DEL', KEYS[1])
+`
+	deleted, err := s.redis.Eval(context.Background(), script,
+		[]string{s.keyPrefix + strings.TrimSpace(sessionUUID)}, raw).Int()
+	if err != nil {
+		return nil, fmt.Errorf("消费会话失败: %w", err)
+	}
+	if deleted == 0 {
+		return nil, fmt.Errorf("会话不存在、已过期或已被使用")
+	}
+	return session, nil
+}
+
+// loadSession 读取并校验会话，返回原始数据供后续 compare-and-delete 使用。
+func (s *CaptchaSessionService) loadSession(sessionUUID, scene, fingerprint string) (*CaptchaSession, string, error) {
+	sessionUUID = strings.TrimSpace(sessionUUID)
+	if sessionUUID == "" {
+		return nil, "", fmt.Errorf("会话不存在或已过期")
+	}
+
+	raw, err := s.redis.Get(context.Background(), s.keyPrefix+sessionUUID).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, "", fmt.Errorf("会话不存在或已过期")
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("获取会话失败: %w", err)
 	}
 	if raw == "" {
-		return nil, fmt.Errorf("会话不存在或已过期")
+		return nil, "", fmt.Errorf("会话不存在或已过期")
 	}
 
 	var session CaptchaSession
 	if err := json.Unmarshal([]byte(raw), &session); err != nil {
-		return nil, fmt.Errorf("解析会话数据失败: %w", err)
+		return nil, "", fmt.Errorf("解析会话数据失败: %w", err)
 	}
 	// 会话绑定场景：禁止用低风险场景的会话去通过高风险场景。
 	if scene != "" && session.Scene != scene {
-		return nil, fmt.Errorf("验证码会话与当前场景不匹配")
+		return nil, "", fmt.Errorf("验证码会话与当前场景不匹配")
 	}
 	if session.Fingerprint != fingerprint {
-		return nil, fmt.Errorf("设备指纹不匹配")
+		return nil, "", fmt.Errorf("设备指纹不匹配")
 	}
-	return &session, nil
+	return &session, raw, nil
 }
 
 // DeleteSession 删除验证码会话
