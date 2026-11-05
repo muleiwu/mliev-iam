@@ -2,6 +2,8 @@ package captcha
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,6 +111,80 @@ func (s *CaptchaSessionService) ValidateSession(sessionUUID, scene, fingerprint 
 	return session, nil
 }
 
+// ProofKey 生成服务商凭证去重键。
+// 极验取 lot_number/captcha_output/pass_token，腾讯取 ticket/randstr。
+// 凭证本身可能较长，因此只在 Redis 键中保存 SHA-256 摘要。
+func ProofKey(provider string, data map[string]string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	var parts []string
+	switch provider {
+	case GeetestProviderType:
+		parts = []string{
+			strings.TrimSpace(data["lot_number"]),
+			strings.TrimSpace(data["captcha_output"]),
+			strings.TrimSpace(data["pass_token"]),
+		}
+	case TencentProviderType, TencentMiniProgramProviderType:
+		parts = []string{
+			strings.TrimSpace(data["ticket"]),
+			strings.TrimSpace(data["randstr"]),
+		}
+	default:
+		return ""
+	}
+	nonEmpty := false
+	for _, part := range parts {
+		if part != "" {
+			nonEmpty = true
+			break
+		}
+	}
+	if !nonEmpty {
+		return ""
+	}
+	raw := provider + "\x00" + strings.Join(parts, "\x00")
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// BeginProof 在调用服务商二次校验之前抢占凭证。
+//
+// 同一份凭证只允许一个请求进入二次校验；使用 SET NX 抢占而不是等校验
+// 成功后再写，避免并发请求都先通过服务商校验、再各自消费不同的会话，
+// 从而让一张凭证换出多份登录结果。抢占失败说明凭证正在使用或已用过。
+func (s *CaptchaSessionService) BeginProof(provider string, data map[string]string) (string, bool, error) {
+	proof := ProofKey(provider, data)
+	if proof == "" {
+		return "", true, nil
+	}
+	key := s.proofKeyPrefix() + proof
+	ok, err := s.redis.SetNX(context.Background(), key, "1", s.expiry).Result()
+	if err != nil {
+		return "", false, fmt.Errorf("凭证状态存储失败: %w", err)
+	}
+	return key, ok, nil
+}
+
+// CommitProof 在服务商校验成功后延长凭证去重记录的保留时间。
+// 会话会在校验成功后删除，凭证记录则至少保留到凭证自然过期。
+func (s *CaptchaSessionService) CommitProof(key string) error {
+	if strings.TrimSpace(key) == "" {
+		return nil
+	}
+	if err := s.redis.Expire(context.Background(), key, s.expiry).Err(); err != nil {
+		return fmt.Errorf("凭证状态提交失败: %w", err)
+	}
+	return nil
+}
+
+// ReleaseProof 在服务商校验失败或出现异常时释放凭证占用，允许用户重试。
+func (s *CaptchaSessionService) ReleaseProof(key string) {
+	if strings.TrimSpace(key) == "" {
+		return
+	}
+	_ = s.redis.Del(context.Background(), key).Err()
+}
+
 // ConsumeSession 原子校验并消费会话。
 //
 // 语义约定（有意为之）：
@@ -169,6 +245,10 @@ func (s *CaptchaSessionService) loadSession(sessionUUID, scene, fingerprint stri
 		return nil, "", fmt.Errorf("设备指纹不匹配")
 	}
 	return &session, raw, nil
+}
+
+func (s *CaptchaSessionService) proofKeyPrefix() string {
+	return strings.TrimSuffix(s.keyPrefix, "session:") + "proof:"
 }
 
 // DeleteSession 删除验证码会话

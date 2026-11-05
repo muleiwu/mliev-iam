@@ -2,7 +2,7 @@ package captcha
 
 import (
 	"encoding/json"
-	"github.com/alicebob/miniredis/v2"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +11,7 @@ import (
 	"cnb.cool/mliev/iam/mliev-iam/app/model"
 	"cnb.cool/mliev/iam/mliev-iam/app/service"
 	sqlitedriver "cnb.cool/mliev/open/go-web/pkg/server/database/sqlite"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -285,14 +286,127 @@ func TestCaptchaValidateKeepsSessionWhenProviderFails(t *testing.T) {
 	}
 }
 
-// stubCaptchaProvider 用于在测试中控制二次校验结果，避免依赖外部网络。
-type stubCaptchaProvider struct {
-	success bool
-	message string
-	calls   int
+// 同一份服务商凭证只能使用一次，即使攻击者用多个验证码会话分别提交。
+func TestCaptchaValidateRejectsSameProofAcrossSessions(t *testing.T) {
+	db := newCaptchaManagerTestDB(t)
+	config := &model.CaptchaConfig{
+		Name:     "login captcha",
+		Provider: GeetestProviderType,
+		Enabled:  true,
+		Params:   datatypes.JSONMap{},
+	}
+	if err := db.Create(config).Error; err != nil {
+		t.Fatalf("create captcha config: %v", err)
+	}
+	createCaptchaSceneBinding(t, db, config.ID)
+
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer client.Close()
+	sessions := NewCaptchaSessionService(client)
+
+	manager := NewManager(db)
+	manager.RegisterProvider(&stubCaptchaProvider{
+		providerType: GeetestProviderType,
+		success:      true,
+		message:      "验证成功",
+	})
+
+	createTicket := func(t *testing.T) *dto.CaptchaTicket {
+		t.Helper()
+		id, err := sessions.CreateSession(&dto.CaptchaParamsRequest{Scene: "login", Fingerprint: "fp-1"}, "127.0.0.1")
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		return &dto.CaptchaTicket{
+			Provider:    GeetestProviderType,
+			SessionUuid: id,
+			Data: map[string]string{
+				"lot_number":     "lot-once",
+				"captcha_output": "output-once",
+				"pass_token":     "pass-once",
+				"gen_time":       "1700000000",
+				"fingerprint":    "fp-1",
+			},
+		}
+	}
+
+	if err := manager.ValidateForScene("login", createTicket(t), "127.0.0.1", client); err != nil {
+		t.Fatalf("expected first validation to succeed, got %v", err)
+	}
+	// 新的会话 + 同一份凭证仍必须失败，否则一张验证码可换取多份业务结果。
+	err := manager.ValidateForScene("login", createTicket(t), "127.0.0.1", client)
+	if err == nil || !strings.Contains(err.Error(), "验证码已使用") {
+		t.Fatalf("expected reused proof to be rejected, got %v", err)
+	}
 }
 
-func (*stubCaptchaProvider) GetProviderType() string { return "stub" }
+// 服务商校验失败后应释放凭证占用，允许用户在同一会话内重试。
+func TestCaptchaValidateReleasesProofWhenProviderFails(t *testing.T) {
+	db := newCaptchaManagerTestDB(t)
+	config := &model.CaptchaConfig{
+		Name:     "login captcha",
+		Provider: GeetestProviderType,
+		Enabled:  true,
+		Params:   datatypes.JSONMap{},
+	}
+	if err := db.Create(config).Error; err != nil {
+		t.Fatalf("create captcha config: %v", err)
+	}
+	createCaptchaSceneBinding(t, db, config.ID)
+
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	defer client.Close()
+	sessions := NewCaptchaSessionService(client)
+
+	manager := NewManager(db)
+	provider := &stubCaptchaProvider{
+		providerType: GeetestProviderType,
+		success:      false,
+		message:      "验证失败，请重新验证",
+	}
+	manager.RegisterProvider(provider)
+
+	id, err := sessions.CreateSession(&dto.CaptchaParamsRequest{Scene: "login", Fingerprint: "fp-1"}, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	ticket := &dto.CaptchaTicket{
+		Provider:    GeetestProviderType,
+		SessionUuid: id,
+		Data: map[string]string{
+			"lot_number":     "lot-retry",
+			"captcha_output": "output-retry",
+			"pass_token":     "pass-retry",
+			"gen_time":       "1700000000",
+			"fingerprint":    "fp-1",
+		},
+	}
+
+	if err := manager.ValidateForScene("login", ticket, "127.0.0.1", client); err == nil {
+		t.Fatal("expected first provider validation to fail")
+	}
+	provider.success = true
+	if err := manager.ValidateForScene("login", ticket, "127.0.0.1", client); err != nil {
+		t.Fatalf("expected retry with the same proof to succeed, got %v", err)
+	}
+}
+
+// stubCaptchaProvider 用于在测试中控制二次校验结果，避免依赖外部网络。
+type stubCaptchaProvider struct {
+	providerType string
+	success      bool
+	message      string
+	calls        int
+}
+
+func (p *stubCaptchaProvider) GetProviderType() string {
+	if p.providerType != "" {
+		return p.providerType
+	}
+	return "stub"
+}
 
 func (*stubCaptchaProvider) GetProviderInfo() dto.CaptchaProviderInfo {
 	return dto.CaptchaProviderInfo{Provider: "stub", Label: "stub"}

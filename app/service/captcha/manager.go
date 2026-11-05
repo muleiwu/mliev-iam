@@ -163,20 +163,42 @@ func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicke
 		return err
 	}
 
+	// 凭证级去重：抢占成功才允许进入二次校验。
+	// 会话去重（ConsumeSession）只能保证「一个会话换一次结果」，
+	// 同一份极验凭证配上不同会话（多次请求 /api/captcha/params）时
+	// 各请求会各自消费自己的会话，会话级去重拦不住。因此必须在调用
+	// 服务商之前用 SET NX 抢占凭证，第二个请求直接拒绝。
+	proofKey, acquired, err := sessionService.BeginProof(config.Provider, ticket.Data)
+	if err != nil {
+		return fmt.Errorf("验证码验证失败: %w", err)
+	}
+	if !acquired {
+		return fmt.Errorf("验证码已使用，请重新验证")
+	}
+
 	// 调用提供商验证，传入用户IP
 	result, err := provider.Verify(config, ticket.Data, userIP)
 	if err != nil {
+		// 网络异常、超时等可重试的情况不占用凭证，允许用户在同一会话内重试。
+		sessionService.ReleaseProof(proofKey)
 		return fmt.Errorf("验证码验证失败: %w", err)
 	}
 
 	if !result.Success {
+		sessionService.ReleaseProof(proofKey)
 		return fmt.Errorf("验证码验证失败: %s", result.Message)
 	}
 
 	// 服务商二次校验通过后才消费会话。并发下只有第一个请求能删成功，
 	// 保证同一会话最多支撑一次成功的业务校验（防重放）。
 	if _, err := sessionService.ConsumeSession(ticket.SessionUuid, scene, fingerprint); err != nil {
+		sessionService.ReleaseProof(proofKey)
 		return fmt.Errorf("验证码会话验证失败: %w", err)
+	}
+
+	// 校验通过：延长凭证去重记录，使同一份凭证在有效期内无法再次使用。
+	if err := sessionService.CommitProof(proofKey); err != nil {
+		return fmt.Errorf("验证码验证失败: %w", err)
 	}
 
 	return nil
