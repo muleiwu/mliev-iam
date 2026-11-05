@@ -37,24 +37,28 @@ func (c CaptchaController) GetCaptchaParams(ctx httpInterfaces.RouterContextInte
 	// 获取客户端IP
 	clientIP := ctx.ClientIP()
 
-	// 创建会话
-	sessionService := captcha.NewCaptchaSessionService(helper.GetRedis())
-	sessionUUID, err := sessionService.CreateSession(&req, clientIP)
-	if err != nil {
-		c.Error(ctx, 500, "创建验证码会话失败: "+err.Error())
-		return
-	}
-
-	// 获取验证码配置
+	// 先确认场景是否启用验证码：未启用时不应创建 Redis 会话，
+	// 否则任何人可无成本刷出大量无主会话键。
 	manager := captcha.NewManager(helper.GetDatabase())
 	params, err := manager.GetClientParamsForScene(req.Scene)
 	if err != nil {
 		c.Error(ctx, 500, err.Error())
 		return
 	}
+	if !params.Enabled {
+		c.Success(ctx, params)
+		return
+	}
 
-	// 添加sessionUUID到响应
+	// 创建一次性会话
+	sessionService := captcha.NewCaptchaSessionService(helper.GetRedis())
+	sessionUUID, err := sessionService.CreateSession(&req, clientIP)
+	if err != nil {
+		c.Error(ctx, 500, "创建验证码会话失败: "+err.Error())
+		return
+	}
 	params.SessionUuid = sessionUUID
 
 	c.Success(ctx, params)
+
 }

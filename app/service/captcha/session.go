@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -98,22 +99,45 @@ func (s *CaptchaSessionService) GetSession(sessionUUID string) (*CaptchaSession,
 	return &session, nil
 }
 
-// ValidateSession 验证会话（灵活模式：指纹必须一致）
-func (s *CaptchaSessionService) ValidateSession(sessionUUID string, fingerprint string) error {
-	session, err := s.GetSession(sessionUUID)
+// ConsumeSession 原子校验并消费会话。
+// 校验场景、指纹后立即删除，避免 GET 与 DEL 之间的竞态让同一会话被并发复用。
+func (s *CaptchaSessionService) ConsumeSession(sessionUUID, scene, fingerprint string) (*CaptchaSession, error) {
+	if strings.TrimSpace(sessionUUID) == "" {
+		return nil, fmt.Errorf("会话不存在或已过期")
+	}
+	ctx := context.Background()
+	key := s.keyPrefix + sessionUUID
+
+	// Lua 保证读取与删除原子化：只有第一个匹配的请求能拿到会话。
+	const script = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+if redis.call('DEL', KEYS[1]) == 0 then return nil end
+return raw
+`
+	raw, err := s.redis.Eval(ctx, script, []string{key}).Text()
 	if err != nil {
-		return err
+		if errors.Is(err, redis.Nil) {
+			return nil, fmt.Errorf("会话不存在或已过期")
+		}
+		return nil, fmt.Errorf("获取会话失败: %w", err)
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("会话不存在或已过期")
 	}
 
-	// 验证指纹必须一致
+	var session CaptchaSession
+	if err := json.Unmarshal([]byte(raw), &session); err != nil {
+		return nil, fmt.Errorf("解析会话数据失败: %w", err)
+	}
+	// 会话绑定场景：禁止用低风险场景的会话去通过高风险场景。
+	if scene != "" && session.Scene != scene {
+		return nil, fmt.Errorf("验证码会话与当前场景不匹配")
+	}
 	if session.Fingerprint != fingerprint {
-		return fmt.Errorf("设备指纹不匹配")
+		return nil, fmt.Errorf("设备指纹不匹配")
 	}
-
-	// 其他字段（IP、UA等）作为日志参考，不强制验证
-	// 因为用户可能在移动网络下IP会变化
-
-	return nil
+	return &session, nil
 }
 
 // DeleteSession 删除验证码会话

@@ -235,13 +235,11 @@ func (c CaptchaConfigController) UpdateCaptchaSceneBindings(ctx httpInterfaces.R
 
 // convertToResponse 转换为响应格式
 func (c CaptchaConfigController) convertToResponse(config *model.CaptchaConfig) dto.CaptchaConfigResponse {
-	// 将 JSONMap 转换为 map[string]string
-	params := make(map[string]string)
+	// 保留原始类型（字符串 / 布尔），前端据此渲染文本框或开关。
+	params := make(map[string]any)
 	if config.Params != nil {
 		for k, v := range config.Params {
-			if str, ok := v.(string); ok {
-				params[k] = str
-			}
+			params[k] = v
 		}
 	}
 

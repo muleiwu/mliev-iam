@@ -23,32 +23,32 @@ type CaptchaTicket struct {
 
 // CaptchaConfigResponse 验证码配置响应
 type CaptchaConfigResponse struct {
-	ID        uint              `json:"id"`
-	Name      string            `json:"name"`
-	Provider  string            `json:"provider"`
-	Enabled   bool              `json:"enabled"`
-	Params    map[string]string `json:"params"`
-	Remark    string            `json:"remark"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
+	ID        uint           `json:"id"`
+	Name      string         `json:"name"`
+	Provider  string         `json:"provider"`
+	Enabled   bool           `json:"enabled"`
+	Params    map[string]any `json:"params"`
+	Remark    string         `json:"remark"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
 }
 
 // CreateCaptchaConfigRequest 创建验证码配置请求
 type CreateCaptchaConfigRequest struct {
-	Name     string            `json:"name" binding:"required" validate:"max=100"`
-	Provider string            `json:"provider" binding:"required" validate:"max=50"`
-	Enabled  bool              `json:"enabled"`
-	Params   map[string]string `json:"params" binding:"required"`
-	Remark   string            `json:"remark" validate:"max=255"`
+	Name     string         `json:"name" binding:"required" validate:"max=100"`
+	Provider string         `json:"provider" binding:"required" validate:"max=50"`
+	Enabled  bool           `json:"enabled"`
+	Params   map[string]any `json:"params" binding:"required"`
+	Remark   string         `json:"remark" validate:"max=255"`
 }
 
 // UpdateCaptchaConfigRequest 更新验证码配置请求
 type UpdateCaptchaConfigRequest struct {
-	Name     string            `json:"name" binding:"required" validate:"max=100"`
-	Provider string            `json:"provider" binding:"required" validate:"max=50"`
-	Enabled  bool              `json:"enabled"`
-	Params   map[string]string `json:"params" binding:"required"`
-	Remark   string            `json:"remark" validate:"max=255"`
+	Name     string         `json:"name" binding:"required" validate:"max=100"`
+	Provider string         `json:"provider" binding:"required" validate:"max=50"`
+	Enabled  bool           `json:"enabled"`
+	Params   map[string]any `json:"params" binding:"required"`
+	Remark   string         `json:"remark" validate:"max=255"`
 }
 
 // CaptchaProviderField 提供商参数字段定义

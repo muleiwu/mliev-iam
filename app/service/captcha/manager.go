@@ -2,6 +2,7 @@ package captcha
 
 import (
 	"fmt"
+	"strings"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dao"
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -30,6 +31,7 @@ func NewManager(db *gorm.DB) *CaptchaManager {
 	// 注册内置提供商
 	manager.RegisterProvider(&TencentCaptchaProvider{})
 	manager.RegisterProvider(&TencentMiniProgramProvider{})
+	manager.RegisterProvider(&GeetestCaptchaProvider{})
 
 	return manager
 }
@@ -135,17 +137,21 @@ func (m *CaptchaManager) ValidateForScene(scene string, ticket *dto.CaptchaTicke
 	}
 
 	// 验证会话（设备指纹验证）
-	if ticket.SessionUuid != "" && redisClient != nil {
-		sessionService := NewCaptchaSessionService(redisClient)
-		fingerprint, ok := ticket.Data["fingerprint"]
-		if !ok || fingerprint == "" {
-			return fmt.Errorf("缺少设备指纹信息")
-		}
-		if err := sessionService.ValidateSession(ticket.SessionUuid, fingerprint); err != nil {
-			return fmt.Errorf("验证码会话验证失败: %w", err)
-		}
-		// 验证后删除会话（一次性使用）
-		sessionService.DeleteSession(ticket.SessionUuid)
+	// 场景已启用验证码时必须存在一次性会话：允许省略 sessionUuid 会让调用方
+	// 绕过 /api/captcha/params 直接提交票据，验证码形同虚设。
+	if redisClient == nil {
+		return fmt.Errorf("验证码会话服务不可用")
+	}
+	if strings.TrimSpace(ticket.SessionUuid) == "" {
+		return fmt.Errorf("验证码会话已失效，请重新完成验证")
+	}
+	fingerprint, ok := ticket.Data["fingerprint"]
+	if !ok || fingerprint == "" {
+		return fmt.Errorf("缺少设备指纹信息")
+	}
+	sessionService := NewCaptchaSessionService(redisClient)
+	if _, err := sessionService.ConsumeSession(ticket.SessionUuid, scene, fingerprint); err != nil {
+		return fmt.Errorf("验证码会话验证失败: %w", err)
 	}
 
 	// 获取提供商
