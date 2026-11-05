@@ -161,18 +161,20 @@ func (p *GeetestCaptchaProvider) Verify(config *model.CaptchaConfig, data map[st
 		return nil, errors.New("验证码服务响应异常，请稍后重试")
 	}
 	// 记录原始判定字段，便于排查 bypass、签名或凭证问题（不含 captchaKey）。
+	status := strings.TrimSpace(result.Status)
+	verdict := strings.TrimSpace(result.Result)
 	if p.logf != nil {
 		p.logf("[geetest] validate captchaId=%s status=%s result=%s reason=%s code=%s msg=%s",
-			captchaID, result.Status, result.Result, result.Reason, result.Code, result.Msg)
-	}
-	if strings.EqualFold(strings.TrimSpace(result.Status), "error") {
-		return nil, fmt.Errorf("验证码服务暂不可用，请稍后重试（%s）", geetestErrorCode(result.Code))
+			captchaID, status, verdict, result.Reason, result.Code, result.Msg)
 	}
 	// 极验后台可把 Captcha ID 设为 bypass；此时校验结果不代表用户真实完成验证。
 	// 只认官方字段的精确取值（status 或 result 为 bypass），不对 reason 做子串匹配：
-	// reason 是对方案案文案，改一句措辞就会让判定翻转，既可能误拦正常用户，
+	// reason 是对方案文案，改一句措辞就会让判定翻转，既可能误拦正常用户，
 	// 也可能放过真正的放行响应，判定必须由结构化字段决定。
-	if geetestBypassed(result.Status, result.Result) {
+	//
+	// bypass 必须先于 error 判定：放行状态下极验同样可能返回带 error 的组合，
+	// 若先因 status=error 直接返回，管理员打开 allowBypass 后仍会被拒绝，开关形同虚设。
+	if geetestBypassed(status, verdict) {
 		if !geetestBypassAllowed(config) {
 			return nil, errors.New("验证码服务处于测试绕过状态，请联系管理员配置生产 Captcha ID")
 		}
@@ -180,10 +182,13 @@ func (p *GeetestCaptchaProvider) Verify(config *model.CaptchaConfig, data map[st
 		// 不能继续走下面的严格判定，否则开关形同虚设。
 		return &VerifyResult{Success: true, Message: "验证成功（极验测试绕过）"}, nil
 	}
+	if strings.EqualFold(status, "error") {
+		return nil, fmt.Errorf("验证码服务暂不可用，请稍后重试（%s）", geetestErrorCode(result.Code))
+	}
 	// status 表示极验服务调用本身是否成功，result 才是本次校验结论。
 	// 只有两者同时为 success 才算通过；{"status":"error","result":"success"}
 	// 这类组合绝不能被当成通过，否则验证码可被完全跳过。
-	if !geetestPassed(result.Status, result.Result) {
+	if !geetestPassed(status, verdict) {
 		return &VerifyResult{Success: false, Message: geetestFailureMessage(result.Reason)}, nil
 	}
 	return &VerifyResult{Success: true, Message: "验证成功"}, nil

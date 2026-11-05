@@ -83,3 +83,43 @@ func TestGeetestProviderDetectsBypassOnResultField(t *testing.T) {
 	_, err := (&GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}).Verify(geetestTestConfig(), geetestTestData(), "")
 	require.ErrorContains(t, err, "测试绕过")
 }
+
+// 放行状态下极验也可能返回 status=error；bypass 判定必须先于 error 分支，
+// 否则管理员打开 allowBypass 后仍会被「服务暂不可用」拒绝，开关形同虚设。
+func TestGeetestProviderBypassTakesPrecedenceOverErrorStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "error",
+			"result": "bypass",
+			"code":   "-50305",
+			"msg":    "bypass mode",
+		})
+	}))
+	defer server.Close()
+
+	t.Run("default rejects", func(t *testing.T) {
+		_, err := (&GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}).Verify(geetestTestConfig(), geetestTestData(), "")
+		require.ErrorContains(t, err, "测试绕过")
+	})
+
+	t.Run("enabled passes", func(t *testing.T) {
+		config := geetestTestConfig()
+		config.Params["allowBypass"] = true
+		result, err := (&GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}).Verify(config, geetestTestData(), "")
+		require.NoError(t, err)
+		require.True(t, result.Success)
+	})
+}
+
+// 非 bypass 的 error 响应仍然必须报服务异常，不能被当作通过或普通失败。
+func TestGeetestProviderKeepsErrorBranchWithoutBypass(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "result": "fail", "code": "-50005"})
+	}))
+	defer server.Close()
+
+	config := geetestTestConfig()
+	config.Params["allowBypass"] = true
+	_, err := (&GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}).Verify(config, geetestTestData(), "")
+	require.ErrorContains(t, err, "-50005")
+}

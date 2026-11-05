@@ -188,16 +188,31 @@ func (s *CaptchaSessionService) BeginProof(provider string, data map[string]stri
 	return key, ok, nil
 }
 
-// CommitProof 在服务商校验成功后把凭证标记为已使用。
+// CommitProof 在服务商校验成功后把凭证从 pending 原子地改为 used。
 //
-// 不能用 Expire 续期了事：那样值仍是 pending，ReleaseProof 依旧能删掉记录，
-// 已使用的凭证会在失败分支被释放后重新可用。写入 used 后只有自然过期才失效。
+// 必须 compare-and-set：若只做 SET，失败分支 ReleaseProof 删除 key 后，
+// 另一个请求可能用同一凭证重新抢到 pending，而此前已通过服务商校验的请求
+// 随后会把新的 pending 直接改写成 used，导致已用凭证被复活、可再次兑换结果。
+// 只有当前值仍是 pending 才提交；key 已释放或已被提交都返回错误，不静默覆盖。
 func (s *CaptchaSessionService) CommitProof(key string) error {
 	if strings.TrimSpace(key) == "" {
 		return nil
 	}
-	if err := s.redis.Set(context.Background(), key, proofStateUsed, s.expiry).Err(); err != nil {
+	const script = `
+local current = redis.call('GET', KEYS[1])
+if current == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+  return 1
+end
+return 0
+`
+	committed, err := s.redis.Eval(context.Background(), script, []string{key},
+		proofStatePending, proofStateUsed, s.expiry.Milliseconds()).Int()
+	if err != nil {
 		return fmt.Errorf("凭证状态提交失败: %w", err)
+	}
+	if committed == 0 {
+		return errors.New("凭证状态已失效，请重新验证")
 	}
 	return nil
 }

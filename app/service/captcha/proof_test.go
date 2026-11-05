@@ -127,3 +127,58 @@ func TestProofReleaseClearsPendingProof(t *testing.T) {
 		t.Fatalf("expected released proof to be acquirable again, got acquired=%v err=%v", acquired, err)
 	}
 }
+
+// 提交必须是 pending -> used 的 compare-and-set：
+// 已 used 的凭证再次提交必须报错且保持 used，不能被静默覆盖。
+func TestProofCommitRejectsAlreadyUsedProof(t *testing.T) {
+	sessions, server := newProofTestSession(t)
+	data := map[string]string{"lot_number": "lot-3", "captcha_output": "o", "pass_token": "p"}
+
+	key, acquired, err := sessions.BeginProof(GeetestProviderType, data)
+	if err != nil || !acquired {
+		t.Fatalf("begin proof: acquired=%v err=%v", acquired, err)
+	}
+	if err := sessions.CommitProof(key); err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+	if err := sessions.CommitProof(key); err == nil {
+		t.Fatal("expected the second commit on a used proof to fail")
+	}
+	if got, err := server.Get(key); err != nil || got != proofStateUsed {
+		t.Fatalf("expected used proof to stay used, got %q (%v)", got, err)
+	}
+}
+
+// 凭证被释放后，此前已通过校验的请求不能再把新抢到的 pending 改写成 used。
+func TestProofCommitRejectsReleasedOrReacquiredProof(t *testing.T) {
+	sessions, server := newProofTestSession(t)
+	data := map[string]string{"lot_number": "lot-4", "captcha_output": "o", "pass_token": "p"}
+
+	key, acquired, err := sessions.BeginProof(GeetestProviderType, data)
+	if err != nil || !acquired {
+		t.Fatalf("begin proof: acquired=%v err=%v", acquired, err)
+	}
+	// 释放后该 key 属于另一个请求，旧请求的提交必须失败。
+	sessions.ReleaseProof(key)
+	if err := sessions.CommitProof(key); err == nil {
+		t.Fatal("expected commit on a released proof to fail")
+	}
+	if server.Exists(key) {
+		t.Fatal("expected the released proof to stay absent after a failed commit")
+	}
+
+	// 重新抢占后值回到 pending，此时旧提交同样不能通过（key 已被别人持有）。
+	reacquiredKey, reacquired, err := sessions.BeginProof(GeetestProviderType, data)
+	if err != nil || !reacquired {
+		t.Fatalf("re-begin proof: acquired=%v err=%v", reacquired, err)
+	}
+	if reacquiredKey != key {
+		t.Fatalf("expected the same proof key, got %s", reacquiredKey)
+	}
+	if err := sessions.CommitProof(key); err != nil {
+		t.Fatalf("expected the current holder to commit successfully: %v", err)
+	}
+	if got, err := server.Get(key); err != nil || got != proofStateUsed {
+		t.Fatalf("expected used proof, got %q (%v)", got, err)
+	}
+}
