@@ -7,12 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+)
+
+// 凭证状态机取值。
+// pending 表示凭证正在被某个请求用于二次校验，used 表示校验已成功且凭证已消费。
+// 只有 pending 可以在校验失败后被释放，used 记录必须保留到自然过期。
+const (
+	proofStatePending = "pending"
+	proofStateUsed    = "used"
 )
 
 // CaptchaSession 验证码会话数据
@@ -111,40 +120,57 @@ func (s *CaptchaSessionService) ValidateSession(sessionUUID, scene, fingerprint 
 	return session, nil
 }
 
-// ProofKey 生成服务商凭证去重键。
-// 极验取 lot_number/captcha_output/pass_token，腾讯取 ticket/randstr。
-// 凭证本身可能较长，因此只在 Redis 键中保存 SHA-256 摘要。
+// ProofKey 生成服务商凭证去重键，始终返回非空摘要。
+//
+// 已内置的提供商按官方字段取值；未登记的第三方提供商退化为
+// 「除 fingerprint 外的全部字段」按键名排序后的摘要，避免未知 provider
+// 拿到空键后跳过 SetNX 抢占、把同一份凭证跨会话重放。
 func ProofKey(provider string, data map[string]string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
-	var parts []string
+	parts := proofDigestParts(provider, data)
+	raw := provider + "\x00" + strings.Join(parts, "\x00")
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
+
+// proofDigestParts 返回参与去重摘要的稳定字段。
+func proofDigestParts(provider string, data map[string]string) []string {
 	switch provider {
 	case GeetestProviderType:
-		parts = []string{
+		// 极验 4.0：流水号 + 验证输出 + 通过标识
+		return []string{
 			strings.TrimSpace(data["lot_number"]),
 			strings.TrimSpace(data["captcha_output"]),
 			strings.TrimSpace(data["pass_token"]),
 		}
 	case TencentProviderType, TencentMiniProgramProviderType:
-		parts = []string{
+		// 腾讯云：ticket + randstr
+		return []string{
 			strings.TrimSpace(data["ticket"]),
 			strings.TrimSpace(data["randstr"]),
 		}
-	default:
-		return ""
 	}
-	nonEmpty := false
-	for _, part := range parts {
-		if part != "" {
-			nonEmpty = true
-			break
+
+	// 未知提供商：排除 fingerprint（每次会话/请求都可能不同），
+	// 其余字段排序后参与摘要，保证同一份凭证得到同一个键。
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		if strings.EqualFold(strings.TrimSpace(key), "fingerprint") {
+			continue
 		}
+		keys = append(keys, key)
 	}
-	if !nonEmpty {
-		return ""
+	if len(keys) == 0 {
+		// 凭证里没有任何可区分字段时，退化为按设备指纹限流，
+		// 至少不会让所有请求共用一个全局键，也不会退化为空键。
+		return []string{"fingerprint=" + strings.TrimSpace(data["fingerprint"])}
 	}
-	raw := provider + "\x00" + strings.Join(parts, "\x00")
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:])
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, strings.TrimSpace(key)+"="+strings.TrimSpace(data[key]))
+	}
+	return parts
 }
 
 // BeginProof 在调用服务商二次校验之前抢占凭证。
@@ -154,35 +180,44 @@ func ProofKey(provider string, data map[string]string) string {
 // 从而让一张凭证换出多份登录结果。抢占失败说明凭证正在使用或已用过。
 func (s *CaptchaSessionService) BeginProof(provider string, data map[string]string) (string, bool, error) {
 	proof := ProofKey(provider, data)
-	if proof == "" {
-		return "", true, nil
-	}
 	key := s.proofKeyPrefix() + proof
-	ok, err := s.redis.SetNX(context.Background(), key, "1", s.expiry).Result()
+	ok, err := s.redis.SetNX(context.Background(), key, proofStatePending, s.expiry).Result()
 	if err != nil {
 		return "", false, fmt.Errorf("凭证状态存储失败: %w", err)
 	}
 	return key, ok, nil
 }
 
-// CommitProof 在服务商校验成功后延长凭证去重记录的保留时间。
-// 会话会在校验成功后删除，凭证记录则至少保留到凭证自然过期。
+// CommitProof 在服务商校验成功后把凭证标记为已使用。
+//
+// 不能用 Expire 续期了事：那样值仍是 pending，ReleaseProof 依旧能删掉记录，
+// 已使用的凭证会在失败分支被释放后重新可用。写入 used 后只有自然过期才失效。
 func (s *CaptchaSessionService) CommitProof(key string) error {
 	if strings.TrimSpace(key) == "" {
 		return nil
 	}
-	if err := s.redis.Expire(context.Background(), key, s.expiry).Err(); err != nil {
+	if err := s.redis.Set(context.Background(), key, proofStateUsed, s.expiry).Err(); err != nil {
 		return fmt.Errorf("凭证状态提交失败: %w", err)
 	}
 	return nil
 }
 
 // ReleaseProof 在服务商校验失败或出现异常时释放凭证占用，允许用户重试。
+//
+// 只释放 pending 记录：已提交为 used 的凭证即便后续请求走到失败分支也不能被清掉，
+// 否则「先成功提交、再触发一次失败」即可让同一份凭证重新可用。
 func (s *CaptchaSessionService) ReleaseProof(key string) {
 	if strings.TrimSpace(key) == "" {
 		return
 	}
-	_ = s.redis.Del(context.Background(), key).Err()
+	const script = `
+local current = redis.call('GET', KEYS[1])
+if current == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`
+	_ = s.redis.Eval(context.Background(), script, []string{key}, proofStatePending).Err()
 }
 
 // ConsumeSession 原子校验并消费会话。

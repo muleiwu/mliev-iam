@@ -9,13 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// geetestBypassServer 模拟极验后台把 Captcha ID 设为 bypass 时返回的真实形态：
+// status=bypass、result=fail。此前测试桩用的是 success/success，只靠 reason
+// 文案区分，既不能证明 bypass 分支会命中，也无法发现「开关打开后仍被严格
+// 判定拦下」的缺陷。
 func geetestBypassServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result":       "success",
-			"reason":       "bypass status",
-			"status":       "success",
+			"status":       "bypass",
+			"result":       "fail",
+			"reason":       "captcha bypass enabled",
 			"captcha_args": map[string]any{},
 		})
 	}))
@@ -23,7 +27,7 @@ func geetestBypassServer(t *testing.T) *httptest.Server {
 	return server
 }
 
-// 极验后台把 Captcha ID 设为 bypass 时，任意凭证都会返回 success。
+// 极验后台把 Captcha ID 设为 bypass 时，任意凭证都会返回 bypass。
 // 默认必须拒绝，否则验证码可被完全跳过。
 func TestGeetestProviderRejectsVendorBypassByDefault(t *testing.T) {
 	server := geetestBypassServer(t)
@@ -33,6 +37,8 @@ func TestGeetestProviderRejectsVendorBypassByDefault(t *testing.T) {
 	require.ErrorContains(t, err, "测试绕过")
 }
 
+// 后台开关打开后，bypass 响应必须直接视为通过。
+// 该响应的 result 是 fail，若继续走严格判定，开关将形同虚设。
 func TestGeetestProviderAllowsVendorBypassOnlyWhenExplicitlyEnabled(t *testing.T) {
 	server := geetestBypassServer(t)
 	config := geetestTestConfig()
@@ -60,5 +66,20 @@ func TestGeetestBypassRejectsFalseBooleanSwitch(t *testing.T) {
 	config.Params["allowBypass"] = false
 
 	_, err := (&GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}).Verify(config, geetestTestData(), "")
+	require.ErrorContains(t, err, "测试绕过")
+}
+
+// result=bypass 同样属于放行标记，不能因为 status 是 success 就漏判。
+func TestGeetestProviderDetectsBypassOnResultField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "success",
+			"result": "bypass",
+			"reason": "bypass",
+		})
+	}))
+	defer server.Close()
+
+	_, err := (&GeetestCaptchaProvider{client: server.Client(), validateURL: server.URL}).Verify(geetestTestConfig(), geetestTestData(), "")
 	require.ErrorContains(t, err, "测试绕过")
 }

@@ -147,13 +147,14 @@ func TestGeetestProviderOnlyAcceptsExactSuccessPair(t *testing.T) {
 	require.False(t, geetestPassed("success", "fail"))
 }
 
-// bypass 标记可能出现在 status/result/reason 任一字段，且文案会变。
-func TestGeetestBypassDetectionCoversAllFields(t *testing.T) {
-	require.True(t, geetestBypassed("bypass status", "success", ""))
-	require.True(t, geetestBypassed("success", "BYPASS_SUCCESS", ""))
-	require.True(t, geetestBypassed("success", "success", "captcha bypass enabled"))
-	require.False(t, geetestBypassed("success", "success", ""))
-	require.False(t, geetestBypassed("error", "fail", "pass_token expire"))
+// bypass 仅认结构化字段的精确值；reason 文案不能控制放行判定。
+func TestGeetestBypassDetectionUsesExactStructuredFields(t *testing.T) {
+	require.True(t, geetestBypassed("bypass", "success"))
+	require.True(t, geetestBypassed(" SUCCESS ", "Bypass"))
+	require.False(t, geetestBypassed("bypass status", "success"))
+	require.False(t, geetestBypassed("success", "BYPASS_SUCCESS"))
+	require.False(t, geetestBypassed("success", "success"))
+	require.False(t, geetestBypassed("error", "fail"))
 }
 
 // 极验配置只接受 captchaId / captchaKey / allowBypass，不再暴露 apiServer。

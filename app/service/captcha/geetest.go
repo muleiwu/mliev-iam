@@ -165,19 +165,24 @@ func (p *GeetestCaptchaProvider) Verify(config *model.CaptchaConfig, data map[st
 		p.logf("[geetest] validate captchaId=%s status=%s result=%s reason=%s code=%s msg=%s",
 			captchaID, result.Status, result.Result, result.Reason, result.Code, result.Msg)
 	}
-	// 极验后台可把 Captcha ID 设为 bypass；此时任意凭证都会返回 success。
-	// 默认不能把测试绕过当成真实通过，否则验证码可被完全跳过。
-	// 放弃校验的标记可能落在 status/result/reason 任一字段，且文案会变，
-	// 因此对三个字段统一做 bypass 检测，而不是只认某一种固定文案。
-	if geetestBypassed(result.Status, result.Result, result.Reason) && !geetestBypassAllowed(config) {
-		return nil, errors.New("验证码服务处于测试绕过状态，请联系管理员配置生产 Captcha ID")
+	if strings.EqualFold(strings.TrimSpace(result.Status), "error") {
+		return nil, fmt.Errorf("验证码服务暂不可用，请稍后重试（%s）", geetestErrorCode(result.Code))
+	}
+	// 极验后台可把 Captcha ID 设为 bypass；此时校验结果不代表用户真实完成验证。
+	// 只认官方字段的精确取值（status 或 result 为 bypass），不对 reason 做子串匹配：
+	// reason 是对方案案文案，改一句措辞就会让判定翻转，既可能误拦正常用户，
+	// 也可能放过真正的放行响应，判定必须由结构化字段决定。
+	if geetestBypassed(result.Status, result.Result) {
+		if !geetestBypassAllowed(config) {
+			return nil, errors.New("验证码服务处于测试绕过状态，请联系管理员配置生产 Captcha ID")
+		}
+		// 管理员显式开启后才接受。bypass 响应的 result 往往是 fail，
+		// 不能继续走下面的严格判定，否则开关形同虚设。
+		return &VerifyResult{Success: true, Message: "验证成功（极验测试绕过）"}, nil
 	}
 	// status 表示极验服务调用本身是否成功，result 才是本次校验结论。
 	// 只有两者同时为 success 才算通过；{"status":"error","result":"success"}
 	// 这类组合绝不能被当成通过，否则验证码可被完全跳过。
-	if strings.EqualFold(strings.TrimSpace(result.Status), "error") {
-		return nil, fmt.Errorf("验证码服务暂不可用，请稍后重试（%s）", geetestErrorCode(result.Code))
-	}
 	if !geetestPassed(result.Status, result.Result) {
 		return &VerifyResult{Success: false, Message: geetestFailureMessage(result.Reason)}, nil
 	}
@@ -191,11 +196,11 @@ func geetestPassed(status, result string) bool {
 }
 
 // geetestBypassed 检测极验是否放弃校验（测试绕过）。
-// 极验把该标记放在 status、result 或 reason 上，且文案会变化，
-// 因此对三个字段都做包含匹配，避免换一种 wording 就绕过拦截。
-func geetestBypassed(status, result, reason string) bool {
-	for _, field := range []string{status, result, reason} {
-		if strings.Contains(strings.ToLower(strings.TrimSpace(field)), "bypass") {
+// 只对官方结构化字段做精确匹配：status 或 result 等于 bypass。
+// 不对 reason 做子串匹配，避免判定被对方文案措辞左右。
+func geetestBypassed(status, result string) bool {
+	for _, field := range []string{status, result} {
+		if strings.EqualFold(strings.TrimSpace(field), "bypass") {
 			return true
 		}
 	}
