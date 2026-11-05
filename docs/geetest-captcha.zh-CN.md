@@ -22,7 +22,7 @@ IAM 已内置 geetest 验证码 Provider，Web 登录端和管理端都支持。
 3. 极验验证成功后，前端只提交 lot_number、captcha_output、pass_token、gen_time 四个字段，外加设备指纹和 IAM 会话 ID。
 4. 服务端用 Captcha Key 对 lot_number 做 HMAC-SHA256，生成 sign_token。
 5. 服务端调用 https://gcaptcha4.geetest.com/validate。
-6. 只有极验返回 result=success 时才放行业务；result=fail 和 status=error 都会拒绝。
+6. 仅当极验返回的 status 与 result 同时为 success 时才放行业务。status=error、result=fail、HTTP 非 200、请求超时、响应非法 JSON 一律拒绝。status 或 result 为 bypass 时默认拒绝，只有管理员在验证码配置中显式打开「接受极验测试绕过」才视为通过。
 
 业务接口仍然使用现有的 captchaTicket 字段，不需要单独为极验新增接口：
 
