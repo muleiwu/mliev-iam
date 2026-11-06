@@ -192,9 +192,10 @@ func TestMiniProgramCaptchaRejectsValidInheritedWebTicket(t *testing.T) {
 		}
 	}
 	require.Zero(t, calls, "incompatible tickets must be rejected before contacting Tencent")
-	// The browser login endpoint retains its existing Web captcha support.
-	require.NoError(t, NewManager(m.db).ValidateForScene("login", ticket, "192.0.2.1", m.redis))
-	require.Equal(t, 1, calls)
+	// A raw vendor ticket without the browser-created one-time session must not
+	// be replayable through the Web login endpoint.
+	require.ErrorContains(t, NewManager(m.db).ValidateForScene("login", ticket, "192.0.2.1", m.redis), "验证码会话")
+	require.Zero(t, calls)
 }
 func TestMiniProgramCaptchaAidEncryptionMatchesDocumentedFormat(t *testing.T) {
 	_, _, cfg, _ := miniCaptchaFixture(t)
