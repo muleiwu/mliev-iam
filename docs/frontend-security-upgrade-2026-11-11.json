@@ -1,0 +1,129 @@
+{
+  "date": "2026-11-11",
+  "registry": "https://registry.npmjs.org",
+  "projects": {
+    "frontend-oidc": {
+      "before": {
+        "info": 0,
+        "low": 4,
+        "moderate": 19,
+        "high": 20,
+        "critical": 4
+      },
+      "after": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "afterProduction": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "remainingAdvisories": [],
+      "remainingProductionAdvisories": [],
+      "versions": {
+        "vue": "3.5.45",
+        "vite": "7.3.8",
+        "vitest": "4.1.12",
+        "zod": "4.6.7",
+        "vee-validate": "4.15.1",
+        "dompurify": "3.4.17",
+        "@unovis/vue": "1.8.1",
+        "@unovis/ts": "1.8.1"
+      }
+    },
+    "admin-web": {
+      "before": {
+        "info": 0,
+        "low": 28,
+        "moderate": 116,
+        "high": 140,
+        "critical": 6
+      },
+      "after": {
+        "info": 0,
+        "low": 1,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "afterProduction": {
+        "info": 0,
+        "low": 1,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "remainingAdvisories": [
+        {
+          "module_name": "deepmerge",
+          "severity": "low",
+          "title": "deepmerge mergeObject() allows prototype poisoning of returned objects",
+          "url": "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+          "vulnerable_versions": ">=4.2.0 <=4.3.1",
+          "patched_versions": "<0.0.0",
+          "findings": [
+            {
+              "version": "4.3.1",
+              "paths": [
+                ".>unbuild>@rollup/plugin-node-resolve>deepmerge"
+              ]
+            }
+          ]
+        }
+      ],
+      "remainingProductionAdvisories": [
+        {
+          "module_name": "deepmerge",
+          "severity": "low",
+          "url": "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+          "findings": [
+            {
+              "version": "4.3.1",
+              "paths": [
+                "internal__vite-config>nitropack>@rollup/plugin-node-resolve>deepmerge"
+              ]
+            }
+          ]
+        }
+      ],
+      "versions": {
+        "vue": "3.5.45",
+        "vite": "7.3.8",
+        "vitest": "4.1.12",
+        "happy-dom": "21.0.4",
+        "vue-tsc": "3.2.2",
+        "typescript": "5.9.3",
+        "axios": "1.21.1",
+        "vue-i18n": "11.4.18",
+        "echarts": "6.1.0",
+        "zod": "4.6.7",
+        "zod-defaults": "0.2.3",
+        "lodash-es": "4.18.1"
+      }
+    }
+  },
+  "validation": {
+    "frontendOidcTests": 504,
+    "adminWebTests": 436,
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "oidcThemeKitBuild": "passed",
+    "strictPeerFrozenInstall": "passed",
+    "browserSmoke": [
+      "registration",
+      "password reset",
+      "profile completion",
+      "Unovis chart",
+      "admin dynamic form/defaults/submit/reset",
+      "ECharts canvas"
+    ],
+    "browserPageErrors": 0,
+    "existingModifiedFilesPreserved": true
+  }
+}
