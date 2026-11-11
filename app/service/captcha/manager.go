@@ -89,12 +89,16 @@ func (m *CaptchaManager) GetClientParamsForScene(scene string) (*dto.CaptchaClie
 	}
 
 	// 获取前端参数
-	params := provider.GetClientParams(config)
+	params, err := provider.GetClientParams(config)
+	if err != nil {
+		return nil, fmt.Errorf("生成验证码参数失败: %w", err)
+	}
 
 	return &dto.CaptchaClientParamsResponse{
-		Enabled:  true,
-		Provider: config.Provider,
-		Params:   params,
+		Enabled:   true,
+		Provider:  config.Provider,
+		Params:    params,
+		ExpiresIn: captchaSessionTTLSeconds,
 	}, nil
 }
 

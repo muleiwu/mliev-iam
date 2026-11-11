@@ -35,7 +35,8 @@ func geetestTestData() map[string]string {
 }
 
 func TestGeetestProviderDoesNotExposeCaptchaKey(t *testing.T) {
-	params := (&GeetestCaptchaProvider{}).GetClientParams(geetestTestConfig())
+	params, err := (&GeetestCaptchaProvider{}).GetClientParams(geetestTestConfig())
+	require.NoError(t, err)
 	require.Equal(t, "test-captcha-id", params["captchaId"])
 	require.NotContains(t, params, "captchaKey")
 

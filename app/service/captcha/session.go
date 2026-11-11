@@ -49,7 +49,7 @@ func NewCaptchaSessionService(redisClient *redis.Client) *CaptchaSessionService 
 	return &CaptchaSessionService{
 		redis:     redisClient,
 		keyPrefix: "captcha:session:",
-		expiry:    5 * time.Minute, // 5分钟过期
+		expiry:    captchaSessionTTLSeconds * time.Second,
 	}
 }
 

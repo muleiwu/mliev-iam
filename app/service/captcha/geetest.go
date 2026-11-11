@@ -71,7 +71,7 @@ func (*GeetestCaptchaProvider) GetProviderInfo() dto.CaptchaProviderInfo {
 }
 
 // GetClientParams 返回 Web 初始化参数。captchaKey 绝不能返回给客户端。
-func (*GeetestCaptchaProvider) GetClientParams(config *model.CaptchaConfig) map[string]interface{} {
+func (*GeetestCaptchaProvider) GetClientParams(config *model.CaptchaConfig) (map[string]interface{}, error) {
 	params := map[string]interface{}{
 		"captchaId": "",
 		"product":   "bind",
@@ -81,7 +81,7 @@ func (*GeetestCaptchaProvider) GetClientParams(config *model.CaptchaConfig) map[
 			params["captchaId"] = value
 		}
 	}
-	return params
+	return params, nil
 }
 
 // Verify 调用极验 /validate 完成服务端二次校验。

@@ -15,6 +15,7 @@ type CaptchaController struct {
 // GetCaptchaParams 获取指定场景的验证码前端参数
 // POST /api/captcha/params
 func (c CaptchaController) GetCaptchaParams(ctx httpInterfaces.RouterContextInterface) {
+	ctx.SetHeader("Cache-Control", "no-store")
 	var req dto.CaptchaParamsRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		c.Error(ctx, 400, "请求参数错误: "+err.Error())

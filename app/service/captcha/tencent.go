@@ -3,6 +3,7 @@ package captcha
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	captcha "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/captcha/v20190722"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
@@ -66,20 +67,12 @@ func (t *TencentCaptchaProvider) GetProviderInfo() dto.CaptchaProviderInfo {
 }
 
 // GetClientParams 获取前端初始化参数
-func (t *TencentCaptchaProvider) GetClientParams(config *model.CaptchaConfig) map[string]interface{} {
-	// 腾讯云前端只需要 CaptchaAppId
-	captchaAppID := ""
-	if config.Params != nil {
-		if val, ok := config.Params["captchaAppId"]; ok {
-			if str, ok := val.(string); ok {
-				captchaAppID = str
-			}
-		}
+func (t *TencentCaptchaProvider) GetClientParams(config *model.CaptchaConfig) (map[string]interface{}, error) {
+	_, _, secret, appID, err := t.getConfigParams(config)
+	if err != nil {
+		return nil, err
 	}
-
-	return map[string]interface{}{
-		"captchaAppId": captchaAppID,
-	}
+	return encryptedTencentClientParams(appID, secret, time.Now())
 }
 
 // Verify 验证腾讯云验证码ticket
@@ -117,7 +110,7 @@ func (t *TencentCaptchaProvider) Verify(config *model.CaptchaConfig, ticketData 
 
 // getConfigParams 从配置中提取参数
 func (t *TencentCaptchaProvider) getConfigParams(config *model.CaptchaConfig) (secretID, secretKey, appSecretKey, captchaAppID string, err error) {
-	if config.Params == nil {
+	if config == nil || config.Params == nil {
 		return "", "", "", "", fmt.Errorf("验证码配置参数为空")
 	}
 

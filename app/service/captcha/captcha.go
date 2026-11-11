@@ -17,8 +17,8 @@ type CaptchaProvider interface {
 
 	// GetClientParams 获取前端初始化需要的参数
 	// 返回给前端用于初始化验证码组件
-	// 例如：腾讯云返回 {"captchaAppId": "xxx"}
-	GetClientParams(config *model.CaptchaConfig) map[string]interface{}
+	// 参数生成失败时返回错误，调用方不得继续创建验证码会话。
+	GetClientParams(config *model.CaptchaConfig) (map[string]interface{}, error)
 
 	// Verify 验证前端提交的ticket
 	// config: 验证码配置

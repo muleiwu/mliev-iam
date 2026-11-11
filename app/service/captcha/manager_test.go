@@ -412,8 +412,8 @@ func (*stubCaptchaProvider) GetProviderInfo() dto.CaptchaProviderInfo {
 	return dto.CaptchaProviderInfo{Provider: "stub", Label: "stub"}
 }
 
-func (*stubCaptchaProvider) GetClientParams(*model.CaptchaConfig) map[string]interface{} {
-	return map[string]interface{}{}
+func (*stubCaptchaProvider) GetClientParams(*model.CaptchaConfig) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
 }
 
 func (p *stubCaptchaProvider) Verify(*model.CaptchaConfig, map[string]string, string) (*VerifyResult, error) {

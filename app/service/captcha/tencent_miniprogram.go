@@ -1,14 +1,8 @@
 package captcha
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"cnb.cool/mliev/iam/mliev-iam/app/dto"
@@ -34,8 +28,8 @@ func (*TencentMiniProgramProvider) GetProviderInfo() dto.CaptchaProviderInfo {
 	info.Fields = append(info.Fields, dto.CaptchaProviderField{Key: "aidEncryptionEnabled", Label: "CaptchaAppId 加密校验", Type: "text", Placeholder: "true 开启，留空关闭"})
 	return info
 }
-func (*TencentMiniProgramProvider) GetClientParams(config *model.CaptchaConfig) map[string]interface{} {
-	return (&TencentCaptchaProvider{}).GetClientParams(config)
+func (*TencentMiniProgramProvider) GetClientParams(config *model.CaptchaConfig) (map[string]interface{}, error) {
+	return miniCaptchaPublicParams(config, time.Now())
 }
 
 // The pinned SDK predates this Action; embed its request/response bases and use
@@ -107,27 +101,5 @@ func miniCaptchaPublicParams(config *model.CaptchaConfig, now time.Time) (map[st
 	if !enabled {
 		return result, nil
 	}
-	// Tencent's documented key derivation repeats short keys to 32 bytes.
-	key := []byte(secret)
-	if len(key) > 32 {
-		return nil, errors.New("验证码加密密钥长度不能超过32字节")
-	}
-	key = []byte(strings.Repeat(secret, (32+len(key)-1)/len(key)))[:32]
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, errors.New("验证码加密配置无效")
-	}
-	iv := make([]byte, aes.BlockSize)
-	if _, err = rand.Read(iv); err != nil {
-		return nil, err
-	}
-	plain := []byte(fmt.Sprintf("%s&%d&300", appID, now.Unix()))
-	pad := aes.BlockSize - len(plain)%aes.BlockSize
-	for i := 0; i < pad; i++ {
-		plain = append(plain, byte(pad))
-	}
-	encrypted := make([]byte, len(plain))
-	cipher.NewCBCEncrypter(block, iv).CryptBlocks(encrypted, plain)
-	result["aidEncrypted"] = base64.StdEncoding.EncodeToString(append(iv, encrypted...))
-	return result, nil
+	return encryptedTencentClientParams(appID, secret, now)
 }
