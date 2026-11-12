@@ -19,7 +19,7 @@ func (d *LoginSessionDAO) Valid(id string, userID uint) (*model.LoginSession, er
 		return nil, ErrLoginSessionInvalid
 	}
 	var session model.LoginSession
-	err := d.db.Where("id = ? AND user_id = ? AND ended_at IS NULL AND expires_at > ?", id, userID, time.Now()).First(&session).Error
+	err := d.db.Where("id = ? AND user_id = ? AND activation_pending = ? AND ended_at IS NULL AND expires_at > ?", id, userID, false, time.Now()).First(&session).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrLoginSessionInvalid
 	}
@@ -35,7 +35,7 @@ func (d *LoginSessionDAO) Lock(id string, userID uint) error {
 	if id == "" || userID == 0 {
 		return ErrLoginSessionInvalid
 	}
-	r := d.db.Model(&model.LoginSession{}).Where("id = ? AND user_id = ? AND ended_at IS NULL AND expires_at > ?", id, userID, time.Now()).UpdateColumn("id", gorm.Expr("id"))
+	r := d.db.Model(&model.LoginSession{}).Where("id = ? AND user_id = ? AND activation_pending = ? AND ended_at IS NULL AND expires_at > ?", id, userID, false, time.Now()).UpdateColumn("id", gorm.Expr("id"))
 	if r.Error != nil {
 		return r.Error
 	}

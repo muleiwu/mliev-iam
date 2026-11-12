@@ -42,8 +42,14 @@ func NewJWTService(secretKey, issuer string) *JWTService {
 
 // GenerateToken 生成JWT token
 func (j *JWTService) GenerateToken(sub TokenSubject, expirationHours int) (string, error) {
-	// 设置过期时间
-	expirationTime := time.Now().Add(time.Duration(expirationHours) * time.Hour)
+	return j.GenerateTokenUntil(sub, time.Now().Add(time.Duration(expirationHours)*time.Hour))
+}
+
+// GenerateTokenUntil replaces an existing credential without extending its lifetime.
+func (j *JWTService) GenerateTokenUntil(sub TokenSubject, expirationTime time.Time) (string, error) {
+	if expirationTime.Unix() <= time.Now().Unix() {
+		return "", errors.New("登录凭证已到期")
+	}
 
 	// role 必须显式指定：早期实现空 role 会回退为 "admin"，造成任何漏填 role 的
 	// 调用方静默拿到管理员身份的提权漏洞，故改为拒绝空 role。

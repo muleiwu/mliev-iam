@@ -304,18 +304,23 @@ type SendVerificationCodeResponse struct {
 
 // CompleteProfileRequest 完善信息请求
 type CompleteProfileRequest struct {
-	SessionID string `json:"sessionId" binding:"required"`
-	Email     string `json:"email,omitempty" binding:"omitempty,email"`
-	EmailCode string `json:"emailCode,omitempty"`
-	Phone     string `json:"phone,omitempty"`
-	PhoneCode string `json:"phoneCode,omitempty"`
+	SessionRotationSupported bool   `json:"sessionRotationSupported"`
+	SessionID                string `json:"sessionId" binding:"required"`
+	Email                    string `json:"email,omitempty" binding:"omitempty,email"`
+	EmailCode                string `json:"emailCode,omitempty"`
+	Phone                    string `json:"phone,omitempty"`
+	PhoneCode                string `json:"phoneCode,omitempty"`
 }
 
 // CompleteProfileResponse 完善信息响应
 type CompleteProfileResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	NextURL string `json:"nextUrl,omitempty"`
+	AccessToken string                    `json:"accessToken,omitempty"`
+	ExpiresIn   int64                     `json:"expiresIn,omitempty"`
+	RememberMe  bool                      `json:"rememberMe"`
+	Error       *dto.AuthorizationFailure `json:"error,omitempty"`
+	Success     bool                      `json:"success"`
+	Message     string                    `json:"message"`
+	NextURL     string                    `json:"nextUrl,omitempty"`
 }
 
 // GetClientConfig 获取 OIDC 登录页客户端配置
@@ -1341,129 +1346,6 @@ func (c OIDCAuthFlowController) GetRegisterSettings(ctx httpInterfaces.RouterCon
 	c.Success(ctx, config)
 }
 
-// CompleteProfile 完善用户信息接口
-// POST /api/oidc/complete-profile
-func (c OIDCAuthFlowController) CompleteProfile(ctx httpInterfaces.RouterContextInterface) {
-	var req CompleteProfileRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "请求参数错误: "+err.Error())
-		return
-	}
-
-	// 1. 验证会话是否存在且已认证
-	sessionService := service.NewOIDCSessionService(helper.GetRedis())
-	session, err := getBoundOIDCSession(ctx, sessionService, req.SessionID)
-	if err != nil {
-		c.Error(ctx, constants.ErrCodeBadRequest, "无效的会话ID或会话已过期")
-		return
-	}
-
-	if !session.IsAuthenticated || session.UserID == nil {
-		c.Error(ctx, constants.ErrCodeUnauthorized, "用户尚未认证")
-		return
-	}
-
-	// 2. 获取验证码服务配置
-	config := getVerificationCodeConfig()
-	if config == nil {
-		c.Error(ctx, constants.ErrCodeInternal, "验证码服务未配置")
-		return
-	}
-
-	verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
-
-	// 3. 验证邮箱验证码（如果提供了邮箱）
-	if req.Email != "" {
-		if req.EmailCode == "" {
-			c.Error(ctx, constants.ErrCodeBadRequest, "请输入邮箱验证码")
-			return
-		}
-		if err := verificationService.VerifyCode(ctx.Request().Context(), req.Email, service.VerificationTypeEmail, req.SessionID, req.EmailCode); err != nil {
-			c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
-			return
-		}
-	}
-
-	// 4. 验证手机验证码（如果提供了手机号）
-	if req.Phone != "" {
-		if req.PhoneCode == "" {
-			c.Error(ctx, constants.ErrCodeBadRequest, "请输入手机验证码")
-			return
-		}
-		if err := verificationService.VerifyCode(ctx.Request().Context(), req.Phone, service.VerificationTypePhone, req.SessionID, req.PhoneCode); err != nil {
-			c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
-			return
-		}
-	}
-
-	// 5. 更新用户信息
-	userService := service.NewUserService(helper.GetDatabase())
-
-	// 先获取当前用户信息，以保留未修改的字段
-	currentUser, err := userService.GetUserModelByID(*session.UserID)
-	if err != nil {
-		c.Error(ctx, constants.ErrCodeInternal, "获取用户信息失败: "+err.Error())
-		return
-	}
-
-	if currentUser.TwoFactorEnabled {
-		factors, err := dao.NewTwoFactorDAO(helper.GetDatabase()).Methods(currentUser.ID)
-		if err != nil {
-			c.Error(ctx, 500, "读取安全设置失败")
-			return
-		}
-		for _, factor := range factors {
-			if (factor.Method == "email" && req.Email != "" && req.Email != factor.Receiver) || (factor.Method == "phone" && req.Phone != "" && req.Phone != factor.Receiver) {
-				c.Error(ctx, 400, "请先在个人中心安全设置中验证身份并修改已绑定的联系方式")
-				return
-			}
-		}
-	}
-	updateReq := &dto.UpdateUserRequest{}
-
-	// 只更新用户提供的字段，未提供的保留原值；
-	// 本接口写入的邮箱/手机号均已通过验证码校验，需同步标记为已验证
-	verified := true
-	if req.Email != "" {
-		updateReq.Email = req.Email
-		updateReq.EmailVerified = &verified
-	} else if currentUser.Email != nil {
-		updateReq.Email = *currentUser.Email
-	}
-
-	if req.Phone != "" {
-		updateReq.Phone = req.Phone
-		updateReq.PhoneVerified = &verified
-	} else if currentUser.Phone != nil {
-		updateReq.Phone = *currentUser.Phone
-	}
-
-	_, err = userService.UpdateUser(*session.UserID, updateReq)
-	if err != nil {
-		// 检查是否是邮箱或手机号已存在的错误
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "邮箱已存在") || strings.Contains(errMsg, "email") {
-			c.Error(ctx, constants.ErrCodeEmailAlreadyExists, "该邮箱已被其他用户使用")
-			return
-		}
-		if strings.Contains(errMsg, "手机号已存在") || strings.Contains(errMsg, "phone") {
-			c.Error(ctx, constants.ErrCodeBadRequest, "该手机号已被其他用户使用")
-			return
-		}
-		c.Error(ctx, constants.ErrCodeInternal, "更新用户信息失败: "+err.Error())
-		return
-	}
-
-	// 6. 返回成功响应，跳转到授权确认页面
-	response := CompleteProfileResponse{
-		Success: true,
-		Message: "信息完善成功",
-		NextURL: "/auth/#/oidc/consent?session_id=" + req.SessionID,
-	}
-
-	c.Success(ctx, response)
-}
-
 // SendRegisterVerificationCode 发送注册验证码接口（无需登录认证）
 // POST /api/oidc/send-register-verification-code
 func (c OIDCAuthFlowController) SendRegisterVerificationCode(ctx httpInterfaces.RouterContextInterface) {
@@ -1576,6 +1458,15 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 		c.Error(ctx, 401, "刷新令牌无效或会话已撤销")
 		return
 	}
+	login, err := dao.NewLoginSessionDAO(helper.GetDatabase()).Valid(oldToken.LoginSessionID, oldToken.UserID)
+	if err != nil {
+		c.Error(ctx, 401, "登录会话已撤销")
+		return
+	}
+	refreshMaxAge := 7 * 24 * 60 * 60 // Preserve historical behavior for unknown persistence.
+	if login.RememberMe != nil && !*login.RememberMe {
+		refreshMaxAge = 0
+	}
 
 	// 5. 更新 Cookie
 	isSecure := ctx.Request().TLS != nil
@@ -1584,7 +1475,7 @@ func (c OIDCAuthFlowController) RefreshToken(ctx httpInterfaces.RouterContextInt
 	} else {
 		ctx.SetSameSite(http.SameSiteLaxMode)
 	}
-	ctx.SetCookie("refresh_token", newTokenResponse.RefreshToken, 7*24*60*60, "/", "", isSecure, true)
+	ctx.SetCookie("refresh_token", newTokenResponse.RefreshToken, refreshMaxAge, "/", "", isSecure, true)
 
 	// 6. 返回新 Access Token
 	c.Success(ctx, RefreshTokenResponse{

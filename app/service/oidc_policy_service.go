@@ -13,6 +13,8 @@ import (
 )
 
 type oidcGrant struct {
+	TokenDeadline        time.Time
+	AuthTime             *time.Time
 	ValidUntil           *time.Time
 	AccessTokenExpiresAt time.Time
 	App                  *model.Application

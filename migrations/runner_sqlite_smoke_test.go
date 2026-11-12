@@ -107,7 +107,7 @@ func TestSqliteSmoke(t *testing.T) {
 	if err := db.QueryRow("SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version").Scan(&maxV); err != nil {
 		t.Fatal(err)
 	}
-	const latestSchemaVersion int64 = 20261025000000
+	const latestSchemaVersion int64 = 20261112000000
 	if maxV != latestSchemaVersion {
 		t.Fatalf("期望最大版本 %d，实际 %d", latestSchemaVersion, maxV)
 	}

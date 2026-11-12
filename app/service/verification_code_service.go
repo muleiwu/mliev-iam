@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -12,6 +13,44 @@ import (
 	"cnb.cool/mliev/open/go-web/pkg/helper"
 	"github.com/redis/go-redis/v9"
 )
+
+var ErrVerificationCodesInvalid = errors.New("验证码错误或已过期，请检查后重试")
+
+type VerificationCodeCheck struct {
+	Type     VerificationType
+	Receiver string
+	Code     string
+}
+
+// VerifyCodes consumes all submitted proofs together. A failed proof cannot
+// consume another contact's valid code, and concurrent requests cannot reuse it.
+func (s *VerificationCodeService) VerifyCodes(ctx context.Context, sessionID string, checks []VerificationCodeCheck) error {
+	if len(checks) == 0 {
+		return ErrVerificationCodesInvalid
+	}
+	keys := make([]string, 0, len(checks))
+	args := make([]interface{}, 0, len(checks))
+	for _, check := range checks {
+		if len(check.Code) != 6 {
+			return ErrVerificationCodesInvalid
+		}
+		keys = append(keys, s.getCodeKey(check.Receiver, check.Type, sessionID))
+		args = append(args, check.Code)
+	}
+	const script = `for i, key in ipairs(KEYS) do
+  if redis.call('GET', key) ~= ARGV[i] then return 0 end
+end
+for _, key in ipairs(KEYS) do redis.call('DEL', key) end
+return 1`
+	n, err := s.redis.Eval(ctx, script, keys, args...).Int()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrVerificationCodesInvalid
+	}
+	return nil
+}
 
 // VerificationType 验证类型
 type VerificationType string

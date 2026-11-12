@@ -90,6 +90,7 @@ type AccessTokenClaims struct {
 
 // OIDCIDTokenService ID Token生成服务
 type OIDCIDTokenService struct {
+	tokenDeadline     time.Time
 	accessTokenExpiry time.Time
 	departmentClaims  *model.OIDCDepartmentSnapshot
 	algorithm         string             // 签名算法: "RS256" 或 "HS256"
@@ -167,6 +168,10 @@ func (s *OIDCIDTokenService) GenerateIDTokenWithHashes(
 ) (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Duration(s.tokenLifetime) * time.Second)
+	exp = boundedTokenDeadline(exp, s.tokenDeadline)
+	if exp.Unix() <= now.Unix() {
+		return "", fmt.Errorf("登录凭证已到期")
+	}
 
 	claims := &IDTokenClaims{
 		Sub: user.UUID,

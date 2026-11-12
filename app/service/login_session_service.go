@@ -147,7 +147,7 @@ func (s *LoginSessionService) List(q LoginSessionQuery, currentID string) (*Logi
 	if q.Status == "" {
 		q.Status = "active"
 	}
-	query := s.db.Model(&model.LoginSession{})
+	query := s.db.Model(&model.LoginSession{}).Where("activation_pending = ?", false)
 	if q.UserID != 0 {
 		query = query.Where("user_id = ?", q.UserID)
 	}

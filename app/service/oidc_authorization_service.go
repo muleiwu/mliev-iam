@@ -664,7 +664,12 @@ func (s *OIDCAuthorizationService) generateSessionTokens(app *model.Application,
 	return result, err
 }
 
-func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, userID uint, scopes []string, nonce, issuer, sessionID string, codeID *uint) (*dto.TokenResponse, error) {
+type loginTokenLimits struct {
+	Access, Refresh, ID time.Time
+	AuthTime            *time.Time
+}
+
+func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, userID uint, scopes []string, nonce, issuer, sessionID string, codeID *uint, limits ...loginTokenLimits) (*dto.TokenResponse, error) {
 	user, err := s.userService.GetUserModelByID(userID)
 	if err != nil || !user.CanLogin() {
 		return nil, constants.ErrInvalidGrant
@@ -677,6 +682,11 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 	app, scopes = grant.App, grant.Scopes
 	if err := s.grantAccessTokenExpiry(grant); err != nil {
 		return nil, err
+	}
+	if len(limits) > 0 {
+		grant.AccessTokenExpiresAt = boundedTokenDeadline(grant.AccessTokenExpiresAt, limits[0].Access)
+		grant.TokenDeadline = limits[0].ID
+		grant.AuthTime = limits[0].AuthTime
 	}
 	accessToken, err := s.generateJWTAccessToken(app, userID, scopes, issuer, grant)
 	if err != nil {
@@ -700,6 +710,10 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 	}
 
 	// 生成 ID 令牌（若 scope 包含 openid），并写入 at_hash
+	if len(limits) > 0 {
+		deadline := boundedTokenDeadline(time.Now().Add(30*24*time.Hour), limits[0].Refresh)
+		token.RefreshExpiresAt = &deadline
+	}
 	if s.hasScope(scopes, "openid") {
 		idToken, err := s.generateIDTokenWithHashes(app, user, scopes, nonce, issuer, accessToken, "", grant)
 		if err != nil {
@@ -717,8 +731,10 @@ func (s *OIDCAuthorizationService) generateTokensLocked(app *model.Application, 
 	if token.RefreshExpiresAt != nil && token.RefreshExpiresAt.After(until) {
 		until = *token.RefreshExpiresAt
 	}
-	if err := dao.NewLoginSessionDAO(s.db).Extend(sessionID, until); err != nil {
-		return nil, err
+	if len(limits) == 0 {
+		if err := dao.NewLoginSessionDAO(s.db).Extend(sessionID, until); err != nil {
+			return nil, err
+		}
 	}
 	_ = dao.NewLoginSessionDAO(s.db).Touch(sessionID, "")
 	response := &dto.TokenResponse{
@@ -798,11 +814,14 @@ func (s *OIDCAuthorizationService) generateIDTokenWithHashes(
 
 	// 5. 生成ID Token（包含 at_hash / c_hash，若上层提供）
 	var roles *model.OIDCRoleSnapshot
+	var authTime *time.Time
 	if len(grants) > 0 && grants[0] != nil {
 		roles = grants[0].Roles
 		idTokenService = idTokenService.withDepartmentClaims(grants[0].Departments)
+		idTokenService.tokenDeadline = grants[0].TokenDeadline
+		authTime = grants[0].AuthTime
 	}
-	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, nil, accessToken, authCode, roles)
+	idToken, err := idTokenService.GenerateIDTokenWithHashes(user, clientID, scopes, nonce, authTime, accessToken, authCode, roles)
 	if err != nil {
 		return "", fmt.Errorf("生成ID Token失败: %w", err)
 	}

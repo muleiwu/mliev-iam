@@ -5,6 +5,8 @@ import "time"
 // LoginSession is a browser or native login, shared by its IAM credentials and OIDC grants.
 // It contains no credentials. Missing or ended records can never authenticate.
 type LoginSession struct {
+	RememberMe            *bool      `json:"-"`
+	ActivationPending     bool       `gorm:"not null;default:false" json:"-"`
 	NativeTransactionHash *string    `gorm:"size:64;uniqueIndex:uk_login_native_transaction" json:"-"`
 	ID                    string     `gorm:"primaryKey;size:36" json:"sessionId"`
 	UserID                uint       `gorm:"not null;index" json:"userId"`

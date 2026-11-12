@@ -24,6 +24,9 @@ func (d *TwoFactorDAO) Method(userID uint, method string) (*model.TwoFactorMetho
 // ValidateSessionAssurance is also used by locked grant creation. It deliberately
 // reads the user's current configuration, not a cached JWT claim.
 func ValidateSessionAssurance(db *gorm.DB, session *model.LoginSession) error {
+	if session.ActivationPending {
+		return ErrLoginSessionInvalid
+	}
 	var user model.User
 	if err := db.First(&user, session.UserID).Error; err != nil {
 		return err

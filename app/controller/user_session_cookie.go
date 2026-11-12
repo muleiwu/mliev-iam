@@ -123,6 +123,10 @@ func prepareUserSessionCookie(ctx httpInterfaces.RouterContextInterface, user *d
 			return "", 0, "", createErr
 		}
 		sid = session.ID
+		if err := helper.GetDatabase().Model(&session).Update("remember_me", rememberMe).Error; err != nil {
+			_ = service.NewLoginSessionService(helper.GetDatabase()).Revoke(user.ID, sid, "", "login_failed", nil)
+			return "", 0, "", err
+		}
 	} else if _, err := dao.NewLoginSessionDAO(helper.GetDatabase()).Valid(sid, user.ID); err != nil {
 		return "", 0, "", err
 	}
