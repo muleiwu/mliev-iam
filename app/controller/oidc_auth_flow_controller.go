@@ -714,69 +714,71 @@ func (c OIDCAuthFlowController) Register(ctx httpInterfaces.RouterContextInterfa
 		return
 	}
 
-	// 4. 验证邮箱和手机验证码
+	// 4. 收集需要验证的联系方式。注册事务成功前暂时占用验证码；
+	// 用户名冲突、另一项验证码错误或事务回滚时，原验证码仍可用于重试。
 	emailCodeVerified := false
 	phoneCodeVerified := false
+	var verificationService *service.VerificationCodeService
+	var codeChecks []service.VerificationCodeCheck
 	config := getVerificationCodeConfig()
 	if config != nil {
-		verificationService := service.NewVerificationCodeService(helper.GetRedis(), config)
+		verificationService = service.NewVerificationCodeService(helper.GetRedis(), config)
 
-		// 验证邮箱验证码（如果提供了邮箱）
 		if req.Email != "" && req.EmailCode != "" {
-			sessionID := "register:" + req.Email
-			if err := verificationService.VerifyCode(ctx.Request().Context(), req.Email, service.VerificationTypeEmail, sessionID, req.EmailCode); err != nil {
-				c.Error(ctx, constants.ErrCodeBadRequest, "邮箱验证码错误或已过期")
-				return
-			}
+			codeChecks = append(codeChecks, service.VerificationCodeCheck{Type: service.VerificationTypeEmail, Receiver: req.Email, Code: req.EmailCode})
 			emailCodeVerified = true
 		}
 
-		// 验证手机验证码（如果提供了手机号）
 		if req.Phone != "" && req.PhoneCode != "" {
-			sessionID := "register:" + req.Phone
-			if err := verificationService.VerifyCode(ctx.Request().Context(), req.Phone, service.VerificationTypePhone, sessionID, req.PhoneCode); err != nil {
-				c.Error(ctx, constants.ErrCodeBadRequest, "手机验证码错误或已过期")
-				return
-			}
+			codeChecks = append(codeChecks, service.VerificationCodeCheck{Type: service.VerificationTypePhone, Receiver: req.Phone, Code: req.PhoneCode})
 			phoneCodeVerified = true
 		}
 	}
 
 	// 5. 创建用户并记录协议同意
 	var userResponse *dto.UserResponse
-	err = helper.GetDatabase().Transaction(func(tx *gorm.DB) error {
-		txUserService := service.NewUserService(tx)
-		resp, err := txUserService.CreateUser(createUserReq)
-		if err != nil {
-			return err
-		}
-		txAgreementService := service.NewAgreementService(tx)
-		if err := txAgreementService.RecordAcceptances(resp.ID, registrationAppID, requiredAgreements); err != nil {
-			return err
-		}
-		// 验证码已证明联系方式归属：标记已验证，并尝试关联迁移数据里的同联系方式旧用户
-		// （合入 legacy 身份映射属性、回填迁移状态）。
-		if err := txUserService.MarkContactVerified(resp.ID, emailCodeVerified, phoneCodeVerified); err != nil {
-			return err
-		}
-		verifiedEmail, verifiedPhone := "", ""
-		if emailCodeVerified {
-			verifiedEmail = createUserReq.Email
-		}
-		if phoneCodeVerified {
-			verifiedPhone = createUserReq.Phone // CreateUser 已规范化为 E.164
-		}
-		if err := service.NewLegacyLoginService(tx).LinkOnRegistration(resp.ID, verifiedEmail, verifiedPhone); err != nil {
-			return err
-		}
-		userResponse = resp
-		return nil
-	})
+	register := func() error {
+		return helper.GetDatabase().WithContext(ctx.Request().Context()).Transaction(func(tx *gorm.DB) error {
+			txUserService := service.NewUserService(tx)
+			resp, err := txUserService.CreateUser(createUserReq)
+			if err != nil {
+				return err
+			}
+			txAgreementService := service.NewAgreementService(tx)
+			if err := txAgreementService.RecordAcceptances(resp.ID, registrationAppID, requiredAgreements); err != nil {
+				return err
+			}
+			// 验证码已证明联系方式归属：标记已验证，并尝试关联迁移数据里的同联系方式旧用户
+			// （合入 legacy 身份映射属性、回填迁移状态）。
+			if err := txUserService.MarkContactVerified(resp.ID, emailCodeVerified, phoneCodeVerified); err != nil {
+				return err
+			}
+			verifiedEmail, verifiedPhone := "", ""
+			if emailCodeVerified {
+				verifiedEmail = createUserReq.Email
+			}
+			if phoneCodeVerified {
+				verifiedPhone = createUserReq.Phone // CreateUser 已规范化为 E.164
+			}
+			if err := service.NewLegacyLoginService(tx).LinkOnRegistration(resp.ID, verifiedEmail, verifiedPhone); err != nil {
+				return err
+			}
+			userResponse = resp
+			return nil
+		})
+	}
+	if verificationService != nil {
+		err = verificationService.WithRegistrationCodes(ctx.Request().Context(), codeChecks, register)
+	} else {
+		err = register()
+	}
 	if err != nil {
 		errCode := constants.ErrCodeInternal
 		errMsg := err.Error()
 
-		if strings.Contains(errMsg, "用户名已存在") || strings.Contains(errMsg, "用户已存在") {
+		if errors.Is(err, service.ErrVerificationCodesInvalid) {
+			errCode = constants.ErrCodeBadRequest
+		} else if strings.Contains(errMsg, "用户名已存在") || strings.Contains(errMsg, "用户已存在") {
 			errCode = constants.ErrCodeUserAlreadyExists
 		} else if strings.Contains(errMsg, "邮箱已存在") {
 			errCode = constants.ErrCodeEmailAlreadyExists
